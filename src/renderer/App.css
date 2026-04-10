@@ -1,0 +1,265 @@
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: #1a1a1a;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 20px;
+  background: #2a2a2a;
+  border-bottom: 1px solid #3a3a3a;
+}
+
+.header h1 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.btn-import {
+  padding: 8px 16px;
+  background: #4a90d9;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.btn-import:hover {
+  background: #5a9fe8;
+}
+
+.main-content {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.viewer-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  min-width: 400px;
+}
+
+.viewer {
+  flex: 1;
+  background: #0a0a0a;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.viewer video {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.viewer-placeholder {
+  text-align: center;
+  color: #666;
+}
+
+.viewer-placeholder p {
+  margin-bottom: 12px;
+}
+
+.viewer-placeholder button {
+  padding: 8px 16px;
+  background: #4a90d9;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.playback-controls {
+  padding: 12px 0;
+  color: #888;
+  font-size: 13px;
+}
+
+.node-panel {
+  width: 200px;
+  background: #252525;
+  border-left: 1px solid #3a3a3a;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+.node-panel h2 {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: #ccc;
+}
+
+.node-list {
+  flex: 1;
+}
+
+.node-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  background: #2a2a2a;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: border-color 0.15s;
+}
+
+.node-item.active {
+  border-color: #4a90d9;
+}
+
+.node-name {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.node-toggle {
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  background: #444;
+  color: #888;
+}
+
+.node-toggle.enabled {
+  background: #2d7d2d;
+  color: #8f8;
+}
+
+.btn-add-node {
+  margin-top: 12px;
+  padding: 10px;
+  background: #333;
+  color: #aaa;
+  border: 1px dashed #555;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.btn-add-node:hover {
+  background: #3a3a3a;
+  color: #ccc;
+}
+
+.controls-panel {
+  width: 300px;
+  background: #252525;
+  border-left: 1px solid #3a3a3a;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.controls-panel h2 {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  color: #ccc;
+}
+
+.control-section {
+  margin-bottom: 20px;
+}
+
+.control-section h3 {
+  font-size: 12px;
+  font-weight: 600;
+  color: #888;
+  margin-bottom: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.color-wheels {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.wheel-group {
+  background: #2a2a2a;
+  padding: 10px;
+  border-radius: 6px;
+}
+
+.wheel-group label {
+  display: block;
+  font-size: 11px;
+  color: #888;
+  margin-bottom: 6px;
+}
+
+.wheel-group input[type="range"] {
+  width: 100%;
+  height: 6px;
+  -webkit-appearance: none;
+  background: #444;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.wheel-group input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  background: #4a90d9;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.sliders {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.slider-group {
+  background: #2a2a2a;
+  padding: 10px;
+  border-radius: 6px;
+}
+
+.slider-group label {
+  display: block;
+  font-size: 11px;
+  color: #888;
+  margin-bottom: 6px;
+}
+
+.slider-group input[type="range"] {
+  width: 100%;
+  height: 6px;
+  -webkit-appearance: none;
+  background: #444;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.slider-group input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  background: #4a90d9;
+  border-radius: 50%;
+  cursor: pointer;
+}
