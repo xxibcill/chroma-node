@@ -14,6 +14,20 @@ interface ColorNode {
   saturation: number;
   temperature: number;
   tint: number;
+  qualifier: {
+    enabled: boolean;
+    hueCenter: number;
+    hueRange: number;
+    satMin: number;
+    satMax: number;
+    lumMin: number;
+    lumMax: number;
+    softness: number;
+  };
+  masks: {
+    ellipse: { enabled: boolean; centerX: number; centerY: number; radiusX: number; radiusY: number; softness: number };
+    rectangle: { enabled: boolean; centerX: number; centerY: number; width: number; height: number; softness: number };
+  };
 }
 
 // Create initial node
@@ -29,7 +43,21 @@ function createDefaultNode(id: string): ColorNode {
     pivot: 0.5,
     saturation: 1,
     temperature: 0,
-    tint: 0
+    tint: 0,
+    qualifier: {
+      enabled: false,
+      hueCenter: 0,
+      hueRange: 0.1,
+      satMin: 0,
+      satMax: 1,
+      lumMin: 0,
+      lumMax: 1,
+      softness: 0.05
+    },
+    masks: {
+      ellipse: { enabled: false, centerX: 0.5, centerY: 0.5, radiusX: 0.2, radiusY: 0.15, softness: 0.05 },
+      rectangle: { enabled: false, centerX: 0.5, centerY: 0.5, width: 0.3, height: 0.2, softness: 0.05 }
+    }
   };
 }
 
@@ -304,6 +332,376 @@ function App() {
                     ));
                   }}
                 />
+              </div>
+            </div>
+          </div>
+
+          <div className="control-section">
+            <h3>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={activeNode?.qualifier.enabled || false}
+                  onChange={(e) => {
+                    if (!activeNode) return;
+                    setNodes(nodes.map(n =>
+                      n.id === activeNodeId
+                        ? { ...n, qualifier: { ...n.qualifier, enabled: e.target.checked } }
+                        : n
+                    ));
+                  }}
+                />
+                HSL Qualifier
+              </label>
+            </h3>
+            <div className="sliders">
+              <div className="slider-group">
+                <label>Hue Center: {((activeNode?.qualifier.hueCenter || 0) * 180).toFixed(0)}°</label>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={activeNode?.qualifier.hueCenter || 0}
+                  onChange={(e) => {
+                    if (!activeNode) return;
+                    setNodes(nodes.map(n =>
+                      n.id === activeNodeId
+                        ? { ...n, qualifier: { ...n.qualifier, hueCenter: parseFloat(e.target.value) } }
+                        : n
+                    ));
+                  }}
+                />
+              </div>
+              <div className="slider-group">
+                <label>Hue Range: {((activeNode?.qualifier.hueRange || 0.1) * 180).toFixed(0)}°</label>
+                <input
+                  type="range"
+                  min="0.01"
+                  max="0.5"
+                  step="0.01"
+                  value={activeNode?.qualifier.hueRange || 0.1}
+                  onChange={(e) => {
+                    if (!activeNode) return;
+                    setNodes(nodes.map(n =>
+                      n.id === activeNodeId
+                        ? { ...n, qualifier: { ...n.qualifier, hueRange: parseFloat(e.target.value) } }
+                        : n
+                    ));
+                  }}
+                />
+              </div>
+              <div className="slider-group">
+                <label>Sat Min: {(activeNode?.qualifier.satMin || 0).toFixed(2)}</label>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={activeNode?.qualifier.satMin || 0}
+                  onChange={(e) => {
+                    if (!activeNode) return;
+                    setNodes(nodes.map(n =>
+                      n.id === activeNodeId
+                        ? { ...n, qualifier: { ...n.qualifier, satMin: parseFloat(e.target.value) } }
+                        : n
+                    ));
+                  }}
+                />
+              </div>
+              <div className="slider-group">
+                <label>Sat Max: {(activeNode?.qualifier.satMax || 1).toFixed(2)}</label>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={activeNode?.qualifier.satMax || 1}
+                  onChange={(e) => {
+                    if (!activeNode) return;
+                    setNodes(nodes.map(n =>
+                      n.id === activeNodeId
+                        ? { ...n, qualifier: { ...n.qualifier, satMax: parseFloat(e.target.value) } }
+                        : n
+                    ));
+                  }}
+                />
+              </div>
+              <div className="slider-group">
+                <label>Lum Min: {(activeNode?.qualifier.lumMin || 0).toFixed(2)}</label>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={activeNode?.qualifier.lumMin || 0}
+                  onChange={(e) => {
+                    if (!activeNode) return;
+                    setNodes(nodes.map(n =>
+                      n.id === activeNodeId
+                        ? { ...n, qualifier: { ...n.qualifier, lumMin: parseFloat(e.target.value) } }
+                        : n
+                    ));
+                  }}
+                />
+              </div>
+              <div className="slider-group">
+                <label>Lum Max: {(activeNode?.qualifier.lumMax || 1).toFixed(2)}</label>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={activeNode?.qualifier.lumMax || 1}
+                  onChange={(e) => {
+                    if (!activeNode) return;
+                    setNodes(nodes.map(n =>
+                      n.id === activeNodeId
+                        ? { ...n, qualifier: { ...n.qualifier, lumMax: parseFloat(e.target.value) } }
+                        : n
+                    ));
+                  }}
+                />
+              </div>
+              <div className="slider-group">
+                <label>Softness: {(activeNode?.qualifier.softness || 0.05).toFixed(2)}</label>
+                <input
+                  type="range"
+                  min="0"
+                  max="0.2"
+                  step="0.01"
+                  value={activeNode?.qualifier.softness || 0.05}
+                  onChange={(e) => {
+                    if (!activeNode) return;
+                    setNodes(nodes.map(n =>
+                      n.id === activeNodeId
+                        ? { ...n, qualifier: { ...n.qualifier, softness: parseFloat(e.target.value) } }
+                        : n
+                    ));
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="control-section">
+            <h3>Power Windows</h3>
+            <div className="mask-controls">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={activeNode?.masks.ellipse.enabled || false}
+                  onChange={(e) => {
+                    if (!activeNode) return;
+                    setNodes(nodes.map(n =>
+                      n.id === activeNodeId
+                        ? { ...n, masks: { ...n.masks, ellipse: { ...n.masks.ellipse, enabled: e.target.checked } } }
+                        : n
+                    ));
+                  }}
+                />
+                Ellipse
+              </label>
+              <div className="sliders">
+                <div className="slider-group">
+                  <label>Center X: {(activeNode?.masks.ellipse.centerX || 0.5).toFixed(2)}</label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value={activeNode?.masks.ellipse.centerX || 0.5}
+                    onChange={(e) => {
+                      if (!activeNode) return;
+                      setNodes(nodes.map(n =>
+                        n.id === activeNodeId
+                          ? { ...n, masks: { ...n.masks, ellipse: { ...n.masks.ellipse, centerX: parseFloat(e.target.value) } } }
+                          : n
+                      ));
+                    }}
+                  />
+                </div>
+                <div className="slider-group">
+                  <label>Center Y: {(activeNode?.masks.ellipse.centerY || 0.5).toFixed(2)}</label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value={activeNode?.masks.ellipse.centerY || 0.5}
+                    onChange={(e) => {
+                      if (!activeNode) return;
+                      setNodes(nodes.map(n =>
+                        n.id === activeNodeId
+                          ? { ...n, masks: { ...n.masks, ellipse: { ...n.masks.ellipse, centerY: parseFloat(e.target.value) } } }
+                          : n
+                      ));
+                    }}
+                  />
+                </div>
+                <div className="slider-group">
+                  <label>Radius X: {(activeNode?.masks.ellipse.radiusX || 0.2).toFixed(2)}</label>
+                  <input
+                    type="range"
+                    min="0.05"
+                    max="0.5"
+                    step="0.01"
+                    value={activeNode?.masks.ellipse.radiusX || 0.2}
+                    onChange={(e) => {
+                      if (!activeNode) return;
+                      setNodes(nodes.map(n =>
+                        n.id === activeNodeId
+                          ? { ...n, masks: { ...n.masks, ellipse: { ...n.masks.ellipse, radiusX: parseFloat(e.target.value) } } }
+                          : n
+                      ));
+                    }}
+                  />
+                </div>
+                <div className="slider-group">
+                  <label>Radius Y: {(activeNode?.masks.ellipse.radiusY || 0.15).toFixed(2)}</label>
+                  <input
+                    type="range"
+                    min="0.05"
+                    max="0.5"
+                    step="0.01"
+                    value={activeNode?.masks.ellipse.radiusY || 0.15}
+                    onChange={(e) => {
+                      if (!activeNode) return;
+                      setNodes(nodes.map(n =>
+                        n.id === activeNodeId
+                          ? { ...n, masks: { ...n.masks, ellipse: { ...n.masks.ellipse, radiusY: parseFloat(e.target.value) } } }
+                          : n
+                      ));
+                    }}
+                  />
+                </div>
+                <div className="slider-group">
+                  <label>Softness: {(activeNode?.masks.ellipse.softness || 0.05).toFixed(2)}</label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="0.2"
+                    step="0.01"
+                    value={activeNode?.masks.ellipse.softness || 0.05}
+                    onChange={(e) => {
+                      if (!activeNode) return;
+                      setNodes(nodes.map(n =>
+                        n.id === activeNodeId
+                          ? { ...n, masks: { ...n.masks, ellipse: { ...n.masks.ellipse, softness: parseFloat(e.target.value) } } }
+                          : n
+                      ));
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="mask-controls">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={activeNode?.masks.rectangle.enabled || false}
+                  onChange={(e) => {
+                    if (!activeNode) return;
+                    setNodes(nodes.map(n =>
+                      n.id === activeNodeId
+                        ? { ...n, masks: { ...n.masks, rectangle: { ...n.masks.rectangle, enabled: e.target.checked } } }
+                        : n
+                    ));
+                  }}
+                />
+                Rectangle
+              </label>
+              <div className="sliders">
+                <div className="slider-group">
+                  <label>Center X: {(activeNode?.masks.rectangle.centerX || 0.5).toFixed(2)}</label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value={activeNode?.masks.rectangle.centerX || 0.5}
+                    onChange={(e) => {
+                      if (!activeNode) return;
+                      setNodes(nodes.map(n =>
+                        n.id === activeNodeId
+                          ? { ...n, masks: { ...n.masks, rectangle: { ...n.masks.rectangle, centerX: parseFloat(e.target.value) } } }
+                          : n
+                      ));
+                    }}
+                  />
+                </div>
+                <div className="slider-group">
+                  <label>Center Y: {(activeNode?.masks.rectangle.centerY || 0.5).toFixed(2)}</label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value={activeNode?.masks.rectangle.centerY || 0.5}
+                    onChange={(e) => {
+                      if (!activeNode) return;
+                      setNodes(nodes.map(n =>
+                        n.id === activeNodeId
+                          ? { ...n, masks: { ...n.masks, rectangle: { ...n.masks.rectangle, centerY: parseFloat(e.target.value) } } }
+                          : n
+                      ));
+                    }}
+                  />
+                </div>
+                <div className="slider-group">
+                  <label>Width: {(activeNode?.masks.rectangle.width || 0.3).toFixed(2)}</label>
+                  <input
+                    type="range"
+                    min="0.05"
+                    max="0.8"
+                    step="0.01"
+                    value={activeNode?.masks.rectangle.width || 0.3}
+                    onChange={(e) => {
+                      if (!activeNode) return;
+                      setNodes(nodes.map(n =>
+                        n.id === activeNodeId
+                          ? { ...n, masks: { ...n.masks, rectangle: { ...n.masks.rectangle, width: parseFloat(e.target.value) } } }
+                          : n
+                      ));
+                    }}
+                  />
+                </div>
+                <div className="slider-group">
+                  <label>Height: {(activeNode?.masks.rectangle.height || 0.2).toFixed(2)}</label>
+                  <input
+                    type="range"
+                    min="0.05"
+                    max="0.8"
+                    step="0.01"
+                    value={activeNode?.masks.rectangle.height || 0.2}
+                    onChange={(e) => {
+                      if (!activeNode) return;
+                      setNodes(nodes.map(n =>
+                        n.id === activeNodeId
+                          ? { ...n, masks: { ...n.masks, rectangle: { ...n.masks.rectangle, height: parseFloat(e.target.value) } } }
+                          : n
+                      ));
+                    }}
+                  />
+                </div>
+                <div className="slider-group">
+                  <label>Softness: {(activeNode?.masks.rectangle.softness || 0.05).toFixed(2)}</label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="0.2"
+                    step="0.01"
+                    value={activeNode?.masks.rectangle.softness || 0.05}
+                    onChange={(e) => {
+                      if (!activeNode) return;
+                      setNodes(nodes.map(n =>
+                        n.id === activeNodeId
+                          ? { ...n, masks: { ...n.masks, rectangle: { ...n.masks.rectangle, softness: parseFloat(e.target.value) } } }
+                          : n
+                      ));
+                    }}
+                  />
+                </div>
               </div>
             </div>
           </div>
