@@ -6,7 +6,7 @@
 - [x] **HSL Qualifier (Secondary):** _As a user_, I want to select pixels by color range. IMPLEMENTED: Qualifier section with hue center/range, sat min/max, lum min/max, softness sliders
 - [x] **Power Window Masks:** _As a user_, I want to draw an ellipse or rectangle over part of the image. IMPLEMENTED: Ellipse and rectangle masks with center, size, and softness controls
 - [x] **Mask Tracking:** _As a user_, I want the mask to follow a moving subject. IMPLEMENTED: Track Forward/Backward buttons with template matching algorithm, keyframe storage and interpolation
-- [ ] **Video Scopes:** _As a user_, I want to see a real-time waveform and vectorscope.
+- [x] **Video Scopes:** _As a user_, I want to see a real-time waveform and vectorscope. IMPLEMENTED: Waveform and vectorscope panels with Show/Hide toggle
 - [x] **Before/After Comparison:** _As a user_, I want a "Before/After" toggle. IMPLEMENTED: WebGL shader pipeline with Before/After toggle button
 - [ ] **Export:** _As a user_, once satisfied, I want to export the graded clip as an H.264 MP4.
 - [x] **M1 - Core Playback & UI:** IMPLEMENTED: Electron app with React, video import
@@ -14,7 +14,7 @@
 - [ ] **M3 - Node Graph + JSON:** Save/load project state
 - [x] **M4 - Secondary Tools: HSL Qualifier & Masks** IMPLEMENTED in App.tsx
 - [x] **M5 - Tracking** IMPLEMENTED: Template matching tracking with keyframes
-- [ ] **M6 - Scopes & Polish**
+- [ ] **M6 - Scopes & Polish** IMPLEMENTED: Waveform and Vectorscope
 
 ## Medium Priority
 
@@ -30,6 +30,7 @@
 - [x] Power Window Masks (ellipse and rectangle with center, size, softness)
 - [x] Before/After Comparison (WebGL shader pipeline with toggle)
 - [x] Mask Tracking (Track Forward/Backward, keyframe interpolation)
+- [x] Video Scopes (Waveform and Vectorscope panels)
 
 ## Notes
 - Focus on MVP functionality first
