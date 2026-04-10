@@ -280,6 +280,12 @@ function App() {
   const [showOriginal, setShowOriginal] = useState(false); // Before/After toggle
   const [trackingStatus, setTrackingStatus] = useState<string>('');
   const [currentFrame, setCurrentFrame] = useState<number>(0);
+  const [showScopes, setShowScopes] = useState(false);
+  const [waveformData, setWaveformData] = useState<Uint8ClampedArray | null>(null);
+  const [vectorscopeData, setVectorscopeData] = useState<Uint8ClampedArray | null>(null);
+
+  const waveformCanvasRef = useRef<HTMLCanvasElement>(null);
+  const vectorscopeCanvasRef = useRef<HTMLCanvasElement>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -486,6 +492,73 @@ function App() {
 
         // Draw
         gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+        // Generate scopes from rendered frame
+        if (showScopes && video) {
+          const width = canvasRef.current?.width || 640;
+          const height = canvasRef.current?.height || 480;
+
+          // Read pixels from canvas
+          const pixels = new Uint8Array(width * height * 4);
+          gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+
+          // Generate waveform data (downsampled luma values)
+          const waveformWidth = 256;
+          const waveformHeight = 128;
+          const waveform = new Uint8ClampedArray(waveformWidth * waveformHeight * 4);
+          const stepX = Math.floor(width / waveformWidth);
+
+          for (let x = 0; x < waveformWidth; x++) {
+            const colStart = x * stepX;
+            for (let y = 0; y < waveformHeight; y++) {
+              const rowStart = Math.floor(y * height / waveformHeight) * width;
+              const idx = (rowStart + colStart) * 4;
+              const r = pixels[idx] || 0;
+              const g = pixels[idx + 1] || 0;
+              const b = pixels[idx + 2] || 0;
+              const luma = Math.floor(0.299 * r + 0.587 * g + 0.114 * b);
+              const waveformY = waveformHeight - 1 - Math.floor((luma / 255) * waveformHeight);
+              const wIdx = ((waveformY * waveformWidth) + x) * 4;
+              waveform[wIdx] = 255;
+              waveform[wIdx + 1] = 255;
+              waveform[wIdx + 2] = 255;
+              waveform[wIdx + 3] = 255;
+            }
+          }
+          setWaveformData(waveform);
+
+          // Generate vectorscope data (chrominance plot)
+          const scopeSize = 256;
+          const scope = new Uint8ClampedArray(scopeSize * scopeSize * 4);
+          const centerX = scopeSize / 2;
+          const centerY = scopeSize / 2;
+          const maxRadius = scopeSize / 2 - 10;
+
+          for (let i = 0; i < pixels.length; i += 4) {
+            const r = pixels[i] / 255;
+            const g = pixels[i + 1] / 255;
+            const b = pixels[i + 2] / 255;
+
+            // Convert to YUV to get chrominance
+            const y = 0.299 * r + 0.587 * g + 0.114 * b;
+            const u = (b - y) / 0.492;
+            const v = (r - y) / 0.877;
+
+            const angle = Math.atan2(u, v);
+            const magnitude = Math.min(1, Math.sqrt(u * u + v * v));
+            const px = Math.round(centerX + magnitude * maxRadius * Math.cos(angle));
+            const py = Math.round(centerY + magnitude * maxRadius * Math.sin(angle));
+
+            if (px >= 0 && px < scopeSize && py >= 0 && py < scopeSize) {
+              const sIdx = (py * scopeSize + px) * 4;
+              scope[sIdx] = Math.min(255, scope[sIdx] + r * 50);
+              scope[sIdx + 1] = Math.min(255, scope[sIdx + 1] + g * 50);
+              scope[sIdx + 2] = Math.min(255, scope[sIdx + 2] + b * 50);
+              scope[sIdx + 3] = 255;
+            }
+          }
+          setVectorscopeData(scope);
+        }
       }
 
       animationRef.current = requestAnimationFrame(render);
@@ -496,7 +569,7 @@ function App() {
     return () => {
       cancelAnimationFrame(animationRef.current);
     };
-  }, [videoSrc, nodes, activeNodeId, showOriginal, activeNode, getTrackedMaskCenter]);
+  }, [videoSrc, nodes, activeNodeId, showOriginal, activeNode, getTrackedMaskCenter, showScopes]);
 
   const handleImportVideo = useCallback(async () => {
     if (window.electronAPI) {
@@ -746,6 +819,24 @@ function App() {
     setTimeout(() => setTrackingStatus(''), 2000);
   }, [activeNodeId, nodes]);
 
+  // Render scopes when data changes
+  useEffect(() => {
+    if (waveformCanvasRef.current && waveformData) {
+      const ctx = waveformCanvasRef.current.getContext('2d');
+      if (ctx) {
+        const imageData = new ImageData(waveformData, 256, 128);
+        ctx.putImageData(imageData, 0, 0);
+      }
+    }
+    if (vectorscopeCanvasRef.current && vectorscopeData) {
+      const ctx = vectorscopeCanvasRef.current.getContext('2d');
+      if (ctx) {
+        const imageData = new ImageData(vectorscopeData, 256, 256);
+        ctx.putImageData(imageData, 0, 0);
+      }
+    }
+  }, [waveformData, vectorscopeData]);
+
   return (
     <div className="app">
       {/* Header */}
@@ -802,7 +893,39 @@ function App() {
                 {showOriginal ? 'BEFORE (Original)' : 'AFTER (Graded)'}
               </span>
             )}
+            {videoSrc && (
+              <button
+                className={`btn-scopes ${showScopes ? 'active' : ''}`}
+                onClick={() => setShowScopes(!showScopes)}
+              >
+                {showScopes ? 'Hide Scopes' : 'Show Scopes'}
+              </button>
+            )}
           </div>
+
+          {/* Scopes Panel */}
+          {showScopes && (
+            <div className="scopes-panel">
+              <div className="scope-container">
+                <h4>Waveform</h4>
+                <canvas
+                  ref={waveformCanvasRef}
+                  className="scope-canvas"
+                  width={256}
+                  height={128}
+                />
+              </div>
+              <div className="scope-container">
+                <h4>Vectorscope</h4>
+                <canvas
+                  ref={vectorscopeCanvasRef}
+                  className="scope-canvas"
+                  width={256}
+                  height={256}
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Node Panel */}

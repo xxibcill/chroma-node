@@ -414,3 +414,57 @@
   border-radius: 4px;
   text-align: center;
 }
+
+.btn-scopes {
+  margin-left: 12px;
+  padding: 6px 12px;
+  background: #444;
+  color: #ccc;
+  border: 1px solid #555;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.15s;
+}
+
+.btn-scopes:hover {
+  background: #555;
+}
+
+.btn-scopes.active {
+  background: #4a90d9;
+  color: white;
+  border-color: #4a90d9;
+}
+
+.scopes-panel {
+  display: flex;
+  gap: 16px;
+  padding: 12px;
+  margin-top: 12px;
+  background: #1a1a1a;
+  border-radius: 6px;
+  border: 1px solid #333;
+}
+
+.scope-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.scope-container h4 {
+  font-size: 11px;
+  font-weight: 600;
+  color: #888;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.scope-canvas {
+  background: #0a0a0a;
+  border: 1px solid #333;
+  border-radius: 4px;
+}
