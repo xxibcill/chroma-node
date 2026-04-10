@@ -35,6 +35,34 @@
   background: #5a9fe8;
 }
 
+.header-controls {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.btn-before-after {
+  padding: 8px 16px;
+  background: #555;
+  color: #ccc;
+  border: 1px solid #666;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.15s;
+}
+
+.btn-before-after:hover {
+  background: #666;
+}
+
+.btn-before-after.active {
+  background: #d94a4a;
+  color: white;
+  border-color: #d94a4a;
+}
+
 .main-content {
   display: flex;
   flex: 1;
@@ -59,7 +87,8 @@
   overflow: hidden;
 }
 
-.viewer video {
+.viewer video,
+.viewer canvas {
   max-width: 100%;
   max-height: 100%;
 }
@@ -86,6 +115,14 @@
   padding: 12px 0;
   color: #888;
   font-size: 13px;
+}
+
+.playback-controls .status {
+  margin-left: 12px;
+  padding: 4px 8px;
+  background: #333;
+  border-radius: 4px;
+  font-size: 12px;
 }
 
 .node-panel {
@@ -262,4 +299,118 @@
   background: #4a90d9;
   border-radius: 50%;
   cursor: pointer;
+}
+
+.mask-controls {
+  margin-bottom: 16px;
+  padding: 12px;
+  background: #2a2a2a;
+  border-radius: 6px;
+}
+
+.mask-controls label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #aaa;
+  margin-bottom: 10px;
+  cursor: pointer;
+}
+
+.mask-controls input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.tracking-controls {
+  margin-top: 16px;
+  padding: 12px;
+  background: #2a2a2a;
+  border-radius: 6px;
+  border: 1px solid #444;
+}
+
+.tracking-controls h4 {
+  font-size: 11px;
+  font-weight: 600;
+  color: #888;
+  margin-bottom: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.tracking-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.btn-track {
+  flex: 1;
+  min-width: 80px;
+  padding: 8px 12px;
+  background: #4a90d9;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: background 0.15s;
+}
+
+.btn-track:hover:not(:disabled) {
+  background: #5a9fe8;
+}
+
+.btn-track:disabled {
+  background: #555;
+  color: #888;
+  cursor: not-allowed;
+}
+
+.btn-track-clear {
+  padding: 8px 12px;
+  background: #555;
+  color: #ccc;
+  border: 1px solid #666;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.15s;
+}
+
+.btn-track-clear:hover:not(:disabled) {
+  background: #666;
+}
+
+.btn-track-clear:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+}
+
+.tracking-info {
+  margin-top: 10px;
+  font-size: 11px;
+  color: #666;
+}
+
+.tracking-info span {
+  padding: 2px 6px;
+  background: #333;
+  border-radius: 3px;
+}
+
+.tracking-status {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #4a90d9;
+  padding: 4px 8px;
+  background: #2a3a4a;
+  border-radius: 4px;
+  text-align: center;
 }
