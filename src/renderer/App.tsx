@@ -15,6 +15,14 @@ import {
 import type { ChromaProject, ViewerMode } from "../shared/project";
 import { createDefaultProject, sanitizeProject } from "../shared/project";
 import {
+  createGradedScopeFrame,
+  createVectorscopeGuides,
+  createVectorscopeHistogram,
+  createWaveformHistogram
+} from "./scopes/scopeAnalysis";
+import type { RgbaFrame } from "./scopes/scopeAnalysis";
+import { clearScopeCanvas, drawVectorscope, drawWaveformScope } from "./scopes/scopeRender";
+import {
   clampFrameIndex,
   formatTimecode,
   frameToTimeSeconds,
@@ -52,16 +60,28 @@ interface PlaybackState {
 const api = window.chromaNode;
 const initialProject = createDefaultProject();
 const initialMessage = "Import an MP4 or MOV clip to start playback inspection.";
+const scopeDebounceMs = 50;
+const playbackScopeIntervalMs = 1000 / 15;
+const pausedScopeMaxWidth = 1280;
+const playbackScopeMaxWidth = 640;
+const waveformHistogramSize = { width: 320, height: 160 };
+const vectorscopeHistogramSize = 220;
 
 export function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const waveformCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const vectorscopeCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const viewerFrameRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const rendererRef = useRef<FrameRenderer | null>(null);
   const frameRequestId = useRef(0);
+  const scopeRequestId = useRef(0);
+  const scopeDebounceTimer = useRef<number | undefined>(undefined);
+  const scopeImageCache = useRef<{ dataUrl: string; image: HTMLImageElement } | undefined>(undefined);
   const [diagnostics, setDiagnostics] = useState<FfmpegDiagnostics | undefined>();
   const [previewBusy, setPreviewBusy] = useState(false);
   const [showMatte, setShowMatte] = useState(false);
+  const [scopeInfo, setScopeInfo] = useState("Scopes waiting for a graded frame.");
   const [viewerSize, setViewerSize] = useState({ width: 0, height: 0 });
   const [project, setProject] = useState<ChromaProject>(initialProject);
   const [selectedNodeId, setSelectedNodeId] = useState(initialProject.nodes[0].id);
@@ -132,6 +152,92 @@ export function App() {
 
     video.currentTime = frameToTimeSeconds(frameIndex, media);
   }, [state.media]);
+
+  const loadScopeImage = useCallback(async (dataUrl: string): Promise<HTMLImageElement> => {
+    if (scopeImageCache.current?.dataUrl === dataUrl) {
+      return scopeImageCache.current.image;
+    }
+
+    const image = await loadImage(dataUrl);
+    scopeImageCache.current = { dataUrl, image };
+    return image;
+  }, []);
+
+  const runScopeAnalysis = useCallback(async (isPlaybackSample: boolean) => {
+    const waveformCanvas = waveformCanvasRef.current;
+    const vectorscopeCanvas = vectorscopeCanvasRef.current;
+    if (!waveformCanvas || !vectorscopeCanvas) {
+      return;
+    }
+
+    const requestId = ++scopeRequestId.current;
+    const maxWidth = isPlaybackSample ? playbackScopeMaxWidth : pausedScopeMaxWidth;
+
+    try {
+      let sourceFrame: RgbaFrame | undefined;
+
+      if (isPlaybackSample) {
+        const video = videoRef.current;
+        if (video && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth > 0 && video.videoHeight > 0) {
+          sourceFrame = captureScopeFrame(video, video.videoWidth, video.videoHeight, maxWidth);
+        }
+      }
+
+      if (!sourceFrame && state.frame) {
+        const image = await loadScopeImage(state.frame.dataUrl);
+        if (requestId !== scopeRequestId.current) {
+          return;
+        }
+        sourceFrame = captureScopeFrame(image, state.frame.width || image.naturalWidth, state.frame.height || image.naturalHeight, maxWidth);
+      }
+
+      if (!sourceFrame) {
+        clearScopeCanvas(waveformCanvas, "No frame");
+        clearScopeCanvas(vectorscopeCanvas, "No frame");
+        setScopeInfo("Scopes waiting for a graded frame.");
+        return;
+      }
+
+      const startedAt = performance.now();
+      const gradedFrame = createGradedScopeFrame(sourceFrame, project.nodes);
+      const waveform = createWaveformHistogram(gradedFrame, waveformHistogramSize.width, waveformHistogramSize.height);
+      const vectorscope = createVectorscopeHistogram(gradedFrame, vectorscopeHistogramSize);
+      const guides = createVectorscopeGuides(vectorscopeHistogramSize);
+
+      if (requestId !== scopeRequestId.current) {
+        return;
+      }
+
+      drawWaveformScope(waveformCanvas, waveform);
+      drawVectorscope(vectorscopeCanvas, vectorscope, guides);
+      setScopeInfo(`${gradedFrame.width} x ${gradedFrame.height} sample, ${Math.round(performance.now() - startedAt)} ms`);
+    } catch (error) {
+      if (requestId !== scopeRequestId.current) {
+        return;
+      }
+
+      clearScopeCanvas(waveformCanvas, "Scope error");
+      clearScopeCanvas(vectorscopeCanvas, "Scope error");
+      setScopeInfo(error instanceof Error ? error.message : "Scope analysis failed.");
+    }
+  }, [loadScopeImage, project.nodes, state.frame]);
+
+  const scheduleScopeAnalysis = useCallback((isPlaybackSample: boolean) => {
+    if (scopeDebounceTimer.current !== undefined) {
+      window.clearTimeout(scopeDebounceTimer.current);
+      scopeDebounceTimer.current = undefined;
+    }
+
+    if (isPlaybackSample) {
+      void runScopeAnalysis(true);
+      return;
+    }
+
+    scopeDebounceTimer.current = window.setTimeout(() => {
+      scopeDebounceTimer.current = undefined;
+      void runScopeAnalysis(false);
+    }, scopeDebounceMs);
+  }, [runScopeAnalysis]);
 
   const extractPreviewFrame = useCallback(async (media: MediaRef, frameIndex: number) => {
     if (!api) {
@@ -660,6 +766,49 @@ export function App() {
   }, [playback.isPlaying, state.frame]);
 
   useEffect(() => {
+    if (!state.frame) {
+      if (!state.media) {
+        if (waveformCanvasRef.current) {
+          clearScopeCanvas(waveformCanvasRef.current, "No frame");
+        }
+        if (vectorscopeCanvasRef.current) {
+          clearScopeCanvas(vectorscopeCanvasRef.current, "No frame");
+        }
+        setScopeInfo("Scopes waiting for a graded frame.");
+      }
+      return;
+    }
+
+    if (playback.isPlaying || playback.isScrubbing) {
+      return;
+    }
+
+    scheduleScopeAnalysis(false);
+  }, [playback.isPlaying, playback.isScrubbing, scheduleScopeAnalysis, state.frame, state.media]);
+
+  useEffect(() => {
+    if (!playback.isPlaying) {
+      return;
+    }
+
+    scheduleScopeAnalysis(true);
+    const intervalId = window.setInterval(() => {
+      scheduleScopeAnalysis(true);
+    }, playbackScopeIntervalMs);
+
+    return () => window.clearInterval(intervalId);
+  }, [playback.isPlaying, scheduleScopeAnalysis]);
+
+  useEffect(() => {
+    return () => {
+      if (scopeDebounceTimer.current !== undefined) {
+        window.clearTimeout(scopeDebounceTimer.current);
+      }
+      scopeRequestId.current += 1;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!mediaUrl || !videoRef.current) {
       return;
     }
@@ -853,6 +1002,36 @@ export function App() {
                 &gt;|
               </IconButton>
             </div>
+          </section>
+
+          <section className="scopes-panel" aria-label="Video scopes">
+            <div className="scope-card scope-card-waveform">
+              <div className="scope-header">
+                <h2>Waveform</h2>
+                <span>Y 0-100 IRE</span>
+              </div>
+              <canvas
+                ref={waveformCanvasRef}
+                className="scope-canvas"
+                width="320"
+                height="160"
+                aria-label="Luma waveform"
+              />
+            </div>
+            <div className="scope-card scope-card-vectorscope">
+              <div className="scope-header">
+                <h2>Vectorscope</h2>
+                <span>Cb / Cr</span>
+              </div>
+              <canvas
+                ref={vectorscopeCanvasRef}
+                className="scope-canvas"
+                width="220"
+                height="220"
+                aria-label="Chroma vectorscope"
+              />
+            </div>
+            <p className="scope-status">{scopeInfo}</p>
           </section>
 
           <footer className="transport">
@@ -1627,6 +1806,44 @@ function normalizeSignedDegrees(value: number): number {
 
 function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value));
+}
+
+function captureScopeFrame(
+  source: CanvasImageSource,
+  sourceWidth: number,
+  sourceHeight: number,
+  maxWidth: number
+): RgbaFrame {
+  const scale = sourceWidth > maxWidth ? maxWidth / sourceWidth : 1;
+  const width = Math.max(1, Math.round(sourceWidth * scale));
+  const height = Math.max(1, Math.round(sourceHeight * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) {
+    throw new Error("Could not create scope sampling canvas.");
+  }
+
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "medium";
+  context.drawImage(source, 0, 0, width, height);
+  const imageData = context.getImageData(0, 0, width, height);
+
+  return {
+    width,
+    height,
+    data: imageData.data
+  };
+}
+
+function loadImage(dataUrl: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Could not decode scope source frame."));
+    image.src = dataUrl;
+  });
 }
 
 function filePathToUrl(sourcePath: string): string {

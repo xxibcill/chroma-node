@@ -1,5 +1,9 @@
 # Phase 04 - Waveform and Vectorscope
 
+## Status
+
+Done
+
 ## Functional Feature Outcome
 
 The user can inspect the current graded frame through waveform and vectorscope displays that update during grading and playback.
@@ -37,4 +41,3 @@ Scopes are essential for learning how image adjustments affect signal distributi
 - Vectorscope plots chroma from graded output.
 - Scopes update within performance targets while paused.
 - Playback scope updates are throttled to avoid UI stalls.
-
