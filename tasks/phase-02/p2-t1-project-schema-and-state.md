@@ -2,7 +2,7 @@
 
 ## Status
 
-Not started
+Done
 
 ## Phase
 
@@ -35,12 +35,11 @@ The app has validated project, media, playback, node, correction, qualifier, win
 
 ## Progress
 
-- [ ] Not started
-- [ ] In progress
-- [ ] Implemented
-- [ ] Verified
+- [x] Not started
+- [x] In progress
+- [x] Implemented
+- [x] Verified
 
 ## Blockers
 
 - None
-

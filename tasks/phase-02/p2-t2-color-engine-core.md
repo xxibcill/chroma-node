@@ -2,7 +2,7 @@
 
 ## Status
 
-Not started
+Done
 
 ## Phase
 
@@ -35,12 +35,11 @@ A standalone color engine validates node graphs, evaluates a CPU reference path,
 
 ## Progress
 
-- [ ] Not started
-- [ ] In progress
-- [ ] Implemented
-- [ ] Verified
+- [x] Not started
+- [x] In progress
+- [x] Implemented
+- [x] Verified
 
 ## Blockers
 
 - None
-

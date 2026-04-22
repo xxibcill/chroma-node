@@ -12,7 +12,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:phase00": "vitest run && npm run build && node scripts/verify-phase00.mjs",
-    "test:phase01": "vitest run && npm run build && node scripts/verify-phase01.mjs"
+    "test:phase01": "vitest run && npm run build && node scripts/verify-phase01.mjs",
+    "test:phase02": "vitest run && npm run build && node scripts/verify-phase02.mjs"
   },
   "dependencies": {
     "react": "^19.0.0",

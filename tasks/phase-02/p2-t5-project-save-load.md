@@ -2,7 +2,7 @@
 
 ## Status
 
-Not started
+Done
 
 ## Phase
 
@@ -35,12 +35,11 @@ The user can save project state to JSON and reopen it without losing media refer
 
 ## Progress
 
-- [ ] Not started
-- [ ] In progress
-- [ ] Implemented
-- [ ] Verified
+- [x] Not started
+- [x] In progress
+- [x] Implemented
+- [x] Verified
 
 ## Blockers
 
 - None
-

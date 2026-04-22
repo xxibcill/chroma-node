@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AppError, DecodedFrame, ExportJobResult, FfmpegDiagnostics, MediaRef } from "../shared/ipc";
+import type { ColorNode, RgbVector } from "../shared/colorEngine";
+import {
+  MAX_SERIAL_NODES,
+  PRIMARY_RANGES,
+  clampNumber,
+  createColorNode,
+  createNeutralPrimaries
+} from "../shared/colorEngine";
+import type { ChromaProject, ViewerMode } from "../shared/project";
+import { createDefaultProject, sanitizeProject } from "../shared/project";
 import {
   clampFrameIndex,
   formatTimecode,
@@ -11,7 +21,9 @@ import {
 import { FrameRenderer } from "./webgl/FrameRenderer";
 
 type Status = "idle" | "busy" | "ready" | "error";
-type ViewerMode = "original" | "graded" | "split";
+type RgbPrimaryKey = "lift" | "gamma" | "gain" | "offset";
+type ScalarPrimaryKey = "contrast" | "pivot" | "saturation" | "temperature" | "tint";
+type RgbChannel = keyof RgbVector;
 
 interface UiState {
   status: Status;
@@ -20,6 +32,7 @@ interface UiState {
   frame?: DecodedFrame;
   exportResult?: ExportJobResult;
   error?: AppError;
+  projectPath?: string;
 }
 
 interface PlaybackState {
@@ -31,6 +44,7 @@ interface PlaybackState {
 }
 
 const api = window.chromaNode;
+const initialProject = createDefaultProject();
 const initialMessage = "Import an MP4 or MOV clip to start playback inspection.";
 
 export function App() {
@@ -40,12 +54,14 @@ export function App() {
   const frameRequestId = useRef(0);
   const [diagnostics, setDiagnostics] = useState<FfmpegDiagnostics | undefined>();
   const [previewBusy, setPreviewBusy] = useState(false);
+  const [project, setProject] = useState<ChromaProject>(initialProject);
+  const [selectedNodeId, setSelectedNodeId] = useState(initialProject.nodes[0].id);
   const [playback, setPlayback] = useState<PlaybackState>({
     isPlaying: false,
     isScrubbing: false,
-    currentFrame: 0,
-    viewerMode: "graded",
-    splitPosition: 50
+    currentFrame: initialProject.playback.currentFrame,
+    viewerMode: initialProject.playback.viewerMode,
+    splitPosition: initialProject.playback.splitPosition
   });
   const [state, setState] = useState<UiState>({
     status: "idle",
@@ -57,6 +73,10 @@ export function App() {
   const lastFrameIndex = useMemo(() => getLastFrameIndex(state.media), [state.media]);
   const timecode = useMemo(() => formatTimecode(playback.currentFrame, state.media), [playback.currentFrame, state.media]);
   const canUseMedia = Boolean(state.media);
+  const activeNode = useMemo(
+    () => project.nodes.find((node) => node.id === selectedNodeId) ?? project.nodes[0],
+    [project.nodes, selectedNodeId]
+  );
 
   const diagnosticsLabel = useMemo(() => {
     if (!diagnostics) {
@@ -65,6 +85,22 @@ export function App() {
 
     return diagnostics.available ? "FFmpeg ready" : "FFmpeg unavailable";
   }, [diagnostics]);
+
+  const commitProject = useCallback((updater: (current: ChromaProject) => ChromaProject) => {
+    setProject((current) => sanitizeProject(updater(current)));
+  }, []);
+
+  const buildProjectSnapshot = useCallback((): ChromaProject => {
+    return sanitizeProject({
+      ...project,
+      media: state.media ?? project.media,
+      playback: {
+        currentFrame: playback.currentFrame,
+        viewerMode: playback.viewerMode,
+        splitPosition: playback.splitPosition
+      }
+    });
+  }, [playback.currentFrame, playback.splitPosition, playback.viewerMode, project, state.media]);
 
   const seekVideoToFrame = useCallback((frameIndex: number, media = state.media) => {
     const video = videoRef.current;
@@ -122,6 +158,7 @@ export function App() {
 
       const targetFrame = clampFrameIndex(frameIndex, state.media);
       videoRef.current?.pause();
+      rendererRef.current?.setPlaybackActive(false);
       seekVideoToFrame(targetFrame, state.media);
       setPlayback((current) => ({
         ...current,
@@ -145,6 +182,7 @@ export function App() {
 
     frameRequestId.current += 1;
     videoRef.current?.pause();
+    rendererRef.current?.setPlaybackActive(false);
     setPreviewBusy(false);
     setPlayback((current) => ({ ...current, isPlaying: false, isScrubbing: false, currentFrame: 0 }));
     setState((current) => ({ ...current, status: "busy", message: "Selecting media...", error: undefined }));
@@ -180,6 +218,15 @@ export function App() {
       isScrubbing: false,
       currentFrame: 0
     }));
+    commitProject((current) => ({
+      ...current,
+      name: media.fileName,
+      media,
+      playback: {
+        ...current.playback,
+        currentFrame: 0
+      }
+    }));
     setState((current) => ({
       ...current,
       status: "busy",
@@ -202,13 +249,109 @@ export function App() {
       return;
     }
 
-    setState({
+    setState((current) => ({
+      ...current,
       status: "ready",
       message: "Clip imported. Viewer is ready for playback.",
       media,
-      frame: frameResult.value
+      frame: frameResult.value,
+      error: undefined
+    }));
+  }, [commitProject, state.media]);
+
+  const saveProject = useCallback(async () => {
+    if (!api) {
+      return;
+    }
+
+    setState((current) => ({ ...current, status: "busy", message: "Saving project...", error: undefined }));
+    const response = await api.saveProject({
+      project: buildProjectSnapshot(),
+      projectPath: state.projectPath
     });
-  }, [state.media]);
+    const result = response.result;
+    if (!result.ok) {
+      setState((current) => ({
+        ...current,
+        status: current.media ? "ready" : "idle",
+        message: result.error.code === "USER_CANCELLED" ? current.message : result.error.message,
+        error: result.error.code === "USER_CANCELLED" ? undefined : result.error
+      }));
+      return;
+    }
+
+    setState((current) => ({
+      ...current,
+      status: current.media ? "ready" : "idle",
+      projectPath: result.value.projectPath,
+      message: "Project saved.",
+      error: undefined
+    }));
+  }, [buildProjectSnapshot, state.projectPath]);
+
+  const openProject = useCallback(async () => {
+    if (!api) {
+      return;
+    }
+
+    videoRef.current?.pause();
+    rendererRef.current?.setPlaybackActive(false);
+    setState((current) => ({ ...current, status: "busy", message: "Opening project...", error: undefined }));
+    const response = await api.openProject();
+    const result = response.result;
+    if (!result.ok) {
+      setState((current) => ({
+        ...current,
+        status: current.media ? "ready" : "idle",
+        message: result.error.code === "USER_CANCELLED" ? current.message : result.error.message,
+        error: result.error.code === "USER_CANCELLED" ? undefined : result.error
+      }));
+      return;
+    }
+
+    const openedProject = result.value.project;
+    const currentFrame = openedProject.media ? clampFrameIndex(openedProject.playback.currentFrame, openedProject.media) : 0;
+    setProject(openedProject);
+    setSelectedNodeId(openedProject.nodes[0].id);
+    setPlayback({
+      isPlaying: false,
+      isScrubbing: false,
+      currentFrame,
+      viewerMode: openedProject.playback.viewerMode,
+      splitPosition: openedProject.playback.splitPosition
+    });
+
+    if (!openedProject.media) {
+      setState({
+        status: "ready",
+        message: "Project loaded.",
+        projectPath: result.value.projectPath
+      });
+      return;
+    }
+
+    if (result.value.missingMedia) {
+      setState({
+        status: "error",
+        message: `Project loaded, but media is missing: ${openedProject.media.sourcePath}`,
+        projectPath: result.value.projectPath,
+        error: {
+          code: "FILE_NOT_FOUND",
+          message: "Project media is missing.",
+          detail: openedProject.media.sourcePath
+        }
+      });
+      return;
+    }
+
+    setState({
+      status: "ready",
+      message: "Project loaded.",
+      media: openedProject.media,
+      projectPath: result.value.projectPath
+    });
+    void extractPreviewFrame(openedProject.media, currentFrame);
+  }, [extractPreviewFrame]);
 
   const runExportSpike = useCallback(async () => {
     if (!api) {
@@ -286,6 +429,87 @@ export function App() {
     }
   }, [commitFrame, playback.currentFrame, playback.isScrubbing]);
 
+  const addNode = useCallback(() => {
+    if (project.nodes.length >= MAX_SERIAL_NODES) {
+      return;
+    }
+
+    const nextNode = createUniqueNode(project.nodes);
+    commitProject((current) => ({
+      ...current,
+      nodes: [...current.nodes, nextNode]
+    }));
+    setSelectedNodeId(nextNode.id);
+  }, [commitProject, project.nodes]);
+
+  const deleteActiveNode = useCallback(() => {
+    if (!activeNode || project.nodes.length <= 1) {
+      return;
+    }
+
+    const index = project.nodes.findIndex((node) => node.id === activeNode.id);
+    const nextNodes = project.nodes.filter((node) => node.id !== activeNode.id);
+    const nextSelection = nextNodes[Math.min(index, nextNodes.length - 1)]?.id ?? nextNodes[0]?.id;
+    commitProject((current) => ({
+      ...current,
+      nodes: current.nodes.filter((node) => node.id !== activeNode.id)
+    }));
+    if (nextSelection) {
+      setSelectedNodeId(nextSelection);
+    }
+  }, [activeNode, commitProject, project.nodes]);
+
+  const updateActiveNode = useCallback((updater: (node: ColorNode) => ColorNode) => {
+    if (!activeNode) {
+      return;
+    }
+
+    commitProject((current) => ({
+      ...current,
+      nodes: current.nodes.map((node) => (node.id === activeNode.id ? updater(node) : node))
+    }));
+  }, [activeNode, commitProject]);
+
+  const updateRgbPrimary = useCallback((key: RgbPrimaryKey, channel: RgbChannel, value: number) => {
+    updateActiveNode((node) => ({
+      ...node,
+      primaries: {
+        ...node.primaries,
+        [key]: {
+          ...node.primaries[key],
+          [channel]: clampNumber(value, PRIMARY_RANGES[key])
+        }
+      }
+    }));
+  }, [updateActiveNode]);
+
+  const updateScalarPrimary = useCallback((key: ScalarPrimaryKey, value: number) => {
+    updateActiveNode((node) => ({
+      ...node,
+      primaries: {
+        ...node.primaries,
+        [key]: clampNumber(value, PRIMARY_RANGES[key])
+      }
+    }));
+  }, [updateActiveNode]);
+
+  const resetPrimary = useCallback((key: RgbPrimaryKey | ScalarPrimaryKey) => {
+    const neutral = createNeutralPrimaries();
+    updateActiveNode((node) => ({
+      ...node,
+      primaries: {
+        ...node.primaries,
+        [key]: neutral[key]
+      }
+    }));
+  }, [updateActiveNode]);
+
+  useEffect(() => {
+    if (!project.nodes.some((node) => node.id === selectedNodeId)) {
+      setSelectedNodeId(project.nodes[0].id);
+    }
+  }, [project.nodes, selectedNodeId]);
+
   useEffect(() => {
     if (!api) {
       setState({
@@ -336,12 +560,24 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!state.frame || !rendererRef.current) {
+    rendererRef.current?.setNodeGraph(project.nodes);
+  }, [project.nodes]);
+
+  useEffect(() => {
+    rendererRef.current?.setViewerMode(playback.viewerMode, playback.splitPosition);
+  }, [playback.splitPosition, playback.viewerMode]);
+
+  useEffect(() => {
+    rendererRef.current?.setPlaybackActive(playback.isPlaying);
+  }, [playback.isPlaying]);
+
+  useEffect(() => {
+    if (!state.frame || !rendererRef.current || playback.isPlaying) {
       return;
     }
 
     void rendererRef.current.setFrame(state.frame);
-  }, [state.frame]);
+  }, [playback.isPlaying, state.frame]);
 
   useEffect(() => {
     if (!mediaUrl || !videoRef.current) {
@@ -352,6 +588,7 @@ export function App() {
     video.pause();
     video.load();
     video.currentTime = 0;
+    rendererRef.current?.setVideoSource(video);
   }, [mediaUrl]);
 
   return (
@@ -377,7 +614,14 @@ export function App() {
             <MetadataRow label="Mode" value={playback.viewerMode} />
             <MetadataRow label="Frame" value={`${playback.currentFrame + 1} / ${totalFrames}`} />
             <MetadataRow label="Timecode" value={timecode} />
-            <MetadataRow label="Split" value={`${playback.splitPosition}%`} />
+            <MetadataRow label="Split" value={`${Math.round(playback.splitPosition * 100)}%`} />
+          </dl>
+
+          <div className="panel-title export-title">Project</div>
+          <dl className="metadata-table">
+            <MetadataRow label="Name" value={project.name} />
+            <MetadataRow label="Nodes" value={`${project.nodes.length} / ${MAX_SERIAL_NODES}`} />
+            <MetadataRow label="Path" value={state.projectPath ?? "Unsaved"} />
           </dl>
 
           <div className="panel-title export-title">Export Spike</div>
@@ -387,50 +631,50 @@ export function App() {
         <section className="viewer-column" aria-label="Viewer">
           <div className={`viewer-frame viewer-mode-${playback.viewerMode}`}>
             {mediaUrl ? (
-              <div className="viewer-media">
-                <video
-                  key={mediaUrl}
-                  ref={videoRef}
-                  className="viewer-video"
-                  src={mediaUrl}
-                  muted
-                  playsInline
-                  preload="metadata"
-                  onPlay={() => {
-                    setPlayback((current) => ({ ...current, isPlaying: true }));
-                    setState((current) => ({ ...current, status: "ready", message: "Playing clip.", error: undefined }));
-                  }}
-                  onPause={() => {
-                    setPlayback((current) => ({ ...current, isPlaying: false }));
-                  }}
-                  onEnded={() => {
-                    setPlayback((current) => ({
-                      ...current,
-                      isPlaying: false,
-                      currentFrame: lastFrameIndex
-                    }));
-                  }}
-                  onTimeUpdate={(event) => {
-                    const frameIndex = timeToFrameIndex(event.currentTarget.currentTime, state.media);
-                    setPlayback((current) => (current.isScrubbing ? current : { ...current, currentFrame: frameIndex }));
-                  }}
-                  onSeeked={(event) => {
-                    const frameIndex = timeToFrameIndex(event.currentTarget.currentTime, state.media);
-                    setPlayback((current) => (current.isScrubbing ? current : { ...current, currentFrame: frameIndex }));
-                  }}
-                />
-                {playback.viewerMode === "split" ? (
-                  <>
-                    <div className="split-shade split-left" style={{ width: `${playback.splitPosition}%` }} />
-                    <div className="split-rule" style={{ left: `${playback.splitPosition}%` }} />
-                  </>
-                ) : null}
-                <div className="viewer-badge viewer-badge-left">{playback.viewerMode === "graded" ? "Graded" : "Original"}</div>
-                {playback.viewerMode === "split" ? <div className="viewer-badge viewer-badge-right">Graded</div> : null}
-              </div>
+              <video
+                key={mediaUrl}
+                ref={videoRef}
+                className="viewer-video-source"
+                src={mediaUrl}
+                muted
+                playsInline
+                preload="metadata"
+                onLoadedMetadata={(event) => rendererRef.current?.setVideoSource(event.currentTarget)}
+                onPlay={() => {
+                  setPlayback((current) => ({ ...current, isPlaying: true }));
+                  setState((current) => ({ ...current, status: "ready", message: "Playing clip.", error: undefined }));
+                }}
+                onPause={() => {
+                  setPlayback((current) => ({ ...current, isPlaying: false }));
+                }}
+                onEnded={() => {
+                  setPlayback((current) => ({
+                    ...current,
+                    isPlaying: false,
+                    currentFrame: lastFrameIndex
+                  }));
+                }}
+                onTimeUpdate={(event) => {
+                  const frameIndex = timeToFrameIndex(event.currentTarget.currentTime, state.media);
+                  setPlayback((current) => (current.isScrubbing ? current : { ...current, currentFrame: frameIndex }));
+                }}
+                onSeeked={(event) => {
+                  const frameIndex = timeToFrameIndex(event.currentTarget.currentTime, state.media);
+                  setPlayback((current) => (current.isScrubbing ? current : { ...current, currentFrame: frameIndex }));
+                }}
+              />
             ) : null}
 
-            <canvas ref={canvasRef} className="viewer-canvas-probe" aria-hidden="true" />
+            <canvas ref={canvasRef} className="viewer-canvas" aria-label="Video viewer" />
+            {playback.viewerMode === "split" ? (
+              <div className="split-rule" style={{ left: `${playback.splitPosition * 100}%` }} />
+            ) : null}
+            {state.media ? (
+              <>
+                <div className="viewer-badge viewer-badge-left">{playback.viewerMode === "graded" ? "Graded" : "Original"}</div>
+                {playback.viewerMode === "split" ? <div className="viewer-badge viewer-badge-right">Graded</div> : null}
+              </>
+            ) : null}
             {!state.media ? (
               <div className="empty-state">
                 <p className="eyebrow">Viewer</p>
@@ -477,7 +721,8 @@ export function App() {
                 <input
                   type="range"
                   min="0"
-                  max="100"
+                  max="1"
+                  step="0.01"
                   value={playback.splitPosition}
                   onChange={(event) =>
                     setPlayback((current) => ({ ...current, splitPosition: Number(event.currentTarget.value) }))
@@ -529,6 +774,12 @@ export function App() {
               <span className="status-message">{previewBusy ? "Settling to exact frame..." : state.message}</span>
             </div>
             <div className="action-row">
+              <button type="button" onClick={openProject} disabled={state.status === "busy"}>
+                Open
+              </button>
+              <button type="button" onClick={saveProject} disabled={state.status === "busy"}>
+                Save
+              </button>
               <button type="button" onClick={importMedia} disabled={state.status === "busy"}>
                 Import
               </button>
@@ -540,8 +791,196 @@ export function App() {
 
           {state.error ? <ErrorBanner error={state.error} /> : null}
         </section>
+
+        <ColorPanel
+          nodes={project.nodes}
+          activeNode={activeNode}
+          selectedNodeId={selectedNodeId}
+          onSelectNode={setSelectedNodeId}
+          onAddNode={addNode}
+          onDeleteNode={deleteActiveNode}
+          onUpdateNode={updateActiveNode}
+          onUpdateRgb={updateRgbPrimary}
+          onUpdateScalar={updateScalarPrimary}
+          onResetPrimary={resetPrimary}
+        />
       </section>
     </main>
+  );
+}
+
+function ColorPanel({
+  activeNode,
+  nodes,
+  selectedNodeId,
+  onAddNode,
+  onDeleteNode,
+  onResetPrimary,
+  onSelectNode,
+  onUpdateNode,
+  onUpdateRgb,
+  onUpdateScalar
+}: {
+  activeNode: ColorNode;
+  nodes: ColorNode[];
+  selectedNodeId: string;
+  onAddNode: () => void;
+  onDeleteNode: () => void;
+  onResetPrimary: (key: RgbPrimaryKey | ScalarPrimaryKey) => void;
+  onSelectNode: (id: string) => void;
+  onUpdateNode: (updater: (node: ColorNode) => ColorNode) => void;
+  onUpdateRgb: (key: RgbPrimaryKey, channel: RgbChannel, value: number) => void;
+  onUpdateScalar: (key: ScalarPrimaryKey, value: number) => void;
+}) {
+  return (
+    <aside className="color-panel" aria-label="Node graph and primary controls">
+      <div className="panel-title">Serial Nodes</div>
+      <div className="node-strip" role="list" aria-label="Serial node graph">
+        {nodes.map((node, index) => (
+          <div className={`node-card ${node.id === selectedNodeId ? "is-selected" : ""} ${node.enabled ? "" : "is-bypassed"}`} key={node.id}>
+            <button type="button" className="node-select" onClick={() => onSelectNode(node.id)}>
+              <span className="node-index">{index + 1}</span>
+              <span className="node-label">{node.name}</span>
+              <span className="node-state">{node.enabled ? "On" : "Bypass"}</span>
+            </button>
+            {index < nodes.length - 1 ? <span className="node-arrow">-&gt;</span> : null}
+          </div>
+        ))}
+      </div>
+      <button className="add-node" type="button" onClick={onAddNode} disabled={nodes.length >= MAX_SERIAL_NODES}>
+        Add Node
+      </button>
+
+      <div className="panel-title export-title">Node</div>
+      <div className="node-editor">
+        <label className="field-label">
+          <span>Name</span>
+          <input
+            type="text"
+            value={activeNode.name}
+            maxLength={48}
+            onChange={(event) => onUpdateNode((node) => ({ ...node, name: event.currentTarget.value }))}
+          />
+        </label>
+        <div className="node-actions">
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={activeNode.enabled}
+              onChange={(event) => onUpdateNode((node) => ({ ...node, enabled: event.currentTarget.checked }))}
+            />
+            <span>Enabled</span>
+          </label>
+          <button type="button" onClick={() => onUpdateNode((node) => ({ ...node, primaries: createNeutralPrimaries() }))}>
+            Reset Node
+          </button>
+          <button type="button" onClick={onDeleteNode} disabled={nodes.length <= 1}>
+            Delete
+          </button>
+        </div>
+      </div>
+
+      <div className="panel-title export-title">Primary</div>
+      <RgbControl label="Lift" value={activeNode.primaries.lift} rangeKey="lift" onChange={onUpdateRgb} onReset={onResetPrimary} />
+      <RgbControl label="Gamma" value={activeNode.primaries.gamma} rangeKey="gamma" onChange={onUpdateRgb} onReset={onResetPrimary} />
+      <RgbControl label="Gain" value={activeNode.primaries.gain} rangeKey="gain" onChange={onUpdateRgb} onReset={onResetPrimary} />
+      <RgbControl label="Offset" value={activeNode.primaries.offset} rangeKey="offset" onChange={onUpdateRgb} onReset={onResetPrimary} />
+
+      <div className="scalar-grid">
+        <ScalarControl label="Contrast" value={activeNode.primaries.contrast} rangeKey="contrast" onChange={onUpdateScalar} onReset={onResetPrimary} />
+        <ScalarControl label="Pivot" value={activeNode.primaries.pivot} rangeKey="pivot" onChange={onUpdateScalar} onReset={onResetPrimary} />
+        <ScalarControl label="Saturation" value={activeNode.primaries.saturation} rangeKey="saturation" onChange={onUpdateScalar} onReset={onResetPrimary} />
+        <ScalarControl label="Temperature" value={activeNode.primaries.temperature} rangeKey="temperature" onChange={onUpdateScalar} onReset={onResetPrimary} />
+        <ScalarControl label="Tint" value={activeNode.primaries.tint} rangeKey="tint" onChange={onUpdateScalar} onReset={onResetPrimary} />
+      </div>
+    </aside>
+  );
+}
+
+function RgbControl({
+  label,
+  onChange,
+  onReset,
+  rangeKey,
+  value
+}: {
+  label: string;
+  onChange: (key: RgbPrimaryKey, channel: RgbChannel, value: number) => void;
+  onReset: (key: RgbPrimaryKey) => void;
+  rangeKey: RgbPrimaryKey;
+  value: RgbVector;
+}) {
+  const range = PRIMARY_RANGES[rangeKey];
+  return (
+    <section className="primary-card">
+      <div className="primary-card-header">
+        <h2>{label}</h2>
+        <button type="button" onClick={() => onReset(rangeKey)}>Reset</button>
+      </div>
+      {(["r", "g", "b"] as const).map((channel) => (
+        <label className={`channel-row channel-${channel}`} key={channel}>
+          <span>{channel.toUpperCase()}</span>
+          <input
+            type="range"
+            min={range.min}
+            max={range.max}
+            step={range.step}
+            value={value[channel]}
+            onChange={(event) => onChange(rangeKey, channel, Number(event.currentTarget.value))}
+          />
+          <input
+            type="number"
+            min={range.min}
+            max={range.max}
+            step={range.step}
+            value={formatControlValue(value[channel])}
+            onChange={(event) => onChange(rangeKey, channel, Number(event.currentTarget.value))}
+          />
+        </label>
+      ))}
+    </section>
+  );
+}
+
+function ScalarControl({
+  label,
+  onChange,
+  onReset,
+  rangeKey,
+  value
+}: {
+  label: string;
+  onChange: (key: ScalarPrimaryKey, value: number) => void;
+  onReset: (key: ScalarPrimaryKey) => void;
+  rangeKey: ScalarPrimaryKey;
+  value: number;
+}) {
+  const range = PRIMARY_RANGES[rangeKey];
+  return (
+    <section className="scalar-card">
+      <div className="primary-card-header">
+        <h2>{label}</h2>
+        <button type="button" onClick={() => onReset(rangeKey)}>Reset</button>
+      </div>
+      <label className="channel-row scalar-row">
+        <input
+          type="range"
+          min={range.min}
+          max={range.max}
+          step={range.step}
+          value={value}
+          onChange={(event) => onChange(rangeKey, Number(event.currentTarget.value))}
+        />
+        <input
+          type="number"
+          min={range.min}
+          max={range.max}
+          step={range.step}
+          value={formatControlValue(value)}
+          onChange={(event) => onChange(rangeKey, Number(event.currentTarget.value))}
+        />
+      </label>
+    </section>
   );
 }
 
@@ -621,6 +1060,23 @@ function ErrorBanner({ error }: { error: AppError }) {
       {error.detail ? <code>{error.detail}</code> : null}
     </div>
   );
+}
+
+function createUniqueNode(nodes: ColorNode[]): ColorNode {
+  const nextNode = createColorNode(nodes.length + 1);
+  const existingIds = new Set(nodes.map((node) => node.id));
+  if (!existingIds.has(nextNode.id)) {
+    return nextNode;
+  }
+
+  return {
+    ...nextNode,
+    id: `node-${Date.now().toString(36)}`
+  };
+}
+
+function formatControlValue(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(2);
 }
 
 function filePathToUrl(sourcePath: string): string {

@@ -4,6 +4,8 @@ export type IpcContractVersion = typeof IPC_CONTRACT_VERSION;
 
 export const IpcChannel = {
   SelectMedia: "dialog:select-media",
+  SaveProject: "project:save",
+  OpenProject: "project:open",
   GetDiagnostics: "ffmpeg:get-diagnostics",
   ProbeMedia: "media:probe",
   ExtractFrame: "frame:extract",
@@ -20,6 +22,9 @@ export type AppErrorCode =
   | "PROBE_FAILED"
   | "FRAME_EXTRACT_FAILED"
   | "EXPORT_FAILED"
+  | "PROJECT_SAVE_FAILED"
+  | "PROJECT_OPEN_FAILED"
+  | "PROJECT_VALIDATION_FAILED"
   | "USER_CANCELLED"
   | "UNKNOWN";
 
@@ -108,8 +113,25 @@ export interface ExportJobResult {
   durationSeconds: number;
 }
 
+export interface SaveProjectRequest {
+  project: import("./project.js").ChromaProject;
+  projectPath?: string;
+}
+
+export interface SaveProjectResult {
+  projectPath: string;
+}
+
+export interface OpenProjectResult {
+  project: import("./project.js").ChromaProject;
+  projectPath: string;
+  missingMedia: boolean;
+}
+
 export interface ChromaNodeApi {
   selectMedia(): Promise<VersionedResponse<SelectMediaResponse>>;
+  saveProject(request: SaveProjectRequest): Promise<VersionedResponse<SaveProjectResult>>;
+  openProject(): Promise<VersionedResponse<OpenProjectResult>>;
   getDiagnostics(): Promise<VersionedResponse<FfmpegDiagnostics>>;
   probeMedia(request: ProbeMediaRequest): Promise<VersionedResponse<MediaRef>>;
   extractFrame(request: FrameExtractRequest): Promise<VersionedResponse<DecodedFrame>>;

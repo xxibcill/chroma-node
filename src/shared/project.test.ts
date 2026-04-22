@@ -1,0 +1,98 @@
+import { describe, expect, it } from "vitest";
+import { createColorNode } from "./colorEngine";
+import { PROJECT_SCHEMA_VERSION, createDefaultProject, serializeProject, validateProject } from "./project";
+
+describe("project schema", () => {
+  it("initializes a new project with one neutral node", () => {
+    const project = createDefaultProject();
+    expect(project.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
+    expect(project.nodes).toHaveLength(1);
+    expect(project.nodes[0].primaries.contrast).toBe(1);
+  });
+
+  it("limits project node arrays to three serial nodes", () => {
+    const project = createDefaultProject();
+    const result = validateProject({
+      ...project,
+      nodes: [createColorNode(1), createColorNode(2), createColorNode(3), createColorNode(4)]
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.project.nodes).toHaveLength(3);
+      expect(result.warnings.some((warning) => warning.code === "TRUNCATED")).toBe(true);
+    }
+  });
+
+  it("clamps invalid numeric values and reports structured warnings", () => {
+    const project = createDefaultProject();
+    const result = validateProject({
+      ...project,
+      playback: {
+        currentFrame: -12,
+        viewerMode: "graded",
+        splitPosition: 8
+      },
+      nodes: [
+        {
+          ...project.nodes[0],
+          primaries: {
+            ...project.nodes[0].primaries,
+            contrast: 9,
+            tint: -8
+          }
+        }
+      ]
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.project.playback.splitPosition).toBe(1);
+      expect(result.project.nodes[0].primaries.contrast).toBe(2);
+      expect(result.project.nodes[0].primaries.tint).toBe(-1);
+      expect(result.warnings.every((warning) => typeof warning.path === "string" && typeof warning.message === "string")).toBe(true);
+    }
+  });
+
+  it("rejects unsupported schema versions with structured errors", () => {
+    const result = validateProject({
+      ...createDefaultProject(),
+      schemaVersion: "9.9.9"
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors[0]).toMatchObject({ path: "schemaVersion", code: "UNSUPPORTED_VERSION" });
+    }
+  });
+
+  it("round-trips JSON without embedding media bytes", () => {
+    const project = {
+      ...createDefaultProject(),
+      media: {
+        id: "clip",
+        sourcePath: "/clips/source.mp4",
+        fileName: "source.mp4",
+        container: "mov,mp4",
+        codec: "h264",
+        width: 1920,
+        height: 1080,
+        durationSeconds: 2,
+        frameRate: 24,
+        totalFrames: 48,
+        hasAudio: false,
+        rotation: 0,
+        videoStreamIndex: 0
+      }
+    };
+    const json = serializeProject(project);
+    const parsed = validateProject(JSON.parse(json));
+
+    expect(json).toContain("/clips/source.mp4");
+    expect(json).not.toContain("data:");
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.project.media?.sourcePath).toBe("/clips/source.mp4");
+    }
+  });
+});

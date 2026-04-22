@@ -1,5 +1,9 @@
 # Phase 02 - Color Engine and Serial Nodes
 
+## Status
+
+Done
+
 ## Functional Feature Outcome
 
 The user can apply primary corrections through up to 3 serial nodes and see deterministic graded output in the viewer.
@@ -40,4 +44,3 @@ The node graph and color engine are the core learning value of the app. This pha
 - Neutral node values produce no visual change.
 - Preview shader and CPU reference match within the agreed tolerance on test frames.
 - Project JSON round-trips without losing node settings.
-

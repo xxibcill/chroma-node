@@ -6,7 +6,10 @@ import type {
   FfmpegDiagnostics,
   FrameExtractRequest,
   MediaRef,
+  OpenProjectResult,
   ProbeMediaRequest,
+  SaveProjectRequest,
+  SaveProjectResult,
   SelectMediaResponse,
   VersionedResponse
 } from "../shared/ipc.js";
@@ -16,6 +19,7 @@ import { exportSynthetic } from "./exportSynthetic.js";
 import { extractFrame } from "./frame.js";
 import { getFfmpegDiagnostics } from "./ffmpeg.js";
 import { probeMedia } from "./mediaProbe.js";
+import { openProjectFile, saveProjectFile } from "./projectFile.js";
 
 export function registerIpcHandlers(): void {
   ipcMain.handle(IpcChannel.SelectMedia, async (): Promise<VersionedResponse<SelectMediaResponse>> => {
@@ -42,6 +46,25 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IpcChannel.GetDiagnostics, async (): Promise<VersionedResponse<FfmpegDiagnostics>> => {
     try {
       return ok(await getFfmpegDiagnostics());
+    } catch (error) {
+      return fail(toAppError(error));
+    }
+  });
+
+  ipcMain.handle(
+    IpcChannel.SaveProject,
+    async (_event, request: SaveProjectRequest): Promise<VersionedResponse<SaveProjectResult>> => {
+      try {
+        return ok(await saveProjectFile(request));
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(IpcChannel.OpenProject, async (): Promise<VersionedResponse<OpenProjectResult>> => {
+    try {
+      return ok(await openProjectFile());
     } catch (error) {
       return fail(toAppError(error));
     }
