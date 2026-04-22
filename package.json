@@ -11,7 +11,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.main.json --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
-    "test:phase00": "vitest run && npm run build && node scripts/verify-phase00.mjs"
+    "test:phase00": "vitest run && npm run build && node scripts/verify-phase00.mjs",
+    "test:phase01": "vitest run && npm run build && node scripts/verify-phase01.mjs"
   },
   "dependencies": {
     "react": "^19.0.0",

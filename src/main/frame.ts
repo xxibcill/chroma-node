@@ -8,29 +8,13 @@ export async function extractFrame(request: FrameExtractRequest): Promise<Decode
   const ffmpegPath = requireFfmpeg();
   const metadata = await probeMedia(request.sourcePath);
   const maxWidth = clampInteger(request.maxWidth ?? 1280, 32, 4096);
-  const targetTime = clampNumber(request.timeSeconds ?? Math.min(0.5, metadata.durationSeconds / 2), 0, metadata.durationSeconds);
+  const filter = `scale='min(${maxWidth},iw)':-2`;
+  const args =
+    request.frameIndex === undefined
+      ? buildTimeSeekArgs(request, metadata.durationSeconds, filter)
+      : buildFrameSeekArgs(request, metadata.totalFrames, filter);
 
-  const output = await runProcess(
-    ffmpegPath,
-    [
-      "-hide_banner",
-      "-nostdin",
-      "-ss",
-      targetTime.toFixed(3),
-      "-i",
-      request.sourcePath,
-      "-frames:v",
-      "1",
-      "-vf",
-      `scale='min(${maxWidth},iw)':-2`,
-      "-f",
-      "image2pipe",
-      "-vcodec",
-      "png",
-      "pipe:1"
-    ],
-    { timeoutMs: 20_000 }
-  );
+  const output = await runProcess(ffmpegPath, args, { timeoutMs: 20_000 });
 
   if (output.exitCode !== 0 || output.stdout.length === 0) {
     throw appError(
@@ -47,6 +31,49 @@ export async function extractFrame(request: FrameExtractRequest): Promise<Decode
     mimeType: "image/png",
     dataUrl: `data:image/png;base64,${output.stdout.toString("base64")}`
   };
+}
+
+function buildTimeSeekArgs(request: FrameExtractRequest, durationSeconds: number, filter: string): string[] {
+  const targetTime = clampNumber(request.timeSeconds ?? Math.min(0.5, durationSeconds / 2), 0, durationSeconds);
+
+  return [
+    "-hide_banner",
+    "-nostdin",
+    "-ss",
+    targetTime.toFixed(3),
+    "-i",
+    request.sourcePath,
+    "-frames:v",
+    "1",
+    "-vf",
+    filter,
+    "-f",
+    "image2pipe",
+    "-vcodec",
+    "png",
+    "pipe:1"
+  ];
+}
+
+function buildFrameSeekArgs(request: FrameExtractRequest, totalFrames: number | undefined, filter: string): string[] {
+  const upperBound = totalFrames === undefined ? Number.MAX_SAFE_INTEGER : Math.max(0, totalFrames - 1);
+  const targetFrame = clampInteger(request.frameIndex ?? 0, 0, upperBound);
+
+  return [
+    "-hide_banner",
+    "-nostdin",
+    "-i",
+    request.sourcePath,
+    "-vf",
+    `select=eq(n\\,${targetFrame}),${filter}`,
+    "-frames:v",
+    "1",
+    "-f",
+    "image2pipe",
+    "-vcodec",
+    "png",
+    "pipe:1"
+  ];
 }
 
 function readPngSize(buffer: Buffer): { width: number; height: number } {

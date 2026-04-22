@@ -1,5 +1,9 @@
 # Phase 01 - Import, Viewer, Playback
 
+## Status
+
+Done
+
 ## Functional Feature Outcome
 
 The user can import one supported video clip, view it, play or pause it, scrub through it, frame-step, and compare original versus graded output.
@@ -38,3 +42,6 @@ Playback and inspection are the base interaction loop for every later grading fe
 - Playback controls update the viewer and frame/timecode display.
 - Before/after comparison works even before grading is implemented.
 
+## Verification
+
+- `npm run test:phase01` passed unit tests, production build, supported H.264 MP4 probe, exact first/last frame extraction, and unsupported media rejection checks.

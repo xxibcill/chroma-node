@@ -79,6 +79,7 @@ export interface MediaRef {
 export interface FrameExtractRequest {
   sourcePath: string;
   timeSeconds?: number;
+  frameIndex?: number;
   maxWidth?: number;
 }
 

@@ -30,7 +30,9 @@ interface FfprobeJson {
   format?: FfprobeFormat;
 }
 
-const supportedExtensions = new Set([".mp4", ".mov", ".m4v"]);
+const supportedExtensions = new Set([".mp4", ".mov"]);
+const maxDisplayWidth = 1920;
+const maxDisplayHeight = 1080;
 
 export async function probeMedia(sourcePath: string): Promise<MediaRef> {
   await assertSupportedPath(sourcePath);
@@ -92,6 +94,16 @@ export function mapProbeOutput(sourcePath: string, parsed: FfprobeJson): MediaRe
     throw appError("UNSUPPORTED_MEDIA", "No supported video stream was found in this file.");
   }
 
+  const rotation = readRotation(videoStream);
+  const displaySize = getDisplaySize(videoStream.width, videoStream.height, rotation);
+  if (displaySize.width > maxDisplayWidth || displaySize.height > maxDisplayHeight) {
+    throw appError(
+      "UNSUPPORTED_MEDIA",
+      "Media exceeds the Phase 01 limit of 1920 x 1080.",
+      `${displaySize.width} x ${displaySize.height}`
+    );
+  }
+
   const durationSeconds = toPositiveNumber(videoStream.duration) ?? toPositiveNumber(parsed.format?.duration) ?? 0;
   const frameRate =
     parseRationalFrameRate(videoStream.avg_frame_rate) || parseRationalFrameRate(videoStream.r_frame_rate);
@@ -110,7 +122,7 @@ export function mapProbeOutput(sourcePath: string, parsed: FfprobeJson): MediaRe
     frameRate,
     totalFrames,
     hasAudio: streams.some((stream) => stream.codec_type === "audio"),
-    rotation: readRotation(videoStream),
+    rotation,
     videoStreamIndex: videoStream.index ?? 0
   };
 }
@@ -118,7 +130,7 @@ export function mapProbeOutput(sourcePath: string, parsed: FfprobeJson): MediaRe
 async function assertSupportedPath(sourcePath: string): Promise<void> {
   const extension = path.extname(sourcePath).toLowerCase();
   if (!supportedExtensions.has(extension)) {
-    throw appError("UNSUPPORTED_MEDIA", "Only MP4, M4V, and MOV files are supported in this phase.");
+    throw appError("UNSUPPORTED_MEDIA", "Only MP4 and MOV files are supported in this phase.");
   }
 
   try {
@@ -161,4 +173,8 @@ function readRotation(stream: FfprobeStream): number {
 function normalizeRotation(rotation: number): number {
   const normalized = rotation % 360;
   return normalized < 0 ? normalized + 360 : normalized;
+}
+
+function getDisplaySize(width: number, height: number, rotation: number): { width: number; height: number } {
+  return rotation === 90 || rotation === 270 ? { width: height, height: width } : { width, height };
 }

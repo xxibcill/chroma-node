@@ -24,7 +24,7 @@ export function registerIpcHandlers(): void {
         title: "Import media",
         properties: ["openFile"],
         filters: [
-          { name: "Video", extensions: ["mp4", "mov", "m4v"] },
+          { name: "Video", extensions: ["mp4", "mov"] },
           { name: "All Files", extensions: ["*"] }
         ]
       });

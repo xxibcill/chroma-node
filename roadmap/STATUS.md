@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-- Phase: Phase 00 - Technical Foundation
+- Phase: Phase 01 - Import, Viewer, Playback
 - Status: Done
 - Last updated: 2026-04-22
 
@@ -40,3 +40,4 @@
 | 2026-04-22 | Roadmap setup | Created phase and task tracking files. | Pending review |
 | 2026-04-22 | Phase 00 | `npm run dev` launch check. | Passed |
 | 2026-04-22 | Phase 00 | `npm run test:phase00` unit, build, FFmpeg, probe, frame, and export verification. | Passed |
+| 2026-04-22 | Phase 01 | `npm run test:phase01` unit, build, supported import/probe, exact first/last frame decode, and rejection verification. | Passed |

@@ -23,8 +23,8 @@ describe("mapProbeOutput", () => {
           index: 0,
           codec_type: "video",
           codec_name: "h264",
-          width: 1920,
-          height: 1080,
+          width: 1080,
+          height: 1920,
           duration: "10.0",
           avg_frame_rate: "30000/1001",
           nb_frames: "300",
@@ -47,8 +47,8 @@ describe("mapProbeOutput", () => {
       fileName: "sample.mp4",
       container: "mov,mp4,m4a,3gp,3g2,mj2",
       codec: "h264",
-      width: 1920,
-      height: 1080,
+      width: 1080,
+      height: 1920,
       durationSeconds: 10,
       totalFrames: 300,
       hasAudio: true,
@@ -66,5 +66,24 @@ describe("mapProbeOutput", () => {
         format: { format_name: "mp4", duration: "2.0" }
       })
     ).toThrow("No supported video stream");
+  });
+
+  it("rejects video streams above the Phase 01 raster limit", () => {
+    expect(() =>
+      mapProbeOutput("/clips/uhd.mp4", {
+        streams: [
+          {
+            index: 0,
+            codec_type: "video",
+            codec_name: "h264",
+            width: 3840,
+            height: 2160,
+            duration: "4.0",
+            avg_frame_rate: "24/1"
+          }
+        ],
+        format: { format_name: "mp4", duration: "4.0" }
+      })
+    ).toThrow("1920 x 1080");
   });
 });
