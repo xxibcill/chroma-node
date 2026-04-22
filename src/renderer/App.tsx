@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import type { AppError, DecodedFrame, ExportJobResult, FfmpegDiagnostics, MediaRef } from "../shared/ipc";
-import type { ColorNode, RgbVector } from "../shared/colorEngine";
+import type { ColorNode, HslQualifier, PowerWindow, PowerWindowShape, RgbVector } from "../shared/colorEngine";
 import {
   MAX_SERIAL_NODES,
   PRIMARY_RANGES,
+  QUALIFIER_RANGES,
+  WINDOW_RANGES,
   clampNumber,
   createColorNode,
+  createDefaultPowerWindows,
   createNeutralPrimaries
 } from "../shared/colorEngine";
 import type { ChromaProject, ViewerMode } from "../shared/project";
@@ -23,6 +27,8 @@ import { FrameRenderer } from "./webgl/FrameRenderer";
 type Status = "idle" | "busy" | "ready" | "error";
 type RgbPrimaryKey = "lift" | "gamma" | "gain" | "offset";
 type ScalarPrimaryKey = "contrast" | "pivot" | "saturation" | "temperature" | "tint";
+type QualifierScalarKey = keyof Omit<HslQualifier, "enabled" | "invert">;
+type WindowScalarKey = keyof Omit<PowerWindow, "enabled" | "invert">;
 type RgbChannel = keyof RgbVector;
 
 interface UiState {
@@ -49,11 +55,14 @@ const initialMessage = "Import an MP4 or MOV clip to start playback inspection."
 
 export function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const viewerFrameRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const rendererRef = useRef<FrameRenderer | null>(null);
   const frameRequestId = useRef(0);
   const [diagnostics, setDiagnostics] = useState<FfmpegDiagnostics | undefined>();
   const [previewBusy, setPreviewBusy] = useState(false);
+  const [showMatte, setShowMatte] = useState(false);
+  const [viewerSize, setViewerSize] = useState({ width: 0, height: 0 });
   const [project, setProject] = useState<ChromaProject>(initialProject);
   const [selectedNodeId, setSelectedNodeId] = useState(initialProject.nodes[0].id);
   const [playback, setPlayback] = useState<PlaybackState>({
@@ -76,6 +85,19 @@ export function App() {
   const activeNode = useMemo(
     () => project.nodes.find((node) => node.id === selectedNodeId) ?? project.nodes[0],
     [project.nodes, selectedNodeId]
+  );
+  const activeNodeIndex = useMemo(
+    () => project.nodes.findIndex((node) => node.id === activeNode?.id),
+    [activeNode?.id, project.nodes]
+  );
+  const viewerSourceRect = useMemo(
+    () => getContainedRect(
+      viewerSize.width,
+      viewerSize.height,
+      state.media?.width ?? state.frame?.width ?? 1,
+      state.media?.height ?? state.frame?.height ?? 1
+    ),
+    [state.frame?.height, state.frame?.width, state.media?.height, state.media?.width, viewerSize.height, viewerSize.width]
   );
 
   const diagnosticsLabel = useMemo(() => {
@@ -313,6 +335,7 @@ export function App() {
     const currentFrame = openedProject.media ? clampFrameIndex(openedProject.playback.currentFrame, openedProject.media) : 0;
     setProject(openedProject);
     setSelectedNodeId(openedProject.nodes[0].id);
+    setShowMatte(false);
     setPlayback({
       isPlaying: false,
       isScrubbing: false,
@@ -493,6 +516,33 @@ export function App() {
     }));
   }, [updateActiveNode]);
 
+  const updateQualifierScalar = useCallback((key: QualifierScalarKey, value: number) => {
+    updateActiveNode((node) => ({
+      ...node,
+      qualifier: {
+        ...node.qualifier,
+        [key]: clampNumber(value, QUALIFIER_RANGES[key])
+      }
+    }));
+  }, [updateActiveNode]);
+
+  const updatePowerWindow = useCallback((shape: PowerWindowShape, updater: (window: PowerWindow) => PowerWindow) => {
+    updateActiveNode((node) => ({
+      ...node,
+      windows: {
+        ...node.windows,
+        [shape]: updater(node.windows[shape])
+      }
+    }));
+  }, [updateActiveNode]);
+
+  const updatePowerWindowScalar = useCallback((shape: PowerWindowShape, key: WindowScalarKey, value: number) => {
+    updatePowerWindow(shape, (window) => ({
+      ...window,
+      [key]: clampNumber(value, WINDOW_RANGES[key])
+    }));
+  }, [updatePowerWindow]);
+
   const resetPrimary = useCallback((key: RgbPrimaryKey | ScalarPrimaryKey) => {
     const neutral = createNeutralPrimaries();
     updateActiveNode((node) => ({
@@ -504,11 +554,37 @@ export function App() {
     }));
   }, [updateActiveNode]);
 
+  const resetWindows = useCallback(() => {
+    updateActiveNode((node) => ({
+      ...node,
+      windows: createDefaultPowerWindows()
+    }));
+  }, [updateActiveNode]);
+
   useEffect(() => {
     if (!project.nodes.some((node) => node.id === selectedNodeId)) {
       setSelectedNodeId(project.nodes[0].id);
     }
   }, [project.nodes, selectedNodeId]);
+
+  useEffect(() => {
+    const frame = viewerFrameRef.current;
+    if (!frame) {
+      return;
+    }
+
+    const updateSize = () => {
+      setViewerSize({
+        width: frame.clientWidth,
+        height: frame.clientHeight
+      });
+    };
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(frame);
+    updateSize();
+
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     if (!api) {
@@ -562,6 +638,10 @@ export function App() {
   useEffect(() => {
     rendererRef.current?.setNodeGraph(project.nodes);
   }, [project.nodes]);
+
+  useEffect(() => {
+    rendererRef.current?.setMatteNode(showMatte ? selectedNodeId : undefined);
+  }, [project.nodes, selectedNodeId, showMatte]);
 
   useEffect(() => {
     rendererRef.current?.setViewerMode(playback.viewerMode, playback.splitPosition);
@@ -629,7 +709,7 @@ export function App() {
         </aside>
 
         <section className="viewer-column" aria-label="Viewer">
-          <div className={`viewer-frame viewer-mode-${playback.viewerMode}`}>
+          <div ref={viewerFrameRef} className={`viewer-frame viewer-mode-${showMatte ? "matte" : playback.viewerMode}`}>
             {mediaUrl ? (
               <video
                 key={mediaUrl}
@@ -666,13 +746,20 @@ export function App() {
             ) : null}
 
             <canvas ref={canvasRef} className="viewer-canvas" aria-label="Video viewer" />
-            {playback.viewerMode === "split" ? (
+            {state.media ? (
+              <WindowOverlay
+                activeNode={activeNode}
+                sourceRect={viewerSourceRect}
+                onUpdateWindow={updatePowerWindow}
+              />
+            ) : null}
+            {!showMatte && playback.viewerMode === "split" ? (
               <div className="split-rule" style={{ left: `${playback.splitPosition * 100}%` }} />
             ) : null}
             {state.media ? (
               <>
-                <div className="viewer-badge viewer-badge-left">{playback.viewerMode === "graded" ? "Graded" : "Original"}</div>
-                {playback.viewerMode === "split" ? <div className="viewer-badge viewer-badge-right">Graded</div> : null}
+                <div className="viewer-badge viewer-badge-left">{showMatte ? `Matte ${activeNodeIndex + 1}` : playback.viewerMode === "graded" ? "Graded" : "Original"}</div>
+                {!showMatte && playback.viewerMode === "split" ? <div className="viewer-badge viewer-badge-right">Graded</div> : null}
               </>
             ) : null}
             {!state.media ? (
@@ -802,7 +889,13 @@ export function App() {
           onUpdateNode={updateActiveNode}
           onUpdateRgb={updateRgbPrimary}
           onUpdateScalar={updateScalarPrimary}
+          onUpdateQualifierScalar={updateQualifierScalar}
+          onUpdateWindowScalar={updatePowerWindowScalar}
+          onUpdateWindow={updatePowerWindow}
           onResetPrimary={resetPrimary}
+          onResetWindows={resetWindows}
+          showMatte={showMatte}
+          onShowMatteChange={setShowMatte}
         />
       </section>
     </main>
@@ -815,22 +908,34 @@ function ColorPanel({
   selectedNodeId,
   onAddNode,
   onDeleteNode,
+  onResetWindows,
   onResetPrimary,
+  onShowMatteChange,
   onSelectNode,
+  onUpdateQualifierScalar,
   onUpdateNode,
   onUpdateRgb,
-  onUpdateScalar
+  onUpdateScalar,
+  onUpdateWindow,
+  onUpdateWindowScalar,
+  showMatte
 }: {
   activeNode: ColorNode;
   nodes: ColorNode[];
   selectedNodeId: string;
   onAddNode: () => void;
   onDeleteNode: () => void;
+  onResetWindows: () => void;
   onResetPrimary: (key: RgbPrimaryKey | ScalarPrimaryKey) => void;
+  onShowMatteChange: (showMatte: boolean) => void;
   onSelectNode: (id: string) => void;
+  onUpdateQualifierScalar: (key: QualifierScalarKey, value: number) => void;
   onUpdateNode: (updater: (node: ColorNode) => ColorNode) => void;
   onUpdateRgb: (key: RgbPrimaryKey, channel: RgbChannel, value: number) => void;
   onUpdateScalar: (key: ScalarPrimaryKey, value: number) => void;
+  onUpdateWindow: (shape: PowerWindowShape, updater: (window: PowerWindow) => PowerWindow) => void;
+  onUpdateWindowScalar: (shape: PowerWindowShape, key: WindowScalarKey, value: number) => void;
+  showMatte: boolean;
 }) {
   return (
     <aside className="color-panel" aria-label="Node graph and primary controls">
@@ -893,6 +998,63 @@ function ColorPanel({
         <ScalarControl label="Temperature" value={activeNode.primaries.temperature} rangeKey="temperature" onChange={onUpdateScalar} onReset={onResetPrimary} />
         <ScalarControl label="Tint" value={activeNode.primaries.tint} rangeKey="tint" onChange={onUpdateScalar} onReset={onResetPrimary} />
       </div>
+
+      <div className="panel-title export-title">Qualifier</div>
+      <section className="mask-card">
+        <div className="mask-toggle-grid">
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={activeNode.qualifier.enabled}
+              onChange={(event) => onUpdateNode((node) => ({
+                ...node,
+                qualifier: { ...node.qualifier, enabled: event.currentTarget.checked }
+              }))}
+            />
+            <span>Enable</span>
+          </label>
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={activeNode.qualifier.invert}
+              onChange={(event) => onUpdateNode((node) => ({
+                ...node,
+                qualifier: { ...node.qualifier, invert: event.currentTarget.checked }
+              }))}
+            />
+            <span>Invert</span>
+          </label>
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={showMatte}
+              onChange={(event) => onShowMatteChange(event.currentTarget.checked)}
+            />
+            <span>Show Matte</span>
+          </label>
+        </div>
+        <QualifierControl label="Hue Center" value={activeNode.qualifier.hueCenter} rangeKey="hueCenter" onChange={onUpdateQualifierScalar} />
+        <QualifierControl label="Hue Width" value={activeNode.qualifier.hueWidth} rangeKey="hueWidth" onChange={onUpdateQualifierScalar} />
+        <QualifierControl label="Hue Softness" value={activeNode.qualifier.hueSoftness} rangeKey="hueSoftness" onChange={onUpdateQualifierScalar} />
+        <div className="mask-subtitle">Saturation</div>
+        <QualifierControl label="Min" value={activeNode.qualifier.saturationMin} rangeKey="saturationMin" onChange={onUpdateQualifierScalar} />
+        <QualifierControl label="Max" value={activeNode.qualifier.saturationMax} rangeKey="saturationMax" onChange={onUpdateQualifierScalar} />
+        <QualifierControl label="Softness" value={activeNode.qualifier.saturationSoftness} rangeKey="saturationSoftness" onChange={onUpdateQualifierScalar} />
+        <div className="mask-subtitle">Luminance</div>
+        <QualifierControl label="Min" value={activeNode.qualifier.luminanceMin} rangeKey="luminanceMin" onChange={onUpdateQualifierScalar} />
+        <QualifierControl label="Max" value={activeNode.qualifier.luminanceMax} rangeKey="luminanceMax" onChange={onUpdateQualifierScalar} />
+        <QualifierControl label="Softness" value={activeNode.qualifier.luminanceSoftness} rangeKey="luminanceSoftness" onChange={onUpdateQualifierScalar} />
+      </section>
+
+      <div className="panel-title export-title">Power Windows</div>
+      <section className="mask-card">
+        <div className="primary-card-header">
+          <h2>Windows</h2>
+          <button type="button" onClick={onResetWindows}>Reset</button>
+        </div>
+        <WindowControl shape="ellipse" window={activeNode.windows.ellipse} onUpdate={onUpdateWindow} onUpdateScalar={onUpdateWindowScalar} />
+        <WindowControl shape="rectangle" window={activeNode.windows.rectangle} onUpdate={onUpdateWindow} onUpdateScalar={onUpdateWindowScalar} />
+      </section>
     </aside>
   );
 }
@@ -981,6 +1143,306 @@ function ScalarControl({
         />
       </label>
     </section>
+  );
+}
+
+function QualifierControl({
+  label,
+  onChange,
+  rangeKey,
+  value
+}: {
+  label: string;
+  onChange: (key: QualifierScalarKey, value: number) => void;
+  rangeKey: QualifierScalarKey;
+  value: number;
+}) {
+  const range = QUALIFIER_RANGES[rangeKey];
+  return (
+    <label className="mask-row">
+      <span>{label}</span>
+      <input
+        type="range"
+        min={range.min}
+        max={range.max}
+        step={range.step}
+        value={value}
+        onChange={(event) => onChange(rangeKey, Number(event.currentTarget.value))}
+      />
+      <input
+        type="number"
+        min={range.min}
+        max={range.max}
+        step={range.step}
+        value={formatControlValue(value)}
+        onChange={(event) => onChange(rangeKey, Number(event.currentTarget.value))}
+      />
+    </label>
+  );
+}
+
+function WindowControl({
+  onUpdate,
+  onUpdateScalar,
+  shape,
+  window
+}: {
+  onUpdate: (shape: PowerWindowShape, updater: (window: PowerWindow) => PowerWindow) => void;
+  onUpdateScalar: (shape: PowerWindowShape, key: WindowScalarKey, value: number) => void;
+  shape: PowerWindowShape;
+  window: PowerWindow;
+}) {
+  const title = shape === "ellipse" ? "Ellipse" : "Rectangle";
+  return (
+    <section className="window-card">
+      <div className="window-card-header">
+        <h2>{title}</h2>
+        <label className="toggle-row">
+          <input
+            type="checkbox"
+            checked={window.enabled}
+            onChange={(event) => onUpdate(shape, (current) => ({ ...current, enabled: event.currentTarget.checked }))}
+          />
+          <span>Enable</span>
+        </label>
+        <label className="toggle-row">
+          <input
+            type="checkbox"
+            checked={window.invert}
+            onChange={(event) => onUpdate(shape, (current) => ({ ...current, invert: event.currentTarget.checked }))}
+          />
+          <span>Invert</span>
+        </label>
+      </div>
+      <WindowScalarControl label="X" value={window.centerX} shape={shape} rangeKey="centerX" onChange={onUpdateScalar} />
+      <WindowScalarControl label="Y" value={window.centerY} shape={shape} rangeKey="centerY" onChange={onUpdateScalar} />
+      <WindowScalarControl label="Width" value={window.width} shape={shape} rangeKey="width" onChange={onUpdateScalar} />
+      <WindowScalarControl label="Height" value={window.height} shape={shape} rangeKey="height" onChange={onUpdateScalar} />
+      <WindowScalarControl label="Rotate" value={window.rotationDegrees} shape={shape} rangeKey="rotationDegrees" onChange={onUpdateScalar} />
+      <WindowScalarControl label="Softness" value={window.softness} shape={shape} rangeKey="softness" onChange={onUpdateScalar} />
+    </section>
+  );
+}
+
+function WindowScalarControl({
+  label,
+  onChange,
+  rangeKey,
+  shape,
+  value
+}: {
+  label: string;
+  onChange: (shape: PowerWindowShape, key: WindowScalarKey, value: number) => void;
+  rangeKey: WindowScalarKey;
+  shape: PowerWindowShape;
+  value: number;
+}) {
+  const range = WINDOW_RANGES[rangeKey];
+  return (
+    <label className="mask-row">
+      <span>{label}</span>
+      <input
+        type="range"
+        min={range.min}
+        max={range.max}
+        step={range.step}
+        value={value}
+        onChange={(event) => onChange(shape, rangeKey, Number(event.currentTarget.value))}
+      />
+      <input
+        type="number"
+        min={range.min}
+        max={range.max}
+        step={range.step}
+        value={formatControlValue(value)}
+        onChange={(event) => onChange(shape, rangeKey, Number(event.currentTarget.value))}
+      />
+    </label>
+  );
+}
+
+function WindowOverlay({
+  activeNode,
+  onUpdateWindow,
+  sourceRect
+}: {
+  activeNode: ColorNode;
+  onUpdateWindow: (shape: PowerWindowShape, updater: (window: PowerWindow) => PowerWindow) => void;
+  sourceRect: SourceRect;
+}) {
+  const interactionRef = useRef<WindowInteraction | undefined>(undefined);
+  const enabledWindows = (["ellipse", "rectangle"] as const).filter((shape) => activeNode.windows[shape].enabled);
+
+  if (sourceRect.width <= 0 || sourceRect.height <= 0 || enabledWindows.length === 0) {
+    return null;
+  }
+
+  const beginInteraction = (
+    event: ReactPointerEvent<SVGElement>,
+    shape: PowerWindowShape,
+    mode: WindowInteraction["mode"]
+  ) => {
+    event.preventDefault();
+    event.currentTarget.ownerSVGElement?.setPointerCapture(event.pointerId);
+    interactionRef.current = {
+      mode,
+      shape,
+      initialWindow: activeNode.windows[shape]
+    };
+  };
+
+  const updateInteraction = (event: ReactPointerEvent<SVGSVGElement>) => {
+    const interaction = interactionRef.current;
+    if (!interaction) {
+      return;
+    }
+
+    const point = readSvgPoint(event);
+    const initial = interaction.initialWindow;
+    if (interaction.mode === "move") {
+      onUpdateWindow(interaction.shape, (window) => ({
+        ...window,
+        centerX: clamp01(point.x / sourceRect.width),
+        centerY: clamp01(point.y / sourceRect.height)
+      }));
+      return;
+    }
+
+    if (interaction.mode === "rotate") {
+      const center = {
+        x: initial.centerX * sourceRect.width,
+        y: initial.centerY * sourceRect.height
+      };
+      const degrees = Math.atan2(point.y - center.y, point.x - center.x) * 180 / Math.PI + 90;
+      onUpdateWindow(interaction.shape, (window) => ({
+        ...window,
+        rotationDegrees: clampNumber(normalizeSignedDegrees(degrees), WINDOW_RANGES.rotationDegrees)
+      }));
+      return;
+    }
+
+    const center = {
+      x: initial.centerX * sourceRect.width,
+      y: initial.centerY * sourceRect.height
+    };
+    const local = rotatePixelPoint(
+      {
+        x: point.x - center.x,
+        y: point.y - center.y
+      },
+      -initial.rotationDegrees
+    );
+    onUpdateWindow(interaction.shape, (window) => ({
+      ...window,
+      width: clampNumber(Math.abs(local.x) * 2 / sourceRect.width, WINDOW_RANGES.width),
+      height: clampNumber(Math.abs(local.y) * 2 / sourceRect.height, WINDOW_RANGES.height)
+    }));
+  };
+
+  const finishInteraction = (event: ReactPointerEvent<SVGSVGElement>) => {
+    if (interactionRef.current && event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    interactionRef.current = undefined;
+  };
+
+  return (
+    <div
+      className="window-overlay"
+      style={{
+        left: sourceRect.left,
+        top: sourceRect.top,
+        width: sourceRect.width,
+        height: sourceRect.height
+      }}
+    >
+      <svg
+        aria-label="Power window overlay"
+        viewBox={`0 0 ${sourceRect.width} ${sourceRect.height}`}
+        preserveAspectRatio="none"
+        onPointerMove={updateInteraction}
+        onPointerUp={finishInteraction}
+        onPointerCancel={finishInteraction}
+      >
+        {enabledWindows.map((shape) => (
+          <WindowOverlayShape
+            key={shape}
+            shape={shape}
+            window={activeNode.windows[shape]}
+            sourceRect={sourceRect}
+            onBeginInteraction={beginInteraction}
+          />
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+function WindowOverlayShape({
+  onBeginInteraction,
+  shape,
+  sourceRect,
+  window
+}: {
+  onBeginInteraction: (event: ReactPointerEvent<SVGElement>, shape: PowerWindowShape, mode: WindowInteraction["mode"]) => void;
+  shape: PowerWindowShape;
+  sourceRect: SourceRect;
+  window: PowerWindow;
+}) {
+  const geometry = getWindowGeometry(window, sourceRect);
+  const rotate = `rotate(${window.rotationDegrees} ${geometry.center.x} ${geometry.center.y})`;
+  const resizePoint = rotatePixelPoint({ x: geometry.width / 2, y: geometry.height / 2 }, window.rotationDegrees);
+  const rotationPoint = rotatePixelPoint({ x: 0, y: -geometry.height / 2 - 28 }, window.rotationDegrees);
+
+  return (
+    <g className={`window-shape window-shape-${shape}`}>
+      {shape === "ellipse" ? (
+        <ellipse
+          cx={geometry.center.x}
+          cy={geometry.center.y}
+          rx={geometry.width / 2}
+          ry={geometry.height / 2}
+          transform={rotate}
+        />
+      ) : (
+        <rect
+          x={geometry.center.x - geometry.width / 2}
+          y={geometry.center.y - geometry.height / 2}
+          width={geometry.width}
+          height={geometry.height}
+          transform={rotate}
+        />
+      )}
+      <line
+        className="window-rotation-line"
+        x1={geometry.center.x}
+        y1={geometry.center.y}
+        x2={geometry.center.x + rotationPoint.x}
+        y2={geometry.center.y + rotationPoint.y}
+      />
+      <circle
+        className="window-handle window-handle-center"
+        cx={geometry.center.x}
+        cy={geometry.center.y}
+        r="7"
+        onPointerDown={(event) => onBeginInteraction(event, shape, "move")}
+      />
+      <circle
+        className="window-handle"
+        cx={geometry.center.x + resizePoint.x}
+        cy={geometry.center.y + resizePoint.y}
+        r="7"
+        onPointerDown={(event) => onBeginInteraction(event, shape, "resize")}
+      />
+      <circle
+        className="window-handle window-handle-rotate"
+        cx={geometry.center.x + rotationPoint.x}
+        cy={geometry.center.y + rotationPoint.y}
+        r="7"
+        onPointerDown={(event) => onBeginInteraction(event, shape, "rotate")}
+      />
+    </g>
   );
 }
 
@@ -1077,6 +1539,94 @@ function createUniqueNode(nodes: ColorNode[]): ColorNode {
 
 function formatControlValue(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(2);
+}
+
+interface SourceRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+interface PixelPoint {
+  x: number;
+  y: number;
+}
+
+interface WindowInteraction {
+  mode: "move" | "resize" | "rotate";
+  shape: PowerWindowShape;
+  initialWindow: PowerWindow;
+}
+
+function getContainedRect(containerWidth: number, containerHeight: number, sourceWidth: number, sourceHeight: number): SourceRect {
+  if (containerWidth <= 0 || containerHeight <= 0 || sourceWidth <= 0 || sourceHeight <= 0) {
+    return { left: 0, top: 0, width: 0, height: 0 };
+  }
+
+  const containerAspect = containerWidth / containerHeight;
+  const sourceAspect = sourceWidth / sourceHeight;
+  if (containerAspect > sourceAspect) {
+    const width = containerHeight * sourceAspect;
+    return {
+      left: (containerWidth - width) / 2,
+      top: 0,
+      width,
+      height: containerHeight
+    };
+  }
+
+  const height = containerWidth / sourceAspect;
+  return {
+    left: 0,
+    top: (containerHeight - height) / 2,
+    width: containerWidth,
+    height
+  };
+}
+
+function readSvgPoint(event: ReactPointerEvent<SVGSVGElement>): PixelPoint {
+  const rect = event.currentTarget.getBoundingClientRect();
+
+  return {
+    x: event.clientX - rect.left,
+    y: event.clientY - rect.top
+  };
+}
+
+function getWindowGeometry(window: PowerWindow, sourceRect: SourceRect): {
+  center: PixelPoint;
+  width: number;
+  height: number;
+} {
+  return {
+    center: {
+      x: window.centerX * sourceRect.width,
+      y: window.centerY * sourceRect.height
+    },
+    width: window.width * sourceRect.width,
+    height: window.height * sourceRect.height
+  };
+}
+
+function rotatePixelPoint(point: PixelPoint, degrees: number): PixelPoint {
+  const radians = degrees * Math.PI / 180;
+  const sin = Math.sin(radians);
+  const cos = Math.cos(radians);
+
+  return {
+    x: point.x * cos - point.y * sin,
+    y: point.x * sin + point.y * cos
+  };
+}
+
+function normalizeSignedDegrees(value: number): number {
+  const degrees = ((value + 180) % 360 + 360) % 360 - 180;
+  return degrees === -180 ? 180 : degrees;
+}
+
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
 }
 
 function filePathToUrl(sourcePath: string): string {

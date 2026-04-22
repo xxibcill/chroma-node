@@ -95,4 +95,36 @@ describe("project schema", () => {
       expect(parsed.project.media?.sourcePath).toBe("/clips/source.mp4");
     }
   });
+
+  it("round-trips qualifier and power-window state in node JSON", () => {
+    const project = createDefaultProject();
+    project.nodes[0].qualifier = {
+      ...project.nodes[0].qualifier,
+      enabled: true,
+      hueCenter: 350,
+      hueWidth: 30,
+      hueSoftness: 12,
+      invert: true
+    };
+    project.nodes[0].windows.ellipse = {
+      ...project.nodes[0].windows.ellipse,
+      enabled: true,
+      centerX: 0.35,
+      centerY: 0.4,
+      width: 0.42,
+      height: 0.28,
+      softness: 0.2
+    };
+
+    const parsed = validateProject(JSON.parse(serializeProject(project)));
+
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.project.nodes[0].qualifier.enabled).toBe(true);
+      expect(parsed.project.nodes[0].qualifier.hueCenter).toBe(350);
+      expect(parsed.project.nodes[0].qualifier.invert).toBe(true);
+      expect(parsed.project.nodes[0].windows.ellipse.enabled).toBe(true);
+      expect(parsed.project.nodes[0].windows.ellipse.centerX).toBe(0.35);
+    }
+  });
 });

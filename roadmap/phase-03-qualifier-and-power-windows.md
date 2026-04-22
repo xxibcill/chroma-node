@@ -1,5 +1,9 @@
 # Phase 03 - Qualifier and Power Windows
 
+## Status
+
+Done
+
 ## Functional Feature Outcome
 
 The user can isolate node corrections with an HSL qualifier and spatial ellipse or rectangle power windows.
@@ -39,4 +43,3 @@ Professional color systems are built around selective correction. This phase add
 - Matte preview shows the active node selection.
 - Ellipse and rectangle windows can be edited in the viewer.
 - Final node mask equals qualifier mask multiplied by unioned window mask.
-

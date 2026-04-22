@@ -9,7 +9,7 @@ This roadmap breaks the DaVinci Resolve-inspired Color page learning app into im
 | [Phase 00 - Technical Foundation](phase-00-technical-foundation.md) | Done | Prove the app shell, FFmpeg integration, WebGL rendering, and export approach. |
 | [Phase 01 - Import, Viewer, Playback](phase-01-import-viewer-playback.md) | Done | Import one supported clip and inspect it with playback controls. |
 | [Phase 02 - Color Engine and Serial Nodes](phase-02-color-engine-and-serial-nodes.md) | Done | Grade frames with up to 3 serial nodes and primary corrections. |
-| [Phase 03 - Qualifier and Power Windows](phase-03-qualifier-and-power-windows.md) | Not started | Isolate corrections with HSL qualification and simple windows. |
+| [Phase 03 - Qualifier and Power Windows](phase-03-qualifier-and-power-windows.md) | Done | Isolate corrections with HSL qualification and simple windows. |
 | [Phase 04 - Waveform and Vectorscope](phase-04-waveform-and-vectorscope.md) | Not started | Inspect the graded signal through waveform and vectorscope displays. |
 | [Phase 05 - Translation Tracking](phase-05-translation-tracking.md) | Not started | Generate translation-only tracking keyframes for power windows. |
 | [Phase 06 - H.264 Export](phase-06-h264-export.md) | Not started | Export the graded clip as a video-only H.264 MP4. |

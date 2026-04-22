@@ -36,6 +36,30 @@ interface ShaderUniforms {
   saturation: WebGLUniformLocation;
   temperature: WebGLUniformLocation;
   tint: WebGLUniformLocation;
+  matteNodeIndex: WebGLUniformLocation;
+  qualifierEnabled: WebGLUniformLocation;
+  hueCenter: WebGLUniformLocation;
+  hueWidth: WebGLUniformLocation;
+  hueSoftness: WebGLUniformLocation;
+  saturationMin: WebGLUniformLocation;
+  saturationMax: WebGLUniformLocation;
+  saturationSoftness: WebGLUniformLocation;
+  luminanceMin: WebGLUniformLocation;
+  luminanceMax: WebGLUniformLocation;
+  luminanceSoftness: WebGLUniformLocation;
+  qualifierInvert: WebGLUniformLocation;
+  ellipseEnabled: WebGLUniformLocation;
+  ellipseCenter: WebGLUniformLocation;
+  ellipseSize: WebGLUniformLocation;
+  ellipseRotation: WebGLUniformLocation;
+  ellipseSoftness: WebGLUniformLocation;
+  ellipseInvert: WebGLUniformLocation;
+  rectangleEnabled: WebGLUniformLocation;
+  rectangleCenter: WebGLUniformLocation;
+  rectangleSize: WebGLUniformLocation;
+  rectangleRotation: WebGLUniformLocation;
+  rectangleSoftness: WebGLUniformLocation;
+  rectangleInvert: WebGLUniformLocation;
 }
 
 export class FrameRenderer {
@@ -51,6 +75,7 @@ export class FrameRenderer {
   private nodes: ColorNode[] = [createColorNode(1)];
   private viewerMode: ViewerMode = "graded";
   private splitPosition = 0.5;
+  private matteNodeIndex = -1;
   private videoSource: HTMLVideoElement | undefined;
   private isPlaybackActive = false;
   private animationFrameId: number | undefined;
@@ -131,6 +156,12 @@ export class FrameRenderer {
   setViewerMode(mode: ViewerMode, splitPosition: number): void {
     this.viewerMode = mode;
     this.splitPosition = Math.min(1, Math.max(0, splitPosition));
+    this.uploadViewerUniforms();
+    this.render();
+  }
+
+  setMatteNode(nodeId: string | undefined): void {
+    this.matteNodeIndex = nodeId ? this.nodes.findIndex((node) => node.id === nodeId) : -1;
     this.uploadViewerUniforms();
     this.render();
   }
@@ -242,6 +273,7 @@ export class FrameRenderer {
     this.gl.uniform1i(this.uniforms.frame, 0);
     this.gl.uniform1i(this.uniforms.viewerMode, mode);
     this.gl.uniform1f(this.uniforms.splitPosition, this.splitPosition);
+    this.gl.uniform1i(this.uniforms.matteNodeIndex, this.matteNodeIndex);
   }
 
   private uploadGraphUniforms(): void {
@@ -256,6 +288,12 @@ export class FrameRenderer {
     const saturation = flattenScalar(this.nodes.map((node) => node.primaries.saturation));
     const temperature = flattenScalar(this.nodes.map((node) => node.primaries.temperature));
     const tint = flattenScalar(this.nodes.map((node) => node.primaries.tint));
+    const qualifierEnabled = new Int32Array(this.nodes.map((node) => (node.qualifier.enabled ? 1 : 0)));
+    const qualifierInvert = new Int32Array(this.nodes.map((node) => (node.qualifier.invert ? 1 : 0)));
+    const ellipseEnabled = new Int32Array(this.nodes.map((node) => (node.windows.ellipse.enabled ? 1 : 0)));
+    const ellipseInvert = new Int32Array(this.nodes.map((node) => (node.windows.ellipse.invert ? 1 : 0)));
+    const rectangleEnabled = new Int32Array(this.nodes.map((node) => (node.windows.rectangle.enabled ? 1 : 0)));
+    const rectangleInvert = new Int32Array(this.nodes.map((node) => (node.windows.rectangle.invert ? 1 : 0)));
 
     gl.useProgram(this.program);
     gl.uniform1iv(this.uniforms.enabled, enabled);
@@ -268,6 +306,29 @@ export class FrameRenderer {
     gl.uniform1fv(this.uniforms.saturation, saturation);
     gl.uniform1fv(this.uniforms.temperature, temperature);
     gl.uniform1fv(this.uniforms.tint, tint);
+    gl.uniform1iv(this.uniforms.qualifierEnabled, qualifierEnabled);
+    gl.uniform1fv(this.uniforms.hueCenter, flattenScalar(this.nodes.map((node) => node.qualifier.hueCenter)));
+    gl.uniform1fv(this.uniforms.hueWidth, flattenScalar(this.nodes.map((node) => node.qualifier.hueWidth)));
+    gl.uniform1fv(this.uniforms.hueSoftness, flattenScalar(this.nodes.map((node) => node.qualifier.hueSoftness)));
+    gl.uniform1fv(this.uniforms.saturationMin, flattenScalar(this.nodes.map((node) => node.qualifier.saturationMin)));
+    gl.uniform1fv(this.uniforms.saturationMax, flattenScalar(this.nodes.map((node) => node.qualifier.saturationMax)));
+    gl.uniform1fv(this.uniforms.saturationSoftness, flattenScalar(this.nodes.map((node) => node.qualifier.saturationSoftness)));
+    gl.uniform1fv(this.uniforms.luminanceMin, flattenScalar(this.nodes.map((node) => node.qualifier.luminanceMin)));
+    gl.uniform1fv(this.uniforms.luminanceMax, flattenScalar(this.nodes.map((node) => node.qualifier.luminanceMax)));
+    gl.uniform1fv(this.uniforms.luminanceSoftness, flattenScalar(this.nodes.map((node) => node.qualifier.luminanceSoftness)));
+    gl.uniform1iv(this.uniforms.qualifierInvert, qualifierInvert);
+    gl.uniform1iv(this.uniforms.ellipseEnabled, ellipseEnabled);
+    gl.uniform2fv(this.uniforms.ellipseCenter, flattenWindowPair(this.nodes.map((node) => node.windows.ellipse), "center"));
+    gl.uniform2fv(this.uniforms.ellipseSize, flattenWindowPair(this.nodes.map((node) => node.windows.ellipse), "size"));
+    gl.uniform1fv(this.uniforms.ellipseRotation, flattenScalar(this.nodes.map((node) => node.windows.ellipse.rotationDegrees)));
+    gl.uniform1fv(this.uniforms.ellipseSoftness, flattenScalar(this.nodes.map((node) => node.windows.ellipse.softness)));
+    gl.uniform1iv(this.uniforms.ellipseInvert, ellipseInvert);
+    gl.uniform1iv(this.uniforms.rectangleEnabled, rectangleEnabled);
+    gl.uniform2fv(this.uniforms.rectangleCenter, flattenWindowPair(this.nodes.map((node) => node.windows.rectangle), "center"));
+    gl.uniform2fv(this.uniforms.rectangleSize, flattenWindowPair(this.nodes.map((node) => node.windows.rectangle), "size"));
+    gl.uniform1fv(this.uniforms.rectangleRotation, flattenScalar(this.nodes.map((node) => node.windows.rectangle.rotationDegrees)));
+    gl.uniform1fv(this.uniforms.rectangleSoftness, flattenScalar(this.nodes.map((node) => node.windows.rectangle.softness)));
+    gl.uniform1iv(this.uniforms.rectangleInvert, rectangleInvert);
   }
 }
 
@@ -349,7 +410,31 @@ function getShaderUniforms(gl: WebGL2RenderingContext, program: WebGLProgram): S
     pivot: mustGetUniformLocation(gl, program, "uPivot[0]"),
     saturation: mustGetUniformLocation(gl, program, "uSaturation[0]"),
     temperature: mustGetUniformLocation(gl, program, "uTemperature[0]"),
-    tint: mustGetUniformLocation(gl, program, "uTint[0]")
+    tint: mustGetUniformLocation(gl, program, "uTint[0]"),
+    matteNodeIndex: mustGetUniformLocation(gl, program, "uMatteNodeIndex"),
+    qualifierEnabled: mustGetUniformLocation(gl, program, "uQualifierEnabled[0]"),
+    hueCenter: mustGetUniformLocation(gl, program, "uHueCenter[0]"),
+    hueWidth: mustGetUniformLocation(gl, program, "uHueWidth[0]"),
+    hueSoftness: mustGetUniformLocation(gl, program, "uHueSoftness[0]"),
+    saturationMin: mustGetUniformLocation(gl, program, "uSaturationMin[0]"),
+    saturationMax: mustGetUniformLocation(gl, program, "uSaturationMax[0]"),
+    saturationSoftness: mustGetUniformLocation(gl, program, "uSaturationSoftness[0]"),
+    luminanceMin: mustGetUniformLocation(gl, program, "uLuminanceMin[0]"),
+    luminanceMax: mustGetUniformLocation(gl, program, "uLuminanceMax[0]"),
+    luminanceSoftness: mustGetUniformLocation(gl, program, "uLuminanceSoftness[0]"),
+    qualifierInvert: mustGetUniformLocation(gl, program, "uQualifierInvert[0]"),
+    ellipseEnabled: mustGetUniformLocation(gl, program, "uEllipseEnabled[0]"),
+    ellipseCenter: mustGetUniformLocation(gl, program, "uEllipseCenter[0]"),
+    ellipseSize: mustGetUniformLocation(gl, program, "uEllipseSize[0]"),
+    ellipseRotation: mustGetUniformLocation(gl, program, "uEllipseRotation[0]"),
+    ellipseSoftness: mustGetUniformLocation(gl, program, "uEllipseSoftness[0]"),
+    ellipseInvert: mustGetUniformLocation(gl, program, "uEllipseInvert[0]"),
+    rectangleEnabled: mustGetUniformLocation(gl, program, "uRectangleEnabled[0]"),
+    rectangleCenter: mustGetUniformLocation(gl, program, "uRectangleCenter[0]"),
+    rectangleSize: mustGetUniformLocation(gl, program, "uRectangleSize[0]"),
+    rectangleRotation: mustGetUniformLocation(gl, program, "uRectangleRotation[0]"),
+    rectangleSoftness: mustGetUniformLocation(gl, program, "uRectangleSoftness[0]"),
+    rectangleInvert: mustGetUniformLocation(gl, program, "uRectangleInvert[0]")
   };
 }
 
@@ -359,6 +444,19 @@ function flattenRgb(values: PrimaryCorrection[keyof Pick<PrimaryCorrection, "lif
 
 function flattenScalar(values: number[]): Float32Array {
   return new Float32Array(values);
+}
+
+function flattenWindowPair(
+  windows: ColorNode["windows"]["ellipse"][],
+  pair: "center" | "size"
+): Float32Array {
+  return new Float32Array(windows.flatMap((window) => {
+    if (pair === "center") {
+      return [window.centerX, window.centerY];
+    }
+
+    return [window.width, window.height];
+  }));
 }
 
 function resizeCanvasToDisplaySize(canvas: HTMLCanvasElement): void {

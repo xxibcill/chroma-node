@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-- Phase: Phase 02 - Color Engine and Serial Nodes
+- Phase: Phase 03 - Qualifier and Power Windows
 - Status: Done
 - Last updated: 2026-04-22
 
@@ -42,3 +42,4 @@
 | 2026-04-22 | Phase 00 | `npm run test:phase00` unit, build, FFmpeg, probe, frame, and export verification. | Passed |
 | 2026-04-22 | Phase 01 | `npm run test:phase01` unit, build, supported import/probe, exact first/last frame decode, and rejection verification. | Passed |
 | 2026-04-22 | Phase 02 | `npm run typecheck`, `npm test`, `npm run lint`, and `npm run build`. | Passed |
+| 2026-04-22 | Phase 03 | `npm run typecheck`, `npm test`, `npm run lint`, and `npm run build`. | Passed |
