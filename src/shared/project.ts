@@ -82,9 +82,9 @@ export function validateProject(input: unknown): ProjectValidationResult {
   const projectId = readString(source.projectId, "projectId", createProjectId(), warnings);
   const name = readString(source.name, "name", DEFAULT_PROJECT_NAME, warnings).slice(0, 80);
   const playback = readPlayback(source.playback, warnings);
-  const nodes = readNodes(source.nodes, warnings);
   const exportSettings = readExportSettings(source.exportSettings, warnings);
   const media = readMedia(source.media, errors, warnings);
+  const nodes = readNodes(source.nodes, warnings, media?.totalFrames);
 
   if (errors.length > 0) {
     return { ok: false, errors };
@@ -169,7 +169,7 @@ function readPlayback(input: unknown, warnings: ProjectValidationIssue[]): Proje
   };
 }
 
-function readNodes(input: unknown, warnings: ProjectValidationIssue[]): ColorNode[] {
+function readNodes(input: unknown, warnings: ProjectValidationIssue[], frameCount?: number): ColorNode[] {
   if (!Array.isArray(input) || input.length === 0) {
     warnings.push(issue("nodes", "DEFAULTED", "Project must contain at least one node; a neutral node was added.", input));
     return [createColorNode(1)];
@@ -185,7 +185,7 @@ function readNodes(input: unknown, warnings: ProjectValidationIssue[]): ColorNod
       return createColorNode(index + 1);
     }
 
-    const sanitized = sanitizeColorNode(node, index + 1);
+    const sanitized = sanitizeColorNode(node, index + 1, frameCount);
     collectNodeClampWarnings(node, sanitized, index, warnings);
     return sanitized;
   }));
@@ -265,6 +265,55 @@ function collectNodeClampWarnings(
       warnings.push(issue(`nodes.${index}.primaries.${path}`, "CLAMPED", "Primary value was clamped to the supported MVP range.", originalValue));
     }
   }
+
+  if (isRecord(original.tracking)) {
+    collectTrackingWarnings(original.tracking, sanitized, index, warnings);
+  }
+}
+
+function collectTrackingWarnings(
+  original: Record<string, unknown>,
+  sanitized: ColorNode,
+  index: number,
+  warnings: ProjectValidationIssue[]
+): void {
+  if (original.targetShape !== undefined && original.targetShape !== sanitized.tracking.targetShape) {
+    warnings.push(issue(`nodes.${index}.tracking.targetShape`, "DEFAULTED", "Invalid tracking target was reset.", original.targetShape));
+  }
+
+  if (Array.isArray(original.keyframes) && original.keyframes.length !== sanitized.tracking.keyframes.length) {
+    warnings.push(issue(
+      `nodes.${index}.tracking.keyframes`,
+      "CLAMPED",
+      "Invalid tracking keyframes were removed.",
+      original.keyframes.length
+    ));
+  }
+
+  sanitized.tracking.keyframes.forEach((keyframe, keyframeIndex) => {
+    const originalKeyframe = Array.isArray(original.keyframes)
+      ? original.keyframes.find((item) => isRecord(item) && item.frame === keyframe.frame)
+      : undefined;
+
+    if (!isRecord(originalKeyframe)) {
+      return;
+    }
+
+    if (originalKeyframe.dx !== keyframe.dx) {
+      warnings.push(issue(`nodes.${index}.tracking.keyframes.${keyframeIndex}.dx`, "CLAMPED", "Tracking dx was clamped.", originalKeyframe.dx));
+    }
+    if (originalKeyframe.dy !== keyframe.dy) {
+      warnings.push(issue(`nodes.${index}.tracking.keyframes.${keyframeIndex}.dy`, "CLAMPED", "Tracking dy was clamped.", originalKeyframe.dy));
+    }
+    if (originalKeyframe.confidence !== keyframe.confidence) {
+      warnings.push(issue(
+        `nodes.${index}.tracking.keyframes.${keyframeIndex}.confidence`,
+        "CLAMPED",
+        "Tracking confidence was clamped.",
+        originalKeyframe.confidence
+      ));
+    }
+  });
 }
 
 function readPath(source: Record<string, unknown>, dottedPath: string): unknown {

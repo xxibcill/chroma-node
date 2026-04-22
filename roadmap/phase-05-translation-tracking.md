@@ -1,5 +1,9 @@
 # Phase 05 - Translation Tracking
 
+## Status
+
+Done
+
 ## Functional Feature Outcome
 
 The user can track an ellipse or rectangle power window forward or backward using translation-only tracking keyframes.
@@ -38,4 +42,3 @@ Tracking demonstrates how color systems bind masks to image motion. This phase a
 - Low-confidence tracking stops with a clear frame-specific error.
 - Tracked windows move during playback.
 - Manual window edits after tracking mark the track as stale or require retracking.
-

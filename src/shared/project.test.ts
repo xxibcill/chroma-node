@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createColorNode } from "./colorEngine";
+import { createColorNode, invalidateTrackingForWindow } from "./colorEngine";
 import { PROJECT_SCHEMA_VERSION, createDefaultProject, serializeProject, validateProject } from "./project";
 
 describe("project schema", () => {
@@ -126,5 +126,98 @@ describe("project schema", () => {
       expect(parsed.project.nodes[0].windows.ellipse.enabled).toBe(true);
       expect(parsed.project.nodes[0].windows.ellipse.centerX).toBe(0.35);
     }
+  });
+
+  it("round-trips tracking keyframes in node JSON", () => {
+    const project = createDefaultProject();
+    project.media = {
+      id: "clip",
+      sourcePath: "/clips/source.mp4",
+      fileName: "source.mp4",
+      container: "mov,mp4",
+      codec: "h264",
+      width: 1920,
+      height: 1080,
+      durationSeconds: 2,
+      frameRate: 24,
+      totalFrames: 48,
+      hasAudio: false,
+      rotation: 0,
+      videoStreamIndex: 0
+    };
+    project.nodes[0].tracking = {
+      targetShape: "rectangle",
+      state: "ready",
+      keyframes: [
+        { frame: 4, dx: 0, dy: 0, confidence: 1 },
+        { frame: 5, dx: 0.02, dy: -0.01, confidence: 0.82 }
+      ]
+    };
+
+    const parsed = validateProject(JSON.parse(serializeProject(project)));
+
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.project.nodes[0].tracking.targetShape).toBe("rectangle");
+      expect(parsed.project.nodes[0].tracking.keyframes).toHaveLength(2);
+      expect(parsed.project.nodes[0].tracking.keyframes[1]).toMatchObject({ frame: 5, dx: 0.02, dy: -0.01 });
+    }
+  });
+
+  it("rejects invalid tracking frame indexes and clamps confidence", () => {
+    const project = createDefaultProject();
+    const result = validateProject({
+      ...project,
+      media: {
+        id: "clip",
+        sourcePath: "/clips/source.mp4",
+        fileName: "source.mp4",
+        container: "mov,mp4",
+        codec: "h264",
+        width: 1920,
+        height: 1080,
+        durationSeconds: 1,
+        frameRate: 24,
+        totalFrames: 12,
+        hasAudio: false,
+        rotation: 0,
+        videoStreamIndex: 0
+      },
+      nodes: [
+        {
+          ...project.nodes[0],
+          tracking: {
+            targetShape: "ellipse",
+            state: "ready",
+            keyframes: [
+              { frame: -1, dx: 0, dy: 0, confidence: 1 },
+              { frame: 12, dx: 0, dy: 0, confidence: 1 },
+              { frame: 4, dx: 2, dy: -2, confidence: 4 }
+            ]
+          }
+        }
+      ]
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.project.nodes[0].tracking.keyframes).toEqual([
+        { frame: 4, dx: 1, dy: -1, confidence: 1 }
+      ]);
+      expect(result.warnings.some((warning) => warning.path === "nodes.0.tracking.keyframes")).toBe(true);
+    }
+  });
+
+  it("marks tracking stale after a manual edit to the tracked window", () => {
+    const node = createColorNode(1);
+    node.tracking = {
+      targetShape: "ellipse",
+      state: "ready",
+      keyframes: [{ frame: 1, dx: 0.1, dy: 0, confidence: 0.9 }]
+    };
+
+    const staleNode = invalidateTrackingForWindow(node, "ellipse");
+
+    expect(staleNode.tracking.state).toBe("stale");
   });
 });

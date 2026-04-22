@@ -2,7 +2,7 @@
 
 ## Status
 
-Not started
+Done
 
 ## Phase
 
@@ -37,10 +37,9 @@ Tracked window translations are applied during viewer playback, scrubbing, frame
 
 - [ ] Not started
 - [ ] In progress
-- [ ] Implemented
-- [ ] Verified
+- [x] Implemented
+- [x] Verified
 
 ## Blockers
 
 - None
-

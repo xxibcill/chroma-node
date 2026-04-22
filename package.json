@@ -15,7 +15,8 @@
     "test:phase01": "vitest run && npm run build && node scripts/verify-phase01.mjs",
     "test:phase02": "vitest run && npm run build && node scripts/verify-phase02.mjs",
     "test:phase03": "vitest run && npm run build && node scripts/verify-phase03.mjs",
-    "test:phase04": "vitest run && npm run build && node scripts/verify-phase04.mjs"
+    "test:phase04": "vitest run && npm run build && node scripts/verify-phase04.mjs",
+    "test:phase05": "vitest run && npm run build && node scripts/verify-phase05.mjs"
   },
   "dependencies": {
     "react": "^19.0.0",

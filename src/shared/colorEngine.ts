@@ -50,6 +50,23 @@ export interface PowerWindows {
   rectangle: PowerWindow;
 }
 
+export type TrackingDataState = "empty" | "ready" | "stale" | "failed";
+
+export interface TrackingKeyframe {
+  frame: number;
+  dx: number;
+  dy: number;
+  confidence: number;
+}
+
+export interface TrackingData {
+  targetShape: PowerWindowShape;
+  keyframes: TrackingKeyframe[];
+  state: TrackingDataState;
+  failureFrame?: number;
+  failureReason?: string;
+}
+
 export interface ColorNode {
   id: string;
   name: string;
@@ -57,6 +74,7 @@ export interface ColorNode {
   primaries: PrimaryCorrection;
   qualifier: HslQualifier;
   windows: PowerWindows;
+  tracking: TrackingData;
 }
 
 export interface Pixel {
@@ -117,6 +135,9 @@ export const WINDOW_RANGES = {
   softness: { min: 0, max: 1, neutral: 0, step: 0.01 }
 } as const satisfies Record<keyof Omit<PowerWindow, "enabled" | "invert">, NumericRange>;
 
+export const TRACKING_OFFSET_RANGE = { min: -1, max: 1, neutral: 0, step: 0.001 } as const satisfies NumericRange;
+export const TRACKING_CONFIDENCE_RANGE = { min: 0, max: 1, neutral: 0, step: 0.001 } as const satisfies NumericRange;
+
 const NEUTRAL_RGB_ADD: RgbVector = { r: 0, g: 0, b: 0 };
 const NEUTRAL_RGB_MULTIPLY: RgbVector = { r: 1, g: 1, b: 1 };
 
@@ -172,6 +193,14 @@ export function createDefaultPowerWindows(): PowerWindows {
   };
 }
 
+export function createDefaultTrackingData(targetShape: PowerWindowShape = "ellipse"): TrackingData {
+  return {
+    targetShape,
+    keyframes: [],
+    state: "empty"
+  };
+}
+
 export function createColorNode(index: number): ColorNode {
   const ordinal = Math.max(1, Math.min(MAX_SERIAL_NODES, Math.floor(index)));
 
@@ -181,7 +210,8 @@ export function createColorNode(index: number): ColorNode {
     enabled: true,
     primaries: createNeutralPrimaries(),
     qualifier: createDefaultQualifier(),
-    windows: createDefaultPowerWindows()
+    windows: createDefaultPowerWindows(),
+    tracking: createDefaultTrackingData()
   };
 }
 
@@ -276,7 +306,84 @@ export function sanitizePowerWindows(input: Partial<PowerWindows> | undefined): 
   };
 }
 
-export function sanitizeColorNode(input: Partial<ColorNode> | undefined, fallbackIndex: number): ColorNode {
+export function sanitizeTrackingData(
+  input: Partial<TrackingData> | undefined,
+  frameCount?: number
+): TrackingData {
+  const fallback = createDefaultTrackingData();
+  const targetShape = input?.targetShape === "rectangle" || input?.targetShape === "ellipse"
+    ? input.targetShape
+    : fallback.targetShape;
+  const frameUpperBound = frameCount === undefined ? Number.MAX_SAFE_INTEGER : Math.max(0, Math.floor(frameCount) - 1);
+  const keyframes = Array.isArray(input?.keyframes)
+    ? sanitizeTrackingKeyframes(input.keyframes, frameUpperBound)
+    : [];
+  const state = readTrackingState(input?.state, keyframes.length);
+  const failureFrame = readOptionalFrame(input?.failureFrame, frameUpperBound);
+  const failureReason = typeof input?.failureReason === "string" && input.failureReason.trim()
+    ? input.failureReason.trim().slice(0, 160)
+    : undefined;
+
+  return {
+    targetShape,
+    keyframes,
+    state,
+    failureFrame,
+    failureReason
+  };
+}
+
+export function invalidateTrackingForWindow(node: ColorNode, shape: PowerWindowShape): ColorNode {
+  if (node.tracking.targetShape !== shape || node.tracking.keyframes.length === 0 || node.tracking.state === "stale") {
+    return node;
+  }
+
+  return {
+    ...node,
+    tracking: {
+      ...node.tracking,
+      state: "stale",
+      failureFrame: undefined,
+      failureReason: undefined
+    }
+  };
+}
+
+export function resolveTrackingOffset(tracking: TrackingData, frame: number): TrackingKeyframe | undefined {
+  if (tracking.state === "stale") {
+    return undefined;
+  }
+
+  const targetFrame = Math.max(0, Math.floor(frame));
+  return tracking.keyframes.find((keyframe) => keyframe.frame === targetFrame);
+}
+
+export function resolveTrackedPowerWindows(node: ColorNode, frame: number): PowerWindows {
+  const keyframe = resolveTrackingOffset(node.tracking, frame);
+  if (!keyframe) {
+    return node.windows;
+  }
+
+  const targetShape = node.tracking.targetShape;
+  const targetWindow = node.windows[targetShape];
+  return {
+    ...node.windows,
+    [targetShape]: {
+      ...targetWindow,
+      centerX: targetWindow.centerX + keyframe.dx,
+      centerY: targetWindow.centerY + keyframe.dy
+    }
+  };
+}
+
+export function resolveTrackedNode(node: ColorNode, frame: number): ColorNode {
+  return {
+    ...node,
+    windows: resolveTrackedPowerWindows(node, frame)
+  };
+}
+
+export function sanitizeColorNode(input: Partial<ColorNode> | undefined, fallbackIndex: number, frameCount?: number): ColorNode {
   const fallback = createColorNode(fallbackIndex);
   const name = typeof input?.name === "string" && input.name.trim() ? input.name.trim().slice(0, 48) : fallback.name;
   const id = typeof input?.id === "string" && input.id.trim() ? input.id.trim().slice(0, 64) : fallback.id;
@@ -287,7 +394,8 @@ export function sanitizeColorNode(input: Partial<ColorNode> | undefined, fallbac
     enabled: typeof input?.enabled === "boolean" ? input.enabled : fallback.enabled,
     primaries: sanitizePrimaries(input?.primaries),
     qualifier: sanitizeQualifier(input?.qualifier),
-    windows: sanitizePowerWindows(input?.windows)
+    windows: sanitizePowerWindows(input?.windows),
+    tracking: sanitizeTrackingData(input?.tracking, frameCount)
   };
 }
 
@@ -306,6 +414,47 @@ export function normalizeNodeGraph(nodes: readonly Partial<ColorNode>[] | undefi
     seenIds.add(id);
     return { ...sanitized, id };
   });
+}
+
+function sanitizeTrackingKeyframes(input: unknown[], frameUpperBound: number): TrackingKeyframe[] {
+  const keyframesByFrame = new Map<number, TrackingKeyframe>();
+
+  for (const item of input) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+
+    const source = item as Partial<TrackingKeyframe>;
+    const frame = source.frame;
+    if (typeof frame !== "number" || !Number.isInteger(frame) || frame < 0 || frame > frameUpperBound) {
+      continue;
+    }
+
+    keyframesByFrame.set(frame, {
+      frame,
+      dx: clampNumber(readNumber(source.dx, 0), TRACKING_OFFSET_RANGE),
+      dy: clampNumber(readNumber(source.dy, 0), TRACKING_OFFSET_RANGE),
+      confidence: clampNumber(readNumber(source.confidence, 0), TRACKING_CONFIDENCE_RANGE)
+    });
+  }
+
+  return [...keyframesByFrame.values()].sort((left, right) => left.frame - right.frame);
+}
+
+function readTrackingState(input: unknown, keyframeCount: number): TrackingDataState {
+  if (input === "ready" || input === "stale" || input === "failed") {
+    return keyframeCount > 0 ? input : "empty";
+  }
+
+  return keyframeCount > 0 ? "ready" : "empty";
+}
+
+function readOptionalFrame(input: unknown, frameUpperBound: number): number | undefined {
+  if (typeof input !== "number" || !Number.isInteger(input) || input < 0 || input > frameUpperBound) {
+    return undefined;
+  }
+
+  return input;
 }
 
 export function applyPrimaryCorrection(pixel: Pixel, correction: PrimaryCorrection): Pixel {

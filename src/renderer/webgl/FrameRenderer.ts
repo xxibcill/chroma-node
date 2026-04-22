@@ -3,7 +3,8 @@ import type { ColorNode, PrimaryCorrection } from "../../shared/colorEngine";
 import {
   createColorNode,
   generateColorFragmentShader,
-  normalizeNodeGraph
+  normalizeNodeGraph,
+  resolveTrackedNode
 } from "../../shared/colorEngine";
 import type { ViewerMode } from "../../shared/project";
 
@@ -76,6 +77,7 @@ export class FrameRenderer {
   private viewerMode: ViewerMode = "graded";
   private splitPosition = 0.5;
   private matteNodeIndex = -1;
+  private currentFrame = 0;
   private videoSource: HTMLVideoElement | undefined;
   private isPlaybackActive = false;
   private animationFrameId: number | undefined;
@@ -157,6 +159,11 @@ export class FrameRenderer {
     this.viewerMode = mode;
     this.splitPosition = Math.min(1, Math.max(0, splitPosition));
     this.uploadViewerUniforms();
+    this.render();
+  }
+
+  setCurrentFrame(frameIndex: number): void {
+    this.currentFrame = Math.max(0, Math.floor(frameIndex));
     this.render();
   }
 
@@ -278,22 +285,23 @@ export class FrameRenderer {
 
   private uploadGraphUniforms(): void {
     const gl = this.gl;
-    const enabled = new Int32Array(this.nodes.map((node) => (node.enabled ? 1 : 0)));
-    const lift = flattenRgb(this.nodes.map((node) => node.primaries.lift));
-    const gamma = flattenRgb(this.nodes.map((node) => node.primaries.gamma));
-    const gain = flattenRgb(this.nodes.map((node) => node.primaries.gain));
-    const offset = flattenRgb(this.nodes.map((node) => node.primaries.offset));
-    const contrast = flattenScalar(this.nodes.map((node) => node.primaries.contrast));
-    const pivot = flattenScalar(this.nodes.map((node) => node.primaries.pivot));
-    const saturation = flattenScalar(this.nodes.map((node) => node.primaries.saturation));
-    const temperature = flattenScalar(this.nodes.map((node) => node.primaries.temperature));
-    const tint = flattenScalar(this.nodes.map((node) => node.primaries.tint));
-    const qualifierEnabled = new Int32Array(this.nodes.map((node) => (node.qualifier.enabled ? 1 : 0)));
-    const qualifierInvert = new Int32Array(this.nodes.map((node) => (node.qualifier.invert ? 1 : 0)));
-    const ellipseEnabled = new Int32Array(this.nodes.map((node) => (node.windows.ellipse.enabled ? 1 : 0)));
-    const ellipseInvert = new Int32Array(this.nodes.map((node) => (node.windows.ellipse.invert ? 1 : 0)));
-    const rectangleEnabled = new Int32Array(this.nodes.map((node) => (node.windows.rectangle.enabled ? 1 : 0)));
-    const rectangleInvert = new Int32Array(this.nodes.map((node) => (node.windows.rectangle.invert ? 1 : 0)));
+    const resolvedNodes = this.nodes.map((node) => resolveTrackedNode(node, this.currentFrame));
+    const enabled = new Int32Array(resolvedNodes.map((node) => (node.enabled ? 1 : 0)));
+    const lift = flattenRgb(resolvedNodes.map((node) => node.primaries.lift));
+    const gamma = flattenRgb(resolvedNodes.map((node) => node.primaries.gamma));
+    const gain = flattenRgb(resolvedNodes.map((node) => node.primaries.gain));
+    const offset = flattenRgb(resolvedNodes.map((node) => node.primaries.offset));
+    const contrast = flattenScalar(resolvedNodes.map((node) => node.primaries.contrast));
+    const pivot = flattenScalar(resolvedNodes.map((node) => node.primaries.pivot));
+    const saturation = flattenScalar(resolvedNodes.map((node) => node.primaries.saturation));
+    const temperature = flattenScalar(resolvedNodes.map((node) => node.primaries.temperature));
+    const tint = flattenScalar(resolvedNodes.map((node) => node.primaries.tint));
+    const qualifierEnabled = new Int32Array(resolvedNodes.map((node) => (node.qualifier.enabled ? 1 : 0)));
+    const qualifierInvert = new Int32Array(resolvedNodes.map((node) => (node.qualifier.invert ? 1 : 0)));
+    const ellipseEnabled = new Int32Array(resolvedNodes.map((node) => (node.windows.ellipse.enabled ? 1 : 0)));
+    const ellipseInvert = new Int32Array(resolvedNodes.map((node) => (node.windows.ellipse.invert ? 1 : 0)));
+    const rectangleEnabled = new Int32Array(resolvedNodes.map((node) => (node.windows.rectangle.enabled ? 1 : 0)));
+    const rectangleInvert = new Int32Array(resolvedNodes.map((node) => (node.windows.rectangle.invert ? 1 : 0)));
 
     gl.useProgram(this.program);
     gl.uniform1iv(this.uniforms.enabled, enabled);
@@ -307,27 +315,27 @@ export class FrameRenderer {
     gl.uniform1fv(this.uniforms.temperature, temperature);
     gl.uniform1fv(this.uniforms.tint, tint);
     gl.uniform1iv(this.uniforms.qualifierEnabled, qualifierEnabled);
-    gl.uniform1fv(this.uniforms.hueCenter, flattenScalar(this.nodes.map((node) => node.qualifier.hueCenter)));
-    gl.uniform1fv(this.uniforms.hueWidth, flattenScalar(this.nodes.map((node) => node.qualifier.hueWidth)));
-    gl.uniform1fv(this.uniforms.hueSoftness, flattenScalar(this.nodes.map((node) => node.qualifier.hueSoftness)));
-    gl.uniform1fv(this.uniforms.saturationMin, flattenScalar(this.nodes.map((node) => node.qualifier.saturationMin)));
-    gl.uniform1fv(this.uniforms.saturationMax, flattenScalar(this.nodes.map((node) => node.qualifier.saturationMax)));
-    gl.uniform1fv(this.uniforms.saturationSoftness, flattenScalar(this.nodes.map((node) => node.qualifier.saturationSoftness)));
-    gl.uniform1fv(this.uniforms.luminanceMin, flattenScalar(this.nodes.map((node) => node.qualifier.luminanceMin)));
-    gl.uniform1fv(this.uniforms.luminanceMax, flattenScalar(this.nodes.map((node) => node.qualifier.luminanceMax)));
-    gl.uniform1fv(this.uniforms.luminanceSoftness, flattenScalar(this.nodes.map((node) => node.qualifier.luminanceSoftness)));
+    gl.uniform1fv(this.uniforms.hueCenter, flattenScalar(resolvedNodes.map((node) => node.qualifier.hueCenter)));
+    gl.uniform1fv(this.uniforms.hueWidth, flattenScalar(resolvedNodes.map((node) => node.qualifier.hueWidth)));
+    gl.uniform1fv(this.uniforms.hueSoftness, flattenScalar(resolvedNodes.map((node) => node.qualifier.hueSoftness)));
+    gl.uniform1fv(this.uniforms.saturationMin, flattenScalar(resolvedNodes.map((node) => node.qualifier.saturationMin)));
+    gl.uniform1fv(this.uniforms.saturationMax, flattenScalar(resolvedNodes.map((node) => node.qualifier.saturationMax)));
+    gl.uniform1fv(this.uniforms.saturationSoftness, flattenScalar(resolvedNodes.map((node) => node.qualifier.saturationSoftness)));
+    gl.uniform1fv(this.uniforms.luminanceMin, flattenScalar(resolvedNodes.map((node) => node.qualifier.luminanceMin)));
+    gl.uniform1fv(this.uniforms.luminanceMax, flattenScalar(resolvedNodes.map((node) => node.qualifier.luminanceMax)));
+    gl.uniform1fv(this.uniforms.luminanceSoftness, flattenScalar(resolvedNodes.map((node) => node.qualifier.luminanceSoftness)));
     gl.uniform1iv(this.uniforms.qualifierInvert, qualifierInvert);
     gl.uniform1iv(this.uniforms.ellipseEnabled, ellipseEnabled);
-    gl.uniform2fv(this.uniforms.ellipseCenter, flattenWindowPair(this.nodes.map((node) => node.windows.ellipse), "center"));
-    gl.uniform2fv(this.uniforms.ellipseSize, flattenWindowPair(this.nodes.map((node) => node.windows.ellipse), "size"));
-    gl.uniform1fv(this.uniforms.ellipseRotation, flattenScalar(this.nodes.map((node) => node.windows.ellipse.rotationDegrees)));
-    gl.uniform1fv(this.uniforms.ellipseSoftness, flattenScalar(this.nodes.map((node) => node.windows.ellipse.softness)));
+    gl.uniform2fv(this.uniforms.ellipseCenter, flattenWindowPair(resolvedNodes.map((node) => node.windows.ellipse), "center"));
+    gl.uniform2fv(this.uniforms.ellipseSize, flattenWindowPair(resolvedNodes.map((node) => node.windows.ellipse), "size"));
+    gl.uniform1fv(this.uniforms.ellipseRotation, flattenScalar(resolvedNodes.map((node) => node.windows.ellipse.rotationDegrees)));
+    gl.uniform1fv(this.uniforms.ellipseSoftness, flattenScalar(resolvedNodes.map((node) => node.windows.ellipse.softness)));
     gl.uniform1iv(this.uniforms.ellipseInvert, ellipseInvert);
     gl.uniform1iv(this.uniforms.rectangleEnabled, rectangleEnabled);
-    gl.uniform2fv(this.uniforms.rectangleCenter, flattenWindowPair(this.nodes.map((node) => node.windows.rectangle), "center"));
-    gl.uniform2fv(this.uniforms.rectangleSize, flattenWindowPair(this.nodes.map((node) => node.windows.rectangle), "size"));
-    gl.uniform1fv(this.uniforms.rectangleRotation, flattenScalar(this.nodes.map((node) => node.windows.rectangle.rotationDegrees)));
-    gl.uniform1fv(this.uniforms.rectangleSoftness, flattenScalar(this.nodes.map((node) => node.windows.rectangle.softness)));
+    gl.uniform2fv(this.uniforms.rectangleCenter, flattenWindowPair(resolvedNodes.map((node) => node.windows.rectangle), "center"));
+    gl.uniform2fv(this.uniforms.rectangleSize, flattenWindowPair(resolvedNodes.map((node) => node.windows.rectangle), "size"));
+    gl.uniform1fv(this.uniforms.rectangleRotation, flattenScalar(resolvedNodes.map((node) => node.windows.rectangle.rotationDegrees)));
+    gl.uniform1fv(this.uniforms.rectangleSoftness, flattenScalar(resolvedNodes.map((node) => node.windows.rectangle.softness)));
     gl.uniform1iv(this.uniforms.rectangleInvert, rectangleInvert);
   }
 }

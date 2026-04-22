@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { AppError, DecodedFrame, ExportJobResult, FfmpegDiagnostics, MediaRef } from "../shared/ipc";
-import type { ColorNode, HslQualifier, PowerWindow, PowerWindowShape, RgbVector } from "../shared/colorEngine";
+import type { ColorNode, HslQualifier, PowerWindow, PowerWindowShape, RgbVector, TrackingKeyframe } from "../shared/colorEngine";
 import {
   MAX_SERIAL_NODES,
   PRIMARY_RANGES,
@@ -10,7 +10,9 @@ import {
   clampNumber,
   createColorNode,
   createDefaultPowerWindows,
-  createNeutralPrimaries
+  createNeutralPrimaries,
+  invalidateTrackingForWindow,
+  resolveTrackedNode
 } from "../shared/colorEngine";
 import type { ChromaProject, ViewerMode } from "../shared/project";
 import { createDefaultProject, sanitizeProject } from "../shared/project";
@@ -30,6 +32,8 @@ import {
   getTotalFrameCount,
   timeToFrameIndex
 } from "./playback";
+import type { LumaFrame } from "./tracking/templateTracker";
+import { TrackingFailure, getScaledSearchRadius, matchTranslation } from "./tracking/templateTracker";
 import { FrameRenderer } from "./webgl/FrameRenderer";
 
 type Status = "idle" | "busy" | "ready" | "error";
@@ -57,6 +61,18 @@ interface PlaybackState {
   splitPosition: number;
 }
 
+type TrackingDirection = "forward" | "backward";
+
+interface TrackingOperation {
+  id: number;
+  direction: TrackingDirection;
+  targetShape: PowerWindowShape;
+  currentFrame: number;
+  completedFrames: number;
+  totalFrames: number;
+  message: string;
+}
+
 const api = window.chromaNode;
 const initialProject = createDefaultProject();
 const initialMessage = "Import an MP4 or MOV clip to start playback inspection.";
@@ -76,12 +92,15 @@ export function App() {
   const rendererRef = useRef<FrameRenderer | null>(null);
   const frameRequestId = useRef(0);
   const scopeRequestId = useRef(0);
+  const trackingRequestId = useRef(0);
+  const cancelledTrackingIds = useRef(new Set<number>());
   const scopeDebounceTimer = useRef<number | undefined>(undefined);
   const scopeImageCache = useRef<{ dataUrl: string; image: HTMLImageElement } | undefined>(undefined);
   const [diagnostics, setDiagnostics] = useState<FfmpegDiagnostics | undefined>();
   const [previewBusy, setPreviewBusy] = useState(false);
   const [showMatte, setShowMatte] = useState(false);
   const [scopeInfo, setScopeInfo] = useState("Scopes waiting for a graded frame.");
+  const [trackingOperation, setTrackingOperation] = useState<TrackingOperation | undefined>();
   const [viewerSize, setViewerSize] = useState({ width: 0, height: 0 });
   const [project, setProject] = useState<ChromaProject>(initialProject);
   const [selectedNodeId, setSelectedNodeId] = useState(initialProject.nodes[0].id);
@@ -109,6 +128,10 @@ export function App() {
   const activeNodeIndex = useMemo(
     () => project.nodes.findIndex((node) => node.id === activeNode?.id),
     [activeNode?.id, project.nodes]
+  );
+  const resolvedActiveNode = useMemo(
+    () => resolveTrackedNode(activeNode, playback.currentFrame),
+    [activeNode, playback.currentFrame]
   );
   const viewerSourceRect = useMemo(
     () => getContainedRect(
@@ -277,6 +300,228 @@ export function App() {
       error: undefined
     }));
   }, []);
+
+  const fetchTrackingFrame = useCallback(async (media: MediaRef, frameIndex: number): Promise<LumaFrame> => {
+    if (!api) {
+      throw new Error("Electron preload API is unavailable.");
+    }
+
+    const targetFrame = clampFrameIndex(frameIndex, media);
+    const response = await api.extractFrame({
+      sourcePath: media.sourcePath,
+      frameIndex: targetFrame,
+      maxWidth: 640
+    });
+    const result = response.result;
+
+    if (!result.ok) {
+      throw new Error(`Frame access failed for ${media.sourcePath} at frame ${targetFrame + 1}: ${result.error.message}`);
+    }
+
+    return decodedFrameToLumaFrame(result.value);
+  }, []);
+
+  const commitTrackingKeyframes = useCallback((
+    nodeId: string,
+    targetShape: PowerWindowShape,
+    keyframes: TrackingKeyframe[],
+    trackingState: "ready" | "failed",
+    failure?: { frame: number; reason: string }
+  ) => {
+    commitProject((current) => ({
+      ...current,
+      nodes: current.nodes.map((node) => {
+        if (node.id !== nodeId) {
+          return node;
+        }
+
+        return {
+          ...node,
+          tracking: {
+            targetShape,
+            keyframes,
+            state: trackingState,
+            failureFrame: failure?.frame,
+            failureReason: failure?.reason
+          }
+        };
+      })
+    }));
+  }, [commitProject]);
+
+  const runWindowTracking = useCallback(async (direction: TrackingDirection) => {
+    if (!state.media || !activeNode || trackingOperation) {
+      return;
+    }
+
+    const media = state.media;
+    const nodeId = activeNode.id;
+    const targetShape = activeNode.tracking.targetShape;
+    const baseWindow = activeNode.windows[targetShape];
+    const startFrame = clampFrameIndex(playback.currentFrame, media);
+    const step = direction === "forward" ? 1 : -1;
+    const finalFrame = direction === "forward" ? lastFrameIndex : 0;
+    const totalSteps = Math.abs(finalFrame - startFrame);
+
+    if (!baseWindow.enabled) {
+      setState((current) => ({
+        ...current,
+        status: "error",
+        message: `Enable the ${targetShape} window before tracking.`,
+        error: {
+          code: "TRACKING_FAILED",
+          message: `Enable the ${targetShape} window before tracking.`
+        }
+      }));
+      return;
+    }
+
+    if (totalSteps === 0) {
+      setState((current) => ({
+        ...current,
+        status: "ready",
+        message: "Tracking needs at least one adjacent frame.",
+        error: undefined
+      }));
+      return;
+    }
+
+    const requestId = ++trackingRequestId.current;
+    cancelledTrackingIds.current.delete(requestId);
+    videoRef.current?.pause();
+    rendererRef.current?.setPlaybackActive(false);
+    setPlayback((current) => ({ ...current, isPlaying: false, isScrubbing: false }));
+    setTrackingOperation({
+      id: requestId,
+      direction,
+      targetShape,
+      currentFrame: startFrame,
+      completedFrames: 0,
+      totalFrames: totalSteps,
+      message: `Tracking ${targetShape} ${direction} from frame ${startFrame + 1}.`
+    });
+    setState((current) => ({ ...current, status: "ready", message: "Tracking started.", error: undefined }));
+
+    const keyframes: TrackingKeyframe[] = [{ frame: startFrame, dx: 0, dy: 0, confidence: 1 }];
+    let accumulatedDx = 0;
+    let accumulatedDy = 0;
+
+    try {
+      let sourceFrame = await fetchTrackingFrame(media, startFrame);
+
+      for (
+        let frameIndex = startFrame + step, completed = 1;
+        direction === "forward" ? frameIndex <= finalFrame : frameIndex >= finalFrame;
+        frameIndex += step, completed += 1
+      ) {
+        if (cancelledTrackingIds.current.has(requestId) || requestId !== trackingRequestId.current) {
+          setTrackingOperation(undefined);
+          setState((current) => ({ ...current, status: "ready", message: "Tracking cancelled.", error: undefined }));
+          return;
+        }
+
+        setTrackingOperation({
+          id: requestId,
+          direction,
+          targetShape,
+          currentFrame: frameIndex,
+          completedFrames: completed - 1,
+          totalFrames: totalSteps,
+          message: `Tracking frame ${frameIndex + 1}.`
+        });
+
+        const targetFrame = await fetchTrackingFrame(media, frameIndex);
+        const translatedWindow = {
+          ...baseWindow,
+          centerX: baseWindow.centerX + accumulatedDx / sourceFrame.width,
+          centerY: baseWindow.centerY + accumulatedDy / sourceFrame.height
+        };
+        const match = matchTranslation(sourceFrame, targetFrame, translatedWindow, frameIndex, {
+          searchRadiusPx: getScaledSearchRadius(sourceFrame.width, sourceFrame.height),
+          minTemplateSizePx: 12,
+          minTextureStandardDeviation: 2
+        });
+
+        if (match.confidence < 0.55) {
+          throw new TrackingFailure(
+            frameIndex,
+            "low-confidence",
+            `Tracking confidence dropped to ${match.confidence.toFixed(2)} at frame ${frameIndex + 1}.`
+          );
+        }
+
+        accumulatedDx += match.dxPx;
+        accumulatedDy += match.dyPx;
+        keyframes.push({
+          frame: frameIndex,
+          dx: accumulatedDx / targetFrame.width,
+          dy: accumulatedDy / targetFrame.height,
+          confidence: match.confidence
+        });
+        sourceFrame = targetFrame;
+
+        setTrackingOperation({
+          id: requestId,
+          direction,
+          targetShape,
+          currentFrame: frameIndex,
+          completedFrames: completed,
+          totalFrames: totalSteps,
+          message: `Tracked ${completed} / ${totalSteps} frames.`
+        });
+      }
+
+      commitTrackingKeyframes(nodeId, targetShape, keyframes, "ready");
+      setTrackingOperation(undefined);
+      setState((current) => ({
+        ...current,
+        status: "ready",
+        message: `Tracking complete: ${keyframes.length} keyframes written.`,
+        error: undefined
+      }));
+    } catch (error) {
+      const failureFrame = error instanceof TrackingFailure ? error.frame : playback.currentFrame;
+      const failureReason = error instanceof Error ? error.message : "Tracking failed.";
+
+      if (keyframes.length > 1) {
+        commitTrackingKeyframes(nodeId, targetShape, keyframes, "failed", {
+          frame: failureFrame,
+          reason: failureReason
+        });
+      }
+
+      setTrackingOperation(undefined);
+      setState((current) => ({
+        ...current,
+        status: "error",
+        message: failureReason,
+        error: {
+          code: "TRACKING_FAILED",
+          message: failureReason,
+          detail: `Frame ${failureFrame + 1}`
+        }
+      }));
+    } finally {
+      cancelledTrackingIds.current.delete(requestId);
+    }
+  }, [
+    activeNode,
+    commitTrackingKeyframes,
+    fetchTrackingFrame,
+    lastFrameIndex,
+    playback.currentFrame,
+    state.media,
+    trackingOperation
+  ]);
+
+  const cancelTracking = useCallback(() => {
+    if (!trackingOperation) {
+      return;
+    }
+
+    cancelledTrackingIds.current.add(trackingOperation.id);
+    setTrackingOperation((current) => current ? { ...current, message: "Cancelling tracking..." } : current);
+  }, [trackingOperation]);
 
   const commitFrame = useCallback(
     (frameIndex: number) => {
@@ -633,14 +878,18 @@ export function App() {
   }, [updateActiveNode]);
 
   const updatePowerWindow = useCallback((shape: PowerWindowShape, updater: (window: PowerWindow) => PowerWindow) => {
+    if (trackingOperation) {
+      return;
+    }
+
     updateActiveNode((node) => ({
-      ...node,
+      ...invalidateTrackingForWindow(node, shape),
       windows: {
         ...node.windows,
         [shape]: updater(node.windows[shape])
       }
     }));
-  }, [updateActiveNode]);
+  }, [trackingOperation, updateActiveNode]);
 
   const updatePowerWindowScalar = useCallback((shape: PowerWindowShape, key: WindowScalarKey, value: number) => {
     updatePowerWindow(shape, (window) => ({
@@ -661,11 +910,36 @@ export function App() {
   }, [updateActiveNode]);
 
   const resetWindows = useCallback(() => {
+    if (trackingOperation) {
+      return;
+    }
+
     updateActiveNode((node) => ({
-      ...node,
+      ...invalidateTrackingForWindow(invalidateTrackingForWindow(node, "ellipse"), "rectangle"),
       windows: createDefaultPowerWindows()
     }));
-  }, [updateActiveNode]);
+  }, [trackingOperation, updateActiveNode]);
+
+  const setTrackingTarget = useCallback((targetShape: PowerWindowShape) => {
+    if (trackingOperation) {
+      return;
+    }
+
+    updateActiveNode((node) => {
+      if (node.tracking.targetShape === targetShape) {
+        return node;
+      }
+
+      return {
+        ...node,
+        tracking: {
+          targetShape,
+          keyframes: [],
+          state: "empty"
+        }
+      };
+    });
+  }, [trackingOperation, updateActiveNode]);
 
   useEffect(() => {
     if (!project.nodes.some((node) => node.id === selectedNodeId)) {
@@ -756,6 +1030,10 @@ export function App() {
   useEffect(() => {
     rendererRef.current?.setPlaybackActive(playback.isPlaying);
   }, [playback.isPlaying]);
+
+  useEffect(() => {
+    rendererRef.current?.setCurrentFrame(playback.currentFrame);
+  }, [playback.currentFrame]);
 
   useEffect(() => {
     if (!state.frame || !rendererRef.current || playback.isPlaying) {
@@ -897,7 +1175,8 @@ export function App() {
             <canvas ref={canvasRef} className="viewer-canvas" aria-label="Video viewer" />
             {state.media ? (
               <WindowOverlay
-                activeNode={activeNode}
+                activeNode={resolvedActiveNode}
+                disabled={Boolean(trackingOperation)}
                 sourceRect={viewerSourceRect}
                 onUpdateWindow={updatePowerWindow}
               />
@@ -1058,24 +1337,29 @@ export function App() {
           {state.error ? <ErrorBanner error={state.error} /> : null}
         </section>
 
-        <ColorPanel
-          nodes={project.nodes}
-          activeNode={activeNode}
-          selectedNodeId={selectedNodeId}
-          onSelectNode={setSelectedNodeId}
-          onAddNode={addNode}
-          onDeleteNode={deleteActiveNode}
-          onUpdateNode={updateActiveNode}
-          onUpdateRgb={updateRgbPrimary}
-          onUpdateScalar={updateScalarPrimary}
-          onUpdateQualifierScalar={updateQualifierScalar}
-          onUpdateWindowScalar={updatePowerWindowScalar}
-          onUpdateWindow={updatePowerWindow}
-          onResetPrimary={resetPrimary}
-          onResetWindows={resetWindows}
-          showMatte={showMatte}
-          onShowMatteChange={setShowMatte}
-        />
+          <ColorPanel
+            nodes={project.nodes}
+            activeNode={activeNode}
+            canUseTracking={Boolean(state.media)}
+            trackingOperation={trackingOperation}
+            selectedNodeId={selectedNodeId}
+            onSelectNode={setSelectedNodeId}
+            onAddNode={addNode}
+            onDeleteNode={deleteActiveNode}
+            onCancelTracking={cancelTracking}
+            onUpdateNode={updateActiveNode}
+            onUpdateRgb={updateRgbPrimary}
+            onUpdateScalar={updateScalarPrimary}
+            onUpdateQualifierScalar={updateQualifierScalar}
+            onUpdateWindowScalar={updatePowerWindowScalar}
+            onUpdateWindow={updatePowerWindow}
+            onResetPrimary={resetPrimary}
+            onResetWindows={resetWindows}
+            onRunTracking={runWindowTracking}
+            onSetTrackingTarget={setTrackingTarget}
+            showMatte={showMatte}
+            onShowMatteChange={setShowMatte}
+          />
       </section>
     </main>
   );
@@ -1083,12 +1367,17 @@ export function App() {
 
 function ColorPanel({
   activeNode,
+  canUseTracking,
   nodes,
+  trackingOperation,
   selectedNodeId,
   onAddNode,
+  onCancelTracking,
   onDeleteNode,
   onResetWindows,
   onResetPrimary,
+  onRunTracking,
+  onSetTrackingTarget,
   onShowMatteChange,
   onSelectNode,
   onUpdateQualifierScalar,
@@ -1100,12 +1389,17 @@ function ColorPanel({
   showMatte
 }: {
   activeNode: ColorNode;
+  canUseTracking: boolean;
   nodes: ColorNode[];
+  trackingOperation?: TrackingOperation;
   selectedNodeId: string;
   onAddNode: () => void;
+  onCancelTracking: () => void;
   onDeleteNode: () => void;
   onResetWindows: () => void;
   onResetPrimary: (key: RgbPrimaryKey | ScalarPrimaryKey) => void;
+  onRunTracking: (direction: TrackingDirection) => void;
+  onSetTrackingTarget: (shape: PowerWindowShape) => void;
   onShowMatteChange: (showMatte: boolean) => void;
   onSelectNode: (id: string) => void;
   onUpdateQualifierScalar: (key: QualifierScalarKey, value: number) => void;
@@ -1116,13 +1410,14 @@ function ColorPanel({
   onUpdateWindowScalar: (shape: PowerWindowShape, key: WindowScalarKey, value: number) => void;
   showMatte: boolean;
 }) {
+  const isTracking = Boolean(trackingOperation);
   return (
     <aside className="color-panel" aria-label="Node graph and primary controls">
       <div className="panel-title">Serial Nodes</div>
       <div className="node-strip" role="list" aria-label="Serial node graph">
         {nodes.map((node, index) => (
           <div className={`node-card ${node.id === selectedNodeId ? "is-selected" : ""} ${node.enabled ? "" : "is-bypassed"}`} key={node.id}>
-            <button type="button" className="node-select" onClick={() => onSelectNode(node.id)}>
+            <button type="button" className="node-select" onClick={() => onSelectNode(node.id)} disabled={isTracking}>
               <span className="node-index">{index + 1}</span>
               <span className="node-label">{node.name}</span>
               <span className="node-state">{node.enabled ? "On" : "Bypass"}</span>
@@ -1131,7 +1426,7 @@ function ColorPanel({
           </div>
         ))}
       </div>
-      <button className="add-node" type="button" onClick={onAddNode} disabled={nodes.length >= MAX_SERIAL_NODES}>
+      <button className="add-node" type="button" onClick={onAddNode} disabled={nodes.length >= MAX_SERIAL_NODES || isTracking}>
         Add Node
       </button>
 
@@ -1158,7 +1453,7 @@ function ColorPanel({
           <button type="button" onClick={() => onUpdateNode((node) => ({ ...node, primaries: createNeutralPrimaries() }))}>
             Reset Node
           </button>
-          <button type="button" onClick={onDeleteNode} disabled={nodes.length <= 1}>
+          <button type="button" onClick={onDeleteNode} disabled={nodes.length <= 1 || isTracking}>
             Delete
           </button>
         </div>
@@ -1229,10 +1524,30 @@ function ColorPanel({
       <section className="mask-card">
         <div className="primary-card-header">
           <h2>Windows</h2>
-          <button type="button" onClick={onResetWindows}>Reset</button>
+          <button type="button" onClick={onResetWindows} disabled={isTracking}>Reset</button>
         </div>
-        <WindowControl shape="ellipse" window={activeNode.windows.ellipse} onUpdate={onUpdateWindow} onUpdateScalar={onUpdateWindowScalar} />
-        <WindowControl shape="rectangle" window={activeNode.windows.rectangle} onUpdate={onUpdateWindow} onUpdateScalar={onUpdateWindowScalar} />
+        <TrackingControl
+          activeNode={activeNode}
+          canUseTracking={canUseTracking}
+          operation={trackingOperation}
+          onCancel={onCancelTracking}
+          onRun={onRunTracking}
+          onSetTarget={onSetTrackingTarget}
+        />
+        <WindowControl
+          disabled={isTracking}
+          shape="ellipse"
+          window={activeNode.windows.ellipse}
+          onUpdate={onUpdateWindow}
+          onUpdateScalar={onUpdateWindowScalar}
+        />
+        <WindowControl
+          disabled={isTracking}
+          shape="rectangle"
+          window={activeNode.windows.rectangle}
+          onUpdate={onUpdateWindow}
+          onUpdateScalar={onUpdateWindowScalar}
+        />
       </section>
     </aside>
   );
@@ -1360,12 +1675,77 @@ function QualifierControl({
   );
 }
 
+function TrackingControl({
+  activeNode,
+  canUseTracking,
+  onCancel,
+  onRun,
+  onSetTarget,
+  operation
+}: {
+  activeNode: ColorNode;
+  canUseTracking: boolean;
+  onCancel: () => void;
+  onRun: (direction: TrackingDirection) => void;
+  onSetTarget: (shape: PowerWindowShape) => void;
+  operation?: TrackingOperation;
+}) {
+  const tracking = activeNode.tracking;
+  const targetEnabled = activeNode.windows[tracking.targetShape].enabled;
+  const isTracking = Boolean(operation);
+  const status = formatTrackingStatus(activeNode);
+  const progressValue = operation
+    ? Math.min(100, Math.round(operation.completedFrames / Math.max(1, operation.totalFrames) * 100))
+    : 0;
+
+  return (
+    <section className="tracking-card" aria-label="Power window tracking">
+      <div className="tracking-header">
+        <h2>Translation Track</h2>
+        <span className={`tracking-state tracking-state-${tracking.state}`}>{tracking.state}</span>
+      </div>
+      <label className="tracking-target">
+        <span>Target</span>
+        <select
+          value={tracking.targetShape}
+          onChange={(event) => onSetTarget(event.currentTarget.value as PowerWindowShape)}
+          disabled={isTracking}
+        >
+          <option value="ellipse">Ellipse</option>
+          <option value="rectangle">Rectangle</option>
+        </select>
+      </label>
+      <div className="tracking-actions" role="group" aria-label="Tracking actions">
+        <button type="button" onClick={() => onRun("backward")} disabled={!canUseTracking || !targetEnabled || isTracking}>
+          Track Back
+        </button>
+        <button type="button" onClick={() => onRun("forward")} disabled={!canUseTracking || !targetEnabled || isTracking}>
+          Track Forward
+        </button>
+        <button type="button" onClick={onCancel} disabled={!isTracking}>
+          Cancel
+        </button>
+      </div>
+      {operation ? (
+        <div className="tracking-progress" role="status" aria-live="polite">
+          <progress value={progressValue} max="100" />
+          <span>{operation.message} Frame {operation.currentFrame + 1}. {operation.completedFrames} / {operation.totalFrames} frames.</span>
+        </div>
+      ) : (
+        <p className="tracking-summary">{status}</p>
+      )}
+    </section>
+  );
+}
+
 function WindowControl({
+  disabled = false,
   onUpdate,
   onUpdateScalar,
   shape,
   window
 }: {
+  disabled?: boolean;
   onUpdate: (shape: PowerWindowShape, updater: (window: PowerWindow) => PowerWindow) => void;
   onUpdateScalar: (shape: PowerWindowShape, key: WindowScalarKey, value: number) => void;
   shape: PowerWindowShape;
@@ -1381,6 +1761,7 @@ function WindowControl({
             type="checkbox"
             checked={window.enabled}
             onChange={(event) => onUpdate(shape, (current) => ({ ...current, enabled: event.currentTarget.checked }))}
+            disabled={disabled}
           />
           <span>Enable</span>
         </label>
@@ -1389,27 +1770,30 @@ function WindowControl({
             type="checkbox"
             checked={window.invert}
             onChange={(event) => onUpdate(shape, (current) => ({ ...current, invert: event.currentTarget.checked }))}
+            disabled={disabled}
           />
           <span>Invert</span>
         </label>
       </div>
-      <WindowScalarControl label="X" value={window.centerX} shape={shape} rangeKey="centerX" onChange={onUpdateScalar} />
-      <WindowScalarControl label="Y" value={window.centerY} shape={shape} rangeKey="centerY" onChange={onUpdateScalar} />
-      <WindowScalarControl label="Width" value={window.width} shape={shape} rangeKey="width" onChange={onUpdateScalar} />
-      <WindowScalarControl label="Height" value={window.height} shape={shape} rangeKey="height" onChange={onUpdateScalar} />
-      <WindowScalarControl label="Rotate" value={window.rotationDegrees} shape={shape} rangeKey="rotationDegrees" onChange={onUpdateScalar} />
-      <WindowScalarControl label="Softness" value={window.softness} shape={shape} rangeKey="softness" onChange={onUpdateScalar} />
+      <WindowScalarControl disabled={disabled} label="X" value={window.centerX} shape={shape} rangeKey="centerX" onChange={onUpdateScalar} />
+      <WindowScalarControl disabled={disabled} label="Y" value={window.centerY} shape={shape} rangeKey="centerY" onChange={onUpdateScalar} />
+      <WindowScalarControl disabled={disabled} label="Width" value={window.width} shape={shape} rangeKey="width" onChange={onUpdateScalar} />
+      <WindowScalarControl disabled={disabled} label="Height" value={window.height} shape={shape} rangeKey="height" onChange={onUpdateScalar} />
+      <WindowScalarControl disabled={disabled} label="Rotate" value={window.rotationDegrees} shape={shape} rangeKey="rotationDegrees" onChange={onUpdateScalar} />
+      <WindowScalarControl disabled={disabled} label="Softness" value={window.softness} shape={shape} rangeKey="softness" onChange={onUpdateScalar} />
     </section>
   );
 }
 
 function WindowScalarControl({
+  disabled = false,
   label,
   onChange,
   rangeKey,
   shape,
   value
 }: {
+  disabled?: boolean;
   label: string;
   onChange: (shape: PowerWindowShape, key: WindowScalarKey, value: number) => void;
   rangeKey: WindowScalarKey;
@@ -1427,6 +1811,7 @@ function WindowScalarControl({
         step={range.step}
         value={value}
         onChange={(event) => onChange(shape, rangeKey, Number(event.currentTarget.value))}
+        disabled={disabled}
       />
       <input
         type="number"
@@ -1435,6 +1820,7 @@ function WindowScalarControl({
         step={range.step}
         value={formatControlValue(value)}
         onChange={(event) => onChange(shape, rangeKey, Number(event.currentTarget.value))}
+        disabled={disabled}
       />
     </label>
   );
@@ -1442,10 +1828,12 @@ function WindowScalarControl({
 
 function WindowOverlay({
   activeNode,
+  disabled = false,
   onUpdateWindow,
   sourceRect
 }: {
   activeNode: ColorNode;
+  disabled?: boolean;
   onUpdateWindow: (shape: PowerWindowShape, updater: (window: PowerWindow) => PowerWindow) => void;
   sourceRect: SourceRect;
 }) {
@@ -1461,6 +1849,10 @@ function WindowOverlay({
     shape: PowerWindowShape,
     mode: WindowInteraction["mode"]
   ) => {
+    if (disabled) {
+      return;
+    }
+
     event.preventDefault();
     event.currentTarget.ownerSVGElement?.setPointerCapture(event.pointerId);
     interactionRef.current = {
@@ -1547,6 +1939,7 @@ function WindowOverlay({
         {enabledWindows.map((shape) => (
           <WindowOverlayShape
             key={shape}
+            disabled={disabled}
             shape={shape}
             window={activeNode.windows[shape]}
             sourceRect={sourceRect}
@@ -1559,11 +1952,13 @@ function WindowOverlay({
 }
 
 function WindowOverlayShape({
+  disabled,
   onBeginInteraction,
   shape,
   sourceRect,
   window
 }: {
+  disabled: boolean;
   onBeginInteraction: (event: ReactPointerEvent<SVGElement>, shape: PowerWindowShape, mode: WindowInteraction["mode"]) => void;
   shape: PowerWindowShape;
   sourceRect: SourceRect;
@@ -1575,7 +1970,7 @@ function WindowOverlayShape({
   const rotationPoint = rotatePixelPoint({ x: 0, y: -geometry.height / 2 - 28 }, window.rotationDegrees);
 
   return (
-    <g className={`window-shape window-shape-${shape}`}>
+    <g className={`window-shape window-shape-${shape} ${disabled ? "is-disabled" : ""}`}>
       {shape === "ellipse" ? (
         <ellipse
           cx={geometry.center.x}
@@ -1691,6 +2086,25 @@ function ExportSummary({ result }: { result: ExportJobResult }) {
       <MetadataRow label="Path" value={result.outputPath} />
     </dl>
   );
+}
+
+function formatTrackingStatus(node: ColorNode): string {
+  const tracking = node.tracking;
+  if (tracking.keyframes.length === 0) {
+    return "No tracking keyframes.";
+  }
+
+  const frameRange = `${tracking.keyframes[0].frame + 1}-${tracking.keyframes[tracking.keyframes.length - 1].frame + 1}`;
+  if (tracking.state === "stale") {
+    return `${tracking.keyframes.length} keyframes are stale after a manual ${tracking.targetShape} edit.`;
+  }
+
+  if (tracking.state === "failed") {
+    const failure = tracking.failureFrame === undefined ? "" : ` Stopped at frame ${tracking.failureFrame + 1}.`;
+    return `${tracking.keyframes.length} keyframes kept for frames ${frameRange}.${failure}`;
+  }
+
+  return `${tracking.keyframes.length} keyframes for ${tracking.targetShape}, frames ${frameRange}.`;
 }
 
 function ErrorBanner({ error }: { error: AppError }) {
@@ -1835,6 +2249,29 @@ function captureScopeFrame(
     height,
     data: imageData.data
   };
+}
+
+async function decodedFrameToLumaFrame(frame: DecodedFrame): Promise<LumaFrame> {
+  const image = await loadImage(frame.dataUrl);
+  const width = frame.width || image.naturalWidth;
+  const height = frame.height || image.naturalHeight;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) {
+    throw new Error("Could not create tracking frame canvas.");
+  }
+
+  context.drawImage(image, 0, 0, width, height);
+  const rgba = context.getImageData(0, 0, width, height).data;
+  const luma = new Uint8ClampedArray(width * height);
+
+  for (let index = 0, pixel = 0; index < rgba.length; index += 4, pixel += 1) {
+    luma[pixel] = Math.round(rgba[index] * 0.2126 + rgba[index + 1] * 0.7152 + rgba[index + 2] * 0.0722);
+  }
+
+  return { width, height, data: luma };
 }
 
 function loadImage(dataUrl: string): Promise<HTMLImageElement> {
