@@ -18,6 +18,11 @@ target/
 *.swo
 .electron-cache
 
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache/
+
 # Ralph generated files
 .ralph/.call_count
 .ralph/.last_reset
