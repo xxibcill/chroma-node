@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
-import type { AppError, DecodedFrame, ExportJobResult, FfmpegDiagnostics, MediaRef } from "../shared/ipc";
+import type { AppError, DecodedFrame, ExportJobResult, ExportProgress, ExportQuality, FfmpegDiagnostics, MediaRef } from "../shared/ipc";
 import type { ColorNode, HslQualifier, PowerWindow, PowerWindowShape, RgbVector, TrackingKeyframe } from "../shared/colorEngine";
 import {
   MAX_SERIAL_NODES,
@@ -101,6 +101,7 @@ export function App() {
   const [showMatte, setShowMatte] = useState(false);
   const [scopeInfo, setScopeInfo] = useState("Scopes waiting for a graded frame.");
   const [trackingOperation, setTrackingOperation] = useState<TrackingOperation | undefined>();
+  const [exportOperation, setExportOperation] = useState<ExportProgress | undefined>();
   const [viewerSize, setViewerSize] = useState({ width: 0, height: 0 });
   const [project, setProject] = useState<ChromaProject>(initialProject);
   const [selectedNodeId, setSelectedNodeId] = useState(initialProject.nodes[0].id);
@@ -121,6 +122,7 @@ export function App() {
   const lastFrameIndex = useMemo(() => getLastFrameIndex(state.media), [state.media]);
   const timecode = useMemo(() => formatTimecode(playback.currentFrame, state.media), [playback.currentFrame, state.media]);
   const canUseMedia = Boolean(state.media);
+  const isExporting = exportOperation?.state === "pending" || exportOperation?.state === "running";
   const activeNode = useMemo(
     () => project.nodes.find((node) => node.id === selectedNodeId) ?? project.nodes[0],
     [project.nodes, selectedNodeId]
@@ -727,22 +729,29 @@ export function App() {
     void extractPreviewFrame(openedProject.media, currentFrame);
   }, [extractPreviewFrame]);
 
-  const runExportSpike = useCallback(async () => {
-    if (!api) {
+  const runProjectExport = useCallback(async () => {
+    if (!api || !state.media || isExporting) {
       return;
     }
 
     videoRef.current?.pause();
+    rendererRef.current?.setPlaybackActive(false);
     setPlayback((current) => ({ ...current, isPlaying: false }));
-    setState((current) => ({ ...current, status: "busy", message: "Encoding synthetic H.264 MP4..." }));
-    const exportResponse = await api.exportSynthetic();
+    setExportOperation(undefined);
+    setState((current) => ({ ...current, status: "busy", message: "Exporting graded H.264 MP4...", error: undefined }));
+    const snapshot = buildProjectSnapshot();
+    const exportResponse = await api.startExport({
+      project: snapshot,
+      quality: snapshot.exportSettings.quality
+    });
     const exportResult = exportResponse.result;
     if (!exportResult.ok) {
+      const wasCancelled = exportResult.error.code === "EXPORT_CANCELLED" || exportResult.error.code === "USER_CANCELLED";
       setState((current) => ({
         ...current,
-        status: "error",
-        message: exportResult.error.message,
-        error: exportResult.error
+        status: current.media ? "ready" : "idle",
+        message: wasCancelled ? "Export cancelled." : exportResult.error.message,
+        error: wasCancelled ? undefined : exportResult.error
       }));
       return;
     }
@@ -750,11 +759,32 @@ export function App() {
     setState((current) => ({
       ...current,
       status: "ready",
-      message: "Synthetic export completed.",
+      message: "H.264 export completed.",
       exportResult: exportResult.value,
       error: undefined
     }));
-  }, []);
+  }, [buildProjectSnapshot, isExporting, state.media]);
+
+  const cancelProjectExport = useCallback(async () => {
+    if (!api || !exportOperation) {
+      return;
+    }
+
+    setExportOperation((current) => current ? { ...current, message: "Cancelling export..." } : current);
+    const response = await api.cancelExport({ jobId: exportOperation.jobId });
+    const result = response.result;
+    if (!result.ok) {
+      setState((current) => ({
+        ...current,
+        status: current.media ? "ready" : "idle",
+        message: result.error.message,
+        error: result.error
+      }));
+      return;
+    }
+
+    setExportOperation(result.value);
+  }, [exportOperation]);
 
   const togglePlayback = useCallback(() => {
     const video = videoRef.current;
@@ -995,6 +1025,40 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    if (!api) {
+      return;
+    }
+
+    return api.onExportProgress((progress) => {
+      setExportOperation(progress);
+      if (progress.state === "running" || progress.state === "pending") {
+        setState((current) => ({
+          ...current,
+          status: "busy",
+          message: `${progress.message} ${progress.percent.toFixed(1)}%.`,
+          error: undefined
+        }));
+      }
+      if (progress.state === "canceled") {
+        setState((current) => ({
+          ...current,
+          status: current.media ? "ready" : "idle",
+          message: "Export cancelled.",
+          error: undefined
+        }));
+      }
+      if (progress.state === "failed") {
+        setState((current) => ({
+          ...current,
+          status: "error",
+          message: progress.error?.message ?? progress.message,
+          error: progress.error
+        }));
+      }
+    });
+  }, []);
+
+  useEffect(() => {
     if (!canvasRef.current || rendererRef.current) {
       return;
     }
@@ -1131,8 +1195,37 @@ export function App() {
             <MetadataRow label="Path" value={state.projectPath ?? "Unsaved"} />
           </dl>
 
-          <div className="panel-title export-title">Export Spike</div>
-          {state.exportResult ? <ExportSummary result={state.exportResult} /> : <p className="muted">No export run yet.</p>}
+          <div className="panel-title export-title">Export</div>
+          <section className="export-card" aria-label="H.264 export settings and progress">
+            <label className="field-label">
+              <span>Quality</span>
+              <select
+                value={project.exportSettings.quality}
+                onChange={(event) => {
+                  const quality = event.currentTarget.value as ExportQuality;
+                  commitProject((current) => ({
+                    ...current,
+                    exportSettings: {
+                      ...current.exportSettings,
+                      quality
+                    }
+                  }));
+                }}
+                disabled={isExporting}
+              >
+                <option value="draft">Draft</option>
+                <option value="standard">Standard</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+            {exportOperation && exportOperation.state !== "completed" ? (
+              <ExportProgressPanel progress={exportOperation} onCancel={cancelProjectExport} />
+            ) : state.exportResult ? (
+              <ExportSummary result={state.exportResult} />
+            ) : (
+              <p className="muted">No export run yet.</p>
+            )}
+          </section>
         </aside>
 
         <section className="viewer-column" aria-label="Viewer">
@@ -1328,8 +1421,11 @@ export function App() {
               <button type="button" onClick={importMedia} disabled={state.status === "busy"}>
                 Import
               </button>
-              <button type="button" onClick={runExportSpike} disabled={state.status === "busy" || diagnostics?.available === false}>
+              <button type="button" onClick={runProjectExport} disabled={!state.media || state.status === "busy" || diagnostics?.available === false}>
                 Export MP4
+              </button>
+              <button type="button" onClick={cancelProjectExport} disabled={!isExporting}>
+                Cancel Export
               </button>
             </div>
           </footer>
@@ -2083,8 +2179,33 @@ function ExportSummary({ result }: { result: ExportJobResult }) {
       <MetadataRow label="Codec" value={result.codec} />
       <MetadataRow label="Raster" value={`${result.width} x ${result.height}`} />
       <MetadataRow label="Frames" value={String(result.frameCount)} />
+      <MetadataRow label="Audio" value={result.hasAudio ? "Present" : "None"} />
       <MetadataRow label="Path" value={result.outputPath} />
     </dl>
+  );
+}
+
+function ExportProgressPanel({
+  onCancel,
+  progress
+}: {
+  onCancel: () => void;
+  progress: ExportProgress;
+}) {
+  const elapsedSeconds = Math.max(0, progress.elapsedMs / 1000);
+  return (
+    <div className="export-progress" role="status" aria-live="polite">
+      <div className="export-progress-header">
+        <span className={`tracking-state tracking-state-${progress.state}`}>{progress.state}</span>
+        <span>{progress.percent.toFixed(1)}%</span>
+      </div>
+      <progress value={progress.percent} max="100" />
+      <p>{progress.currentFrame} / {progress.totalFrames} frames, {elapsedSeconds.toFixed(1)}s elapsed.</p>
+      <p title={progress.outputPath}>{progress.message}</p>
+      <button type="button" onClick={onCancel} disabled={progress.state !== "pending" && progress.state !== "running"}>
+        Cancel
+      </button>
+    </div>
   );
 }
 

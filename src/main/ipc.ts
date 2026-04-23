@@ -1,7 +1,10 @@
 import { dialog, ipcMain } from "electron";
 import type {
+  CancelExportRequest,
   DecodedFrame,
   ExportJobResult,
+  ExportProgress,
+  ExportProjectRequest,
   ExportSyntheticRequest,
   FfmpegDiagnostics,
   FrameExtractRequest,
@@ -15,6 +18,7 @@ import type {
 } from "../shared/ipc.js";
 import { IpcChannel } from "../shared/ipc.js";
 import { appError, fail, isAppError, ok } from "./errors.js";
+import { cancelExport, exportProject, outputPathExists } from "./exportProject.js";
 import { exportSynthetic } from "./exportSynthetic.js";
 import { extractFrame } from "./frame.js";
 import { getFfmpegDiagnostics } from "./ffmpeg.js";
@@ -102,6 +106,80 @@ export function registerIpcHandlers(): void {
       }
     }
   );
+
+  ipcMain.handle(
+    IpcChannel.StartExport,
+    async (event, request: ExportProjectRequest): Promise<VersionedResponse<ExportJobResult>> => {
+      try {
+        const preparedRequest = await prepareExportRequest(request);
+        return ok(await exportProject(preparedRequest, (progress) => {
+          event.sender.send(IpcChannel.ExportProgress, progress);
+        }));
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.CancelExport,
+    async (_event, request: CancelExportRequest): Promise<VersionedResponse<ExportProgress>> => {
+      try {
+        return ok(cancelExport(request.jobId));
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+}
+
+async function prepareExportRequest(request: ExportProjectRequest): Promise<ExportProjectRequest> {
+  const defaultPath = request.outputPath ?? request.project.exportSettings.outputPath ?? defaultProjectExportName(request);
+  const selection = request.outputPath
+    ? { canceled: false, filePath: request.outputPath }
+    : await dialog.showSaveDialog({
+        title: "Export H.264 MP4",
+        defaultPath,
+        filters: [{ name: "MP4 Video", extensions: ["mp4"] }]
+      });
+
+  if (selection.canceled || !selection.filePath) {
+    throw appError("USER_CANCELLED", "Export was cancelled before encoding started.");
+  }
+
+  const outputPath = selection.filePath.endsWith(".mp4") ? selection.filePath : `${selection.filePath}.mp4`;
+  let overwriteConfirmed = request.overwriteConfirmed ?? false;
+  if (!overwriteConfirmed && await outputPathExists(outputPath)) {
+    const confirmation = await dialog.showMessageBox({
+      type: "warning",
+      title: "Replace existing export?",
+      message: "The selected MP4 already exists.",
+      detail: outputPath,
+      buttons: ["Replace", "Cancel"],
+      defaultId: 1,
+      cancelId: 1
+    });
+    overwriteConfirmed = confirmation.response === 0;
+  }
+
+  if (!overwriteConfirmed && await outputPathExists(outputPath)) {
+    throw appError("EXPORT_OUTPUT_EXISTS", "Export output already exists and needs confirmation.", outputPath);
+  }
+
+  return {
+    ...request,
+    outputPath,
+    overwriteConfirmed
+  };
+}
+
+function defaultProjectExportName(request: ExportProjectRequest): string {
+  const media = request.project.media;
+  if (!media) {
+    return "chroma-node-export.mp4";
+  }
+
+  return media.sourcePath.replace(/\.[^.\\/]+$/, "-graded.mp4");
 }
 
 function toAppError(error: unknown) {

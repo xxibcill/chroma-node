@@ -20,11 +20,16 @@ export async function getFfmpegDiagnostics(): Promise<FfmpegDiagnostics> {
   const errors: AppError[] = [];
   let ffmpegVersion: string | undefined;
   let ffprobeVersion: string | undefined;
+  let h264EncoderAvailable = false;
 
   if (!paths.ffmpegPath) {
     errors.push(appError("FFMPEG_MISSING", "FFmpeg was not found on PATH or in bundled resources."));
   } else {
     ffmpegVersion = await readVersion(paths.ffmpegPath);
+    h264EncoderAvailable = await hasH264Encoder(paths.ffmpegPath);
+    if (!h264EncoderAvailable) {
+      errors.push(appError("FFMPEG_MISSING", "FFmpeg was found, but the libx264 encoder is unavailable."));
+    }
   }
 
   if (!paths.ffprobePath) {
@@ -37,6 +42,7 @@ export async function getFfmpegDiagnostics(): Promise<FfmpegDiagnostics> {
     ...paths,
     ffmpegVersion,
     ffprobeVersion,
+    h264EncoderAvailable,
     available: errors.length === 0,
     errors
   };
@@ -109,6 +115,15 @@ async function readVersion(executable: string): Promise<string | undefined> {
     return output.stdout.toString("utf8").split(/\r?\n/)[0]?.trim();
   } catch {
     return undefined;
+  }
+}
+
+async function hasH264Encoder(executable: string): Promise<boolean> {
+  try {
+    const output = await runProcess(executable, ["-hide_banner", "-encoders"], { timeoutMs: 5_000 });
+    return output.exitCode === 0 && /\blibx264\b/.test(output.stdout.toString("utf8"));
+  } catch {
+    return false;
   }
 }
 

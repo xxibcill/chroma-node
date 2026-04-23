@@ -1,5 +1,9 @@
 # Phase 06 - H.264 Export
 
+## Status
+
+Done
+
 ## Functional Feature Outcome
 
 The user can export the full graded clip as a video-only H.264 MP4 that reflects the current node graph, masks, and tracking data.
@@ -39,4 +43,3 @@ Export completes the end-to-end learning pipeline from source media through grad
 - Export reflects nodes, qualifiers, windows, and tracking.
 - Cancellation cleans up incomplete output.
 - Existing files are not overwritten without confirmation.
-

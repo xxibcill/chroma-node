@@ -1,4 +1,4 @@
-import type { MediaRef } from "./ipc.js";
+import type { ExportQuality, MediaRef } from "./ipc.js";
 import {
   MAX_SERIAL_NODES,
   createColorNode,
@@ -20,6 +20,7 @@ export interface ProjectPlaybackState {
 export interface ProjectExportSettings {
   codec: "h264";
   outputPath?: string;
+  quality: ExportQuality;
 }
 
 export interface ChromaProject {
@@ -57,7 +58,8 @@ export function createDefaultProject(): ChromaProject {
     },
     nodes: [createColorNode(1)],
     exportSettings: {
-      codec: "h264"
+      codec: "h264",
+      quality: "standard"
     }
   };
 }
@@ -199,8 +201,21 @@ function readExportSettings(input: unknown, warnings: ProjectValidationIssue[]):
 
   return {
     codec: "h264",
-    outputPath: typeof source.outputPath === "string" && source.outputPath.trim() ? source.outputPath : undefined
+    outputPath: typeof source.outputPath === "string" && source.outputPath.trim() ? source.outputPath : undefined,
+    quality: readExportQuality(source.quality, warnings)
   };
+}
+
+function readExportQuality(input: unknown, warnings: ProjectValidationIssue[]): ExportQuality {
+  if (input === "draft" || input === "standard" || input === "high") {
+    return input;
+  }
+
+  if (input !== undefined) {
+    warnings.push(issue("exportSettings.quality", "DEFAULTED", "Invalid export quality; standard quality was used.", input));
+  }
+
+  return "standard";
 }
 
 function readMedia(

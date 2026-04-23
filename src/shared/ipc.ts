@@ -9,7 +9,10 @@ export const IpcChannel = {
   GetDiagnostics: "ffmpeg:get-diagnostics",
   ProbeMedia: "media:probe",
   ExtractFrame: "frame:extract",
-  ExportSynthetic: "export:synthetic"
+  ExportSynthetic: "export:synthetic",
+  StartExport: "export:start",
+  CancelExport: "export:cancel",
+  ExportProgress: "export:progress"
 } as const;
 
 export type IpcChannelName = (typeof IpcChannel)[keyof typeof IpcChannel];
@@ -23,6 +26,8 @@ export type AppErrorCode =
   | "FRAME_EXTRACT_FAILED"
   | "TRACKING_FAILED"
   | "EXPORT_FAILED"
+  | "EXPORT_CANCELLED"
+  | "EXPORT_OUTPUT_EXISTS"
   | "PROJECT_SAVE_FAILED"
   | "PROJECT_OPEN_FAILED"
   | "PROJECT_VALIDATION_FAILED"
@@ -54,6 +59,7 @@ export interface FfmpegDiagnostics {
   ffprobePath?: string;
   ffmpegVersion?: string;
   ffprobeVersion?: string;
+  h264EncoderAvailable: boolean;
   available: boolean;
   errors: AppError[];
 }
@@ -104,13 +110,42 @@ export interface ExportSyntheticRequest {
   fps?: number;
 }
 
+export type ExportQuality = "draft" | "standard" | "high";
+export type ExportJobState = "pending" | "running" | "canceled" | "failed" | "completed";
+
+export interface ExportProjectRequest {
+  project: import("./project.js").ChromaProject;
+  outputPath?: string;
+  overwriteConfirmed?: boolean;
+  quality?: ExportQuality;
+}
+
+export interface CancelExportRequest {
+  jobId: string;
+}
+
+export interface ExportProgress {
+  jobId: string;
+  state: ExportJobState;
+  currentFrame: number;
+  totalFrames: number;
+  percent: number;
+  elapsedMs: number;
+  outputPath?: string;
+  message: string;
+  error?: AppError;
+}
+
 export interface ExportJobResult {
+  jobId?: string;
   outputPath: string;
   width: number;
   height: number;
   frameCount: number;
   fps: number;
   codec: string;
+  container?: string;
+  hasAudio?: boolean;
   durationSeconds: number;
 }
 
@@ -137,6 +172,9 @@ export interface ChromaNodeApi {
   probeMedia(request: ProbeMediaRequest): Promise<VersionedResponse<MediaRef>>;
   extractFrame(request: FrameExtractRequest): Promise<VersionedResponse<DecodedFrame>>;
   exportSynthetic(request?: ExportSyntheticRequest): Promise<VersionedResponse<ExportJobResult>>;
+  startExport(request: ExportProjectRequest): Promise<VersionedResponse<ExportJobResult>>;
+  cancelExport(request: CancelExportRequest): Promise<VersionedResponse<ExportProgress>>;
+  onExportProgress(listener: (progress: ExportProgress) => void): () => void;
 }
 
 declare global {
