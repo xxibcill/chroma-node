@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
-  ChromaNodeApi,
   CancelExportRequest,
+  ChromaNodeApi,
   ExportProgress,
   ExportProjectRequest,
   ExportSyntheticRequest,
@@ -9,7 +9,19 @@ import type {
   ProbeMediaRequest,
   SaveProjectRequest
 } from "../shared/ipc.js";
-import { IpcChannel } from "../shared/ipc.js";
+
+const IpcChannel = {
+  SelectMedia: "dialog:select-media",
+  SaveProject: "project:save",
+  OpenProject: "project:open",
+  GetDiagnostics: "ffmpeg:get-diagnostics",
+  ProbeMedia: "media:probe",
+  ExtractFrame: "frame:extract",
+  ExportSynthetic: "export:synthetic",
+  StartExport: "export:start",
+  CancelExport: "export:cancel",
+  ExportProgress: "export:progress"
+} as const;
 
 const api: ChromaNodeApi = {
   selectMedia: () => ipcRenderer.invoke(IpcChannel.SelectMedia),
