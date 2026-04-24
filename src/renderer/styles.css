@@ -580,6 +580,81 @@ input[type="range"] {
   white-space: pre-wrap;
 }
 
+.relink-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.72);
+}
+
+.relink-content {
+  max-width: 480px;
+  padding: 32px;
+  border: 1px solid #68483f;
+  border-radius: 12px;
+  background: #1a1814;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.48);
+}
+
+.relink-content h2 {
+  margin: 0 0 12px;
+  color: #f3aa8c;
+}
+
+.relink-content p {
+  margin: 0 0 12px;
+  color: #ece8dc;
+  line-height: 1.5;
+}
+
+.relink-path {
+  padding: 10px 14px;
+  border-radius: 6px;
+  background: #11120f;
+}
+
+.relink-path code {
+  color: #d5b14f;
+  word-break: break-all;
+}
+
+.relink-error {
+  padding: 10px 14px;
+  border-radius: 6px;
+  background: #251914;
+  color: #f0c6b8;
+}
+
+.relink-content ul {
+  margin: 0 0 20px;
+  padding-left: 20px;
+  color: #9e9b80;
+  line-height: 1.8;
+}
+
+.relink-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.relink-actions button {
+  flex: 1;
+}
+
+.relink-actions .primary-action {
+  background: #4a6741;
+  border-color: #5a7a4f;
+}
+
+.relink-actions .primary-action:hover:not(:disabled) {
+  background: #5a7a4f;
+  border-color: #6a8a5f;
+}
+
 .color-panel {
   min-width: 0;
   border-left: 1px solid #32342b;

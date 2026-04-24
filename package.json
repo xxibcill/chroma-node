@@ -19,7 +19,10 @@
     "test:phase03": "vitest run && npm run build && node scripts/verify-phase03.mjs",
     "test:phase04": "vitest run && npm run build && node scripts/verify-phase04.mjs",
     "test:phase05": "vitest run && npm run build && node scripts/verify-phase05.mjs",
-    "test:phase06": "vitest run && npm run build && node scripts/verify-phase06.mjs"
+    "test:phase06": "vitest run && npm run build && node scripts/verify-phase06.mjs",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder",
+    "dist:mac": "npm run build && electron-builder --mac"
   },
   "dependencies": {
     "react": "^19.0.0",
@@ -37,11 +40,47 @@
     "concurrently": "^9.1.2",
     "cross-env": "^7.0.3",
     "electron": "^34.0.0",
+    "electron-builder": "^25.1.8",
     "eslint": "^9.18.0",
     "eslint-plugin-react-hooks": "^5.1.0",
     "typescript": "^5.7.3",
     "vite": "^6.0.7",
     "vitest": "^2.1.8",
     "wait-on": "^8.0.2"
+  },
+  "build": {
+    "appId": "com.chromanode.app",
+    "productName": "Chroma Node",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraMetadata": {
+      "main": "dist/main/main/main.js"
+    },
+    "mac": {
+      "category": "public.app-category.video",
+      "target": ["dmg"]
+    },
+    "dmg": {
+      "title": "${productName}",
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    },
+    "asar": true,
+    "compression": "normal"
   }
 }

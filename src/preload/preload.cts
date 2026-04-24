@@ -7,6 +7,7 @@ import type {
   ExportSyntheticRequest,
   FrameExtractRequest,
   ProbeMediaRequest,
+  RelinkMediaRequest,
   SaveProjectRequest
 } from "../shared/ipc.js";
 
@@ -14,6 +15,7 @@ const IpcChannel = {
   SelectMedia: "dialog:select-media",
   SaveProject: "project:save",
   OpenProject: "project:open",
+  RelinkMedia: "media:relink",
   GetDiagnostics: "ffmpeg:get-diagnostics",
   ProbeMedia: "media:probe",
   ExtractFrame: "frame:extract",
@@ -27,6 +29,7 @@ const api: ChromaNodeApi = {
   selectMedia: () => ipcRenderer.invoke(IpcChannel.SelectMedia),
   saveProject: (request: SaveProjectRequest) => ipcRenderer.invoke(IpcChannel.SaveProject, request),
   openProject: () => ipcRenderer.invoke(IpcChannel.OpenProject),
+  relinkMedia: (request: RelinkMediaRequest) => ipcRenderer.invoke(IpcChannel.RelinkMedia, request),
   getDiagnostics: () => ipcRenderer.invoke(IpcChannel.GetDiagnostics),
   probeMedia: (request: ProbeMediaRequest) => ipcRenderer.invoke(IpcChannel.ProbeMedia, request),
   extractFrame: (request: FrameExtractRequest) => ipcRenderer.invoke(IpcChannel.ExtractFrame, request),

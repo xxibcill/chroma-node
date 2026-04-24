@@ -6,6 +6,7 @@ export const IpcChannel = {
   SelectMedia: "dialog:select-media",
   SaveProject: "project:save",
   OpenProject: "project:open",
+  RelinkMedia: "media:relink",
   GetDiagnostics: "ffmpeg:get-diagnostics",
   ProbeMedia: "media:probe",
   ExtractFrame: "frame:extract",
@@ -162,12 +163,23 @@ export interface OpenProjectResult {
   project: import("./project.js").ChromaProject;
   projectPath: string;
   missingMedia: boolean;
+  missingMediaPath?: string;
 }
+
+export interface RelinkMediaRequest {
+  originalPath: string;
+  replacementPath: string;
+}
+
+export type RelinkMediaResult =
+  | { ok: true; media: MediaRef }
+  | { ok: false; error: AppError };
 
 export interface ChromaNodeApi {
   selectMedia(): Promise<VersionedResponse<SelectMediaResponse>>;
   saveProject(request: SaveProjectRequest): Promise<VersionedResponse<SaveProjectResult>>;
   openProject(): Promise<VersionedResponse<OpenProjectResult>>;
+  relinkMedia(request: RelinkMediaRequest): Promise<RelinkMediaResult>;
   getDiagnostics(): Promise<VersionedResponse<FfmpegDiagnostics>>;
   probeMedia(request: ProbeMediaRequest): Promise<VersionedResponse<MediaRef>>;
   extractFrame(request: FrameExtractRequest): Promise<VersionedResponse<DecodedFrame>>;

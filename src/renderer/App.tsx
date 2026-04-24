@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useUndoRedo } from "./state/useUndoRedo";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { AppError, DecodedFrame, ExportJobResult, ExportProgress, ExportQuality, FfmpegDiagnostics, MediaRef } from "../shared/ipc";
 import type { ColorNode, HslQualifier, PowerWindow, PowerWindowShape, RgbVector, TrackingKeyframe } from "../shared/colorEngine";
@@ -53,6 +54,13 @@ interface UiState {
   projectPath?: string;
 }
 
+interface RelinkState {
+  isRelinking: boolean;
+  originalPath?: string;
+  projectPath?: string;
+  error?: AppError;
+}
+
 interface PlaybackState {
   isPlaying: boolean;
   isScrubbing: boolean;
@@ -105,6 +113,7 @@ export function App() {
   const [viewerSize, setViewerSize] = useState({ width: 0, height: 0 });
   const [project, setProject] = useState<ChromaProject>(initialProject);
   const [selectedNodeId, setSelectedNodeId] = useState(initialProject.nodes[0].id);
+  const { canUndo, canRedo, pushHistory, undo, redo } = useUndoRedo();
   const [playback, setPlayback] = useState<PlaybackState>({
     isPlaying: false,
     isScrubbing: false,
@@ -116,6 +125,7 @@ export function App() {
     status: "idle",
     message: initialMessage
   });
+  const [relinkState, setRelinkState] = useState<RelinkState>({ isRelinking: false });
 
   const mediaUrl = useMemo(() => (state.media ? filePathToUrl(state.media.sourcePath) : undefined), [state.media]);
   const totalFrames = useMemo(() => getTotalFrameCount(state.media), [state.media]);
@@ -153,10 +163,6 @@ export function App() {
     return diagnostics.available ? "FFmpeg ready" : "FFmpeg unavailable";
   }, [diagnostics]);
 
-  const commitProject = useCallback((updater: (current: ChromaProject) => ChromaProject) => {
-    setProject((current) => sanitizeProject(updater(current)));
-  }, []);
-
   const buildProjectSnapshot = useCallback((): ChromaProject => {
     return sanitizeProject({
       ...project,
@@ -168,6 +174,12 @@ export function App() {
       }
     });
   }, [playback.currentFrame, playback.splitPosition, playback.viewerMode, project, state.media]);
+
+  const commitProject = useCallback((updater: (current: ChromaProject) => ChromaProject) => {
+    const snapshot = buildProjectSnapshot();
+    pushHistory(snapshot);
+    setProject((current) => sanitizeProject(updater(current)));
+  }, [buildProjectSnapshot, pushHistory]);
 
   const seekVideoToFrame = useCallback((frameIndex: number, media = state.media) => {
     const video = videoRef.current;
@@ -709,13 +721,18 @@ export function App() {
     if (result.value.missingMedia) {
       setState({
         status: "error",
-        message: `Project loaded, but media is missing: ${openedProject.media.sourcePath}`,
+        message: "Project loaded, but media is missing.",
         projectPath: result.value.projectPath,
         error: {
           code: "FILE_NOT_FOUND",
           message: "Project media is missing.",
-          detail: openedProject.media.sourcePath
+          detail: result.value.missingMediaPath
         }
+      });
+      setRelinkState({
+        isRelinking: true,
+        originalPath: result.value.missingMediaPath,
+        projectPath: result.value.projectPath
       });
       return;
     }
@@ -728,6 +745,74 @@ export function App() {
     });
     void extractPreviewFrame(openedProject.media, currentFrame);
   }, [extractPreviewFrame]);
+
+  const relinkMedia = useCallback(async () => {
+    if (!api || !relinkState.originalPath) {
+      return;
+    }
+
+    setState((current) => ({ ...current, status: "busy", message: "Selecting replacement media...", error: undefined }));
+    const selection = await api.selectMedia();
+    const selectionResult = selection.result;
+    if (!selectionResult.ok) {
+      setState((current) => ({
+        ...current,
+        status: "error",
+        message: selectionResult.error.code === "USER_CANCELLED" ? "Relink cancelled." : selectionResult.error.message,
+        error: selectionResult.error.code === "USER_CANCELLED" ? undefined : selectionResult.error
+      }));
+      return;
+    }
+
+    setState((current) => ({ ...current, status: "busy", message: "Validating replacement media...", error: undefined }));
+    const relinkResult = await api.relinkMedia({
+      originalPath: relinkState.originalPath,
+      replacementPath: selectionResult.value.sourcePath
+    });
+
+    if (!relinkResult.ok) {
+      setRelinkState((current) => ({
+        ...current,
+        error: relinkResult.error
+      }));
+      setState((current) => ({
+        ...current,
+        status: "error",
+        message: relinkResult.error.message,
+        error: relinkResult.error
+      }));
+      return;
+    }
+
+    const currentFrame = clampFrameIndex(project.playback.currentFrame, relinkResult.media);
+    commitProject((current) => ({
+      ...current,
+      media: relinkResult.media,
+      playback: {
+        ...current.playback,
+        currentFrame
+      }
+    }));
+    setState((current) => ({
+      ...current,
+      status: "ready",
+      message: "Media relinked. Project restored.",
+      media: relinkResult.media,
+      error: undefined
+    }));
+    setRelinkState({ isRelinking: false });
+    void extractPreviewFrame(relinkResult.media, currentFrame);
+  }, [api, commitProject, project.playback.currentFrame, relinkState.originalPath, extractPreviewFrame]);
+
+  const cancelRelink = useCallback(() => {
+    setRelinkState({ isRelinking: false });
+    setState((current) => ({
+      ...current,
+      status: current.media ? "ready" : "idle",
+      message: current.media ? "Ready." : initialMessage,
+      error: undefined
+    }));
+  }, []);
 
   const runProjectExport = useCallback(async () => {
     if (!api || !state.media || isExporting) {
@@ -1151,6 +1236,34 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
+      const modifier = isMac ? event.metaKey : event.ctrlKey;
+
+      if (modifier && event.key === "z" && !event.shiftKey) {
+        event.preventDefault();
+        const previous = undo();
+        if (previous) {
+          setProject(previous);
+          setSelectedNodeId(previous.nodes[0]?.id ?? selectedNodeId);
+        }
+      }
+
+      if (modifier && event.key === "z" && event.shiftKey) {
+        event.preventDefault();
+        const next = redo();
+        if (next) {
+          setProject(next);
+          setSelectedNodeId(next.nodes[0]?.id ?? selectedNodeId);
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [redo, selectedNodeId, undo]);
+
+  useEffect(() => {
     if (!mediaUrl || !videoRef.current) {
       return;
     }
@@ -1412,6 +1525,12 @@ export function App() {
               <span className="status-message">{previewBusy ? "Settling to exact frame..." : state.message}</span>
             </div>
             <div className="action-row">
+              <button type="button" onClick={() => { const prev = undo(); if (prev) { setProject(prev); setSelectedNodeId(prev.nodes[0]?.id ?? selectedNodeId); } }} disabled={!canUndo}>
+                Undo
+              </button>
+              <button type="button" onClick={() => { const next = redo(); if (next) { setProject(next); setSelectedNodeId(next.nodes[0]?.id ?? selectedNodeId); } }} disabled={!canRedo}>
+                Redo
+              </button>
               <button type="button" onClick={openProject} disabled={state.status === "busy"}>
                 Open
               </button>
@@ -1431,6 +1550,14 @@ export function App() {
           </footer>
 
           {state.error ? <ErrorBanner error={state.error} /> : null}
+          {relinkState.isRelinking ? (
+            <RelinkPanel
+              originalPath={relinkState.originalPath}
+              error={relinkState.error}
+              onRelink={relinkMedia}
+              onCancel={cancelRelink}
+            />
+          ) : null}
         </section>
 
           <ColorPanel
@@ -2416,4 +2543,44 @@ function filePathToUrl(sourcePath: string): string {
   const escaped = segments.join("/");
 
   return normalized.startsWith("/") ? `file://${escaped}` : `file:///${escaped}`;
+}
+
+function RelinkPanel({
+  error,
+  onCancel,
+  onRelink,
+  originalPath
+}: {
+  error?: AppError;
+  onCancel: () => void;
+  onRelink: () => void;
+  originalPath?: string;
+}) {
+  return (
+    <div className="relink-panel" role="alertdialog" aria-label="Media relink required">
+      <div className="relink-content">
+        <h2>Media Missing</h2>
+        <p>The media file linked in this project could not be found.</p>
+        {originalPath ? (
+          <p className="relink-path">Original path: <code title={originalPath}>{originalPath}</code></p>
+        ) : null}
+        {error ? (
+          <p className="relink-error">Validation error: {error.message}</p>
+        ) : null}
+        <p>Select a replacement media file to continue. The replacement must be:</p>
+        <ul>
+          <li>An MP4 or MOV file with H.264 video codec</li>
+          <li>Maximum resolution of 1920 x 1080</li>
+        </ul>
+        <div className="relink-actions">
+          <button type="button" className="primary-action" onClick={onRelink}>
+            Choose Replacement Media
+          </button>
+          <button type="button" onClick={onCancel}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }

@@ -23,6 +23,7 @@ import { exportSynthetic } from "./exportSynthetic.js";
 import { extractFrame } from "./frame.js";
 import { getFfmpegDiagnostics } from "./ffmpeg.js";
 import { probeMedia } from "./mediaProbe.js";
+import { relinkMedia } from "./mediaRelink.js";
 import { openProjectFile, saveProjectFile } from "./projectFile.js";
 
 export function registerIpcHandlers(): void {
@@ -69,6 +70,14 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IpcChannel.OpenProject, async (): Promise<VersionedResponse<OpenProjectResult>> => {
     try {
       return ok(await openProjectFile());
+    } catch (error) {
+      return fail(toAppError(error));
+    }
+  });
+
+  ipcMain.handle(IpcChannel.RelinkMedia, async (_event, request: { originalPath: string; replacementPath: string }) => {
+    try {
+      return await relinkMedia(request.originalPath, request.replacementPath);
     } catch (error) {
       return fail(toAppError(error));
     }

@@ -63,7 +63,10 @@ export async function openProjectFile(): Promise<OpenProjectResult> {
   return {
     project: validation.project,
     projectPath,
-    missingMedia: Boolean(validation.project.media && !existsSync(validation.project.media.sourcePath))
+    missingMedia: Boolean(validation.project.media && !existsSync(validation.project.media.sourcePath)),
+    missingMediaPath: validation.project.media && !existsSync(validation.project.media.sourcePath)
+      ? validation.project.media.sourcePath
+      : undefined
   };
 }
 
