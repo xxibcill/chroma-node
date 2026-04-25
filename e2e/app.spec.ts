@@ -94,6 +94,35 @@ test.describe("Top Bar", () => {
   });
 });
 
+test.describe("Shell Layout", () => {
+  test.beforeEach(async ({ page }) => {
+    await mockChromaNodeApi(page);
+    await page.goto("/");
+  });
+
+  test("locks the desktop shell to the viewport without page scrolling", async ({ page }) => {
+    const viewportMetrics = await page.evaluate(() => {
+      const shellBounds = document.querySelector(".app-shell")?.getBoundingClientRect();
+      const root = document.documentElement;
+
+      return {
+        innerHeight: window.innerHeight,
+        scrollHeight: root.scrollHeight,
+        shellHeight: shellBounds?.height ?? 0
+      };
+    });
+
+    expect(viewportMetrics.scrollHeight).toBeLessThanOrEqual(viewportMetrics.innerHeight);
+    expect(Math.abs(viewportMetrics.shellHeight - viewportMetrics.innerHeight)).toBeLessThanOrEqual(1);
+
+    const transportBounds = await page.locator(".transport").boundingBox();
+    expect(transportBounds).not.toBeNull();
+
+    const footerBottom = (transportBounds?.y ?? 0) + (transportBounds?.height ?? 0);
+    expect(footerBottom).toBeLessThanOrEqual(viewportMetrics.innerHeight);
+  });
+});
+
 test.describe("Transport Footer", () => {
   test.beforeEach(async ({ page }) => {
     await mockChromaNodeApi(page);
