@@ -24,6 +24,7 @@ The current MVP supports one imported clip at a time, up to three serial color n
   - direct viewer overlay editing
 - Track one selected power window with translation-only forward/backward template matching.
 - Display luma waveform and chroma vectorscope from the graded frame.
+- Undo and redo recent project edits in the renderer.
 - Save and open JSON project files.
 - Export the graded clip as a video-only H.264 MP4 with draft, standard, or high quality presets.
 - Cancel active exports and receive progress updates.
@@ -115,6 +116,17 @@ npm run test:phase06
 
 Each phase script runs Vitest, builds the app, then runs the matching verification script from `scripts/`.
 
+## Developer Documentation
+
+For onboarding and deeper implementation notes, start with:
+
+- `docs/developer/README.md`
+- `docs/developer/getting-started.md`
+- `docs/developer/architecture.md`
+- `docs/developer/video-editing-and-color-theory.md`
+- `docs/developer/feature-workflows.md`
+- `docs/developer/external-resources.md`
+
 ## Project Layout
 
 ```text
@@ -202,7 +214,6 @@ Project loading validates and sanitizes the file. Unsupported schema versions fa
 - No eyedropper; qualifier values are controlled with numeric/range inputs.
 - Tracking is translation-only and stores per-frame offsets for the selected power window.
 - Packaging and bundled FFmpeg distribution are still tracked as roadmap work.
-- Undo/redo is not implemented yet.
 
 ## Roadmap
 
