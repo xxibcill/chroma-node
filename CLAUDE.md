@@ -77,6 +77,15 @@ Projects are JSON with schema version `1.0.0`. Loading validates and sanitizes; 
 - WebGL2 support required in the browser environment.
 - `.mp4` and `.mov` only; max 1920x1080.
 
+## UI Layout Guardrails
+
+- Treat the renderer as a fixed desktop workspace, not a vertically growing web page.
+- On desktop widths, the full shell must fit inside the viewport without document-level vertical scrolling.
+- Keep scrolling inside the left and right side panels when content is long; the page itself should not become scrollable.
+- Preserve persistent access to the viewer, playback controls, scopes, status, and primary actions on typical laptop heights.
+- Prefer denser spacing and horizontal grouping over adding new vertical rows in the center viewer column.
+- Any change to `src/renderer/App.tsx` or `src/renderer/styles.css` that affects shell layout should keep or update a regression check for viewport fit in `e2e/app.spec.ts`.
+
 ## Roadmap
 
 The project is organized by phase in `roadmap/` with task notes in `tasks/`.
