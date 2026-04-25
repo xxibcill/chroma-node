@@ -1278,215 +1278,245 @@ export function App() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <div>
+        <div className="topbar-brand">
           <p className="eyebrow">Import, viewer, playback</p>
-          <h1>Chroma Node</h1>
+          <div className="title-row">
+            <h1>Chroma Node</h1>
+            <span className={`title-chip ${state.media ? "is-active" : ""}`}>{state.media ? "Clip online" : "Awaiting media"}</span>
+          </div>
+          <p className="topbar-summary">Study-grade color workstation for node flow, scopes, tracked windows, and export verification.</p>
         </div>
-        <div className={`diagnostic ${diagnostics?.available ? "is-ok" : "is-warning"}`}>
-          <span className="diagnostic-dot" />
-          {diagnosticsLabel}
+        <div className="topbar-status">
+          <div className={`diagnostic ${diagnostics?.available ? "is-ok" : "is-warning"}`}>
+            <span className="diagnostic-dot" />
+            {diagnosticsLabel}
+          </div>
+          <dl className="topbar-stats" aria-label="Viewer summary">
+            <div>
+              <dt>Mode</dt>
+              <dd>{playback.viewerMode}</dd>
+            </div>
+            <div>
+              <dt>Frame</dt>
+              <dd>{state.media ? `${playback.currentFrame + 1}/${totalFrames}` : "—"}</dd>
+            </div>
+            <div>
+              <dt>Time</dt>
+              <dd>{state.media ? timecode : "Idle"}</dd>
+            </div>
+          </dl>
         </div>
       </header>
 
       <section className="workspace" aria-label="Chroma Node workspace">
         <aside className="inspector" aria-label="Media diagnostics">
-          <div className="panel-title">Media</div>
-          {state.media ? <MetadataTable media={state.media} /> : <EmptyMetadata />}
+          <section className="side-card">
+            <div className="panel-title">Media</div>
+            {state.media ? <MetadataTable media={state.media} /> : <EmptyMetadata />}
+          </section>
 
-          <div className="panel-title export-title">Viewer State</div>
-          <dl className="metadata-table">
-            <MetadataRow label="Mode" value={playback.viewerMode} />
-            <MetadataRow label="Frame" value={`${playback.currentFrame + 1} / ${totalFrames}`} />
-            <MetadataRow label="Timecode" value={timecode} />
-            <MetadataRow label="Split" value={`${Math.round(playback.splitPosition * 100)}%`} />
-          </dl>
+          <section className="side-card">
+            <div className="panel-title">Viewer State</div>
+            <dl className="metadata-table">
+              <MetadataRow label="Mode" value={playback.viewerMode} />
+              <MetadataRow label="Frame" value={`${playback.currentFrame + 1} / ${totalFrames}`} />
+              <MetadataRow label="Timecode" value={timecode} />
+              <MetadataRow label="Split" value={`${Math.round(playback.splitPosition * 100)}%`} />
+            </dl>
+          </section>
 
-          <div className="panel-title export-title">Project</div>
-          <dl className="metadata-table">
-            <MetadataRow label="Name" value={project.name} />
-            <MetadataRow label="Nodes" value={`${project.nodes.length} / ${MAX_SERIAL_NODES}`} />
-            <MetadataRow label="Path" value={state.projectPath ?? "Unsaved"} />
-          </dl>
+          <section className="side-card">
+            <div className="panel-title">Project</div>
+            <dl className="metadata-table">
+              <MetadataRow label="Name" value={project.name} />
+              <MetadataRow label="Nodes" value={`${project.nodes.length} / ${MAX_SERIAL_NODES}`} />
+              <MetadataRow label="Path" value={state.projectPath ?? "Unsaved"} />
+            </dl>
+          </section>
 
-          <div className="panel-title export-title">Export</div>
-          <section className="export-card" aria-label="H.264 export settings and progress">
-            <label className="field-label">
-              <span>Quality</span>
-              <select
-                value={project.exportSettings.quality}
-                onChange={(event) => {
-                  const quality = event.currentTarget.value as ExportQuality;
-                  commitProject((current) => ({
-                    ...current,
-                    exportSettings: {
-                      ...current.exportSettings,
-                      quality
-                    }
-                  }));
-                }}
-                disabled={isExporting}
-              >
-                <option value="draft">Draft</option>
-                <option value="standard">Standard</option>
-                <option value="high">High</option>
-              </select>
-            </label>
-            {exportOperation && exportOperation.state !== "completed" ? (
-              <ExportProgressPanel progress={exportOperation} onCancel={cancelProjectExport} />
-            ) : state.exportResult ? (
-              <ExportSummary result={state.exportResult} />
-            ) : (
-              <p className="muted">No export run yet.</p>
-            )}
+          <section className="side-card side-card-export">
+            <div className="panel-title">Export</div>
+            <section className="export-card" aria-label="H.264 export settings and progress">
+              <label className="field-label">
+                <span>Quality</span>
+                <select
+                  value={project.exportSettings.quality}
+                  onChange={(event) => {
+                    const quality = event.currentTarget.value as ExportQuality;
+                    commitProject((current) => ({
+                      ...current,
+                      exportSettings: {
+                        ...current.exportSettings,
+                        quality
+                      }
+                    }));
+                  }}
+                  disabled={isExporting}
+                >
+                  <option value="draft">Draft</option>
+                  <option value="standard">Standard</option>
+                  <option value="high">High</option>
+                </select>
+              </label>
+              {exportOperation && exportOperation.state !== "completed" ? (
+                <ExportProgressPanel progress={exportOperation} onCancel={cancelProjectExport} />
+              ) : state.exportResult ? (
+                <ExportSummary result={state.exportResult} />
+              ) : (
+                <p className="muted">No export run yet.</p>
+              )}
+            </section>
           </section>
         </aside>
 
         <section className="viewer-column" aria-label="Viewer">
-          <div ref={viewerFrameRef} className={`viewer-frame viewer-mode-${showMatte ? "matte" : playback.viewerMode}`}>
-            {mediaUrl ? (
-              <video
-                key={mediaUrl}
-                ref={videoRef}
-                className="viewer-video-source"
-                src={mediaUrl}
-                muted
-                playsInline
-                preload="metadata"
-                onLoadedMetadata={(event) => rendererRef.current?.setVideoSource(event.currentTarget)}
-                onPlay={() => {
-                  setPlayback((current) => ({ ...current, isPlaying: true }));
-                  setState((current) => ({ ...current, status: "ready", message: "Playing clip.", error: undefined }));
-                }}
-                onPause={() => {
-                  setPlayback((current) => ({ ...current, isPlaying: false }));
-                }}
-                onEnded={() => {
-                  setPlayback((current) => ({
-                    ...current,
-                    isPlaying: false,
-                    currentFrame: lastFrameIndex
-                  }));
-                }}
-                onTimeUpdate={(event) => {
-                  const frameIndex = timeToFrameIndex(event.currentTarget.currentTime, state.media);
-                  setPlayback((current) => (current.isScrubbing ? current : { ...current, currentFrame: frameIndex }));
-                }}
-                onSeeked={(event) => {
-                  const frameIndex = timeToFrameIndex(event.currentTarget.currentTime, state.media);
-                  setPlayback((current) => (current.isScrubbing ? current : { ...current, currentFrame: frameIndex }));
-                }}
-              />
-            ) : null}
+          <section className="viewer-stage">
+            <div ref={viewerFrameRef} className={`viewer-frame viewer-mode-${showMatte ? "matte" : playback.viewerMode}`}>
+              {mediaUrl ? (
+                <video
+                  key={mediaUrl}
+                  ref={videoRef}
+                  className="viewer-video-source"
+                  src={mediaUrl}
+                  muted
+                  playsInline
+                  preload="metadata"
+                  onLoadedMetadata={(event) => rendererRef.current?.setVideoSource(event.currentTarget)}
+                  onPlay={() => {
+                    setPlayback((current) => ({ ...current, isPlaying: true }));
+                    setState((current) => ({ ...current, status: "ready", message: "Playing clip.", error: undefined }));
+                  }}
+                  onPause={() => {
+                    setPlayback((current) => ({ ...current, isPlaying: false }));
+                  }}
+                  onEnded={() => {
+                    setPlayback((current) => ({
+                      ...current,
+                      isPlaying: false,
+                      currentFrame: lastFrameIndex
+                    }));
+                  }}
+                  onTimeUpdate={(event) => {
+                    const frameIndex = timeToFrameIndex(event.currentTarget.currentTime, state.media);
+                    setPlayback((current) => (current.isScrubbing ? current : { ...current, currentFrame: frameIndex }));
+                  }}
+                  onSeeked={(event) => {
+                    const frameIndex = timeToFrameIndex(event.currentTarget.currentTime, state.media);
+                    setPlayback((current) => (current.isScrubbing ? current : { ...current, currentFrame: frameIndex }));
+                  }}
+                />
+              ) : null}
 
-            <canvas ref={canvasRef} className="viewer-canvas" aria-label="Video viewer" />
-            {state.media ? (
-              <WindowOverlay
-                activeNode={resolvedActiveNode}
-                disabled={Boolean(trackingOperation)}
-                sourceRect={viewerSourceRect}
-                onUpdateWindow={updatePowerWindow}
-              />
-            ) : null}
-            {!showMatte && playback.viewerMode === "split" ? (
-              <div className="split-rule" style={{ left: `${playback.splitPosition * 100}%` }} />
-            ) : null}
-            {state.media ? (
-              <>
-                <div className="viewer-badge viewer-badge-left">{showMatte ? `Matte ${activeNodeIndex + 1}` : playback.viewerMode === "graded" ? "Graded" : "Original"}</div>
-                {!showMatte && playback.viewerMode === "split" ? <div className="viewer-badge viewer-badge-right">Graded</div> : null}
-              </>
-            ) : null}
-            {!state.media ? (
-              <div className="empty-state">
-                <p className="eyebrow">Viewer</p>
-                <h2>Import a supported clip</h2>
-                <p>Load one MP4 or MOV up to 1920 x 1080, then inspect playback with frame stepping, scrubbing, and before-after modes.</p>
-                <button className="primary-action" type="button" onClick={importMedia} disabled={state.status === "busy"}>
-                  Import Clip
-                </button>
-              </div>
-            ) : null}
-          </div>
-
-          <section className="playback-panel" aria-label="Playback controls">
-            <div className="viewer-mode-row" role="group" aria-label="Viewer mode">
-              <button
-                type="button"
-                className={playback.viewerMode === "original" ? "is-active" : ""}
-                onClick={() => setPlayback((current) => ({ ...current, viewerMode: "original" }))}
-                disabled={!canUseMedia}
-              >
-                Original
-              </button>
-              <button
-                type="button"
-                className={playback.viewerMode === "graded" ? "is-active" : ""}
-                onClick={() => setPlayback((current) => ({ ...current, viewerMode: "graded" }))}
-                disabled={!canUseMedia}
-              >
-                Graded
-              </button>
-              <button
-                type="button"
-                className={playback.viewerMode === "split" ? "is-active" : ""}
-                onClick={() => setPlayback((current) => ({ ...current, viewerMode: "split" }))}
-                disabled={!canUseMedia}
-              >
-                Split
-              </button>
+              <canvas ref={canvasRef} className="viewer-canvas" aria-label="Video viewer" />
+              {state.media ? (
+                <WindowOverlay
+                  activeNode={resolvedActiveNode}
+                  disabled={Boolean(trackingOperation)}
+                  sourceRect={viewerSourceRect}
+                  onUpdateWindow={updatePowerWindow}
+                />
+              ) : null}
+              {!showMatte && playback.viewerMode === "split" ? (
+                <div className="split-rule" style={{ left: `${playback.splitPosition * 100}%` }} />
+              ) : null}
+              {state.media ? (
+                <>
+                  <div className="viewer-badge viewer-badge-left">{showMatte ? `Matte ${activeNodeIndex + 1}` : playback.viewerMode === "graded" ? "Graded" : "Original"}</div>
+                  {!showMatte && playback.viewerMode === "split" ? <div className="viewer-badge viewer-badge-right">Graded</div> : null}
+                </>
+              ) : null}
+              {!state.media ? (
+                <div className="empty-state">
+                  <p className="eyebrow">Viewer</p>
+                  <h2>Import a supported clip</h2>
+                  <p>Load one MP4 or MOV up to 1920 x 1080, then inspect playback with frame stepping, scrubbing, and before-after modes.</p>
+                  <button className="primary-action" type="button" onClick={importMedia} disabled={state.status === "busy"}>
+                    Import Clip
+                  </button>
+                </div>
+              ) : null}
             </div>
 
-            {playback.viewerMode === "split" ? (
-              <label className="split-control">
-                <span>Split</span>
+            <section className="playback-panel" aria-label="Playback controls">
+              <div className="viewer-mode-row" role="group" aria-label="Viewer mode">
+                <button
+                  type="button"
+                  className={playback.viewerMode === "original" ? "is-active" : ""}
+                  onClick={() => setPlayback((current) => ({ ...current, viewerMode: "original" }))}
+                  disabled={!canUseMedia}
+                >
+                  Original
+                </button>
+                <button
+                  type="button"
+                  className={playback.viewerMode === "graded" ? "is-active" : ""}
+                  onClick={() => setPlayback((current) => ({ ...current, viewerMode: "graded" }))}
+                  disabled={!canUseMedia}
+                >
+                  Graded
+                </button>
+                <button
+                  type="button"
+                  className={playback.viewerMode === "split" ? "is-active" : ""}
+                  onClick={() => setPlayback((current) => ({ ...current, viewerMode: "split" }))}
+                  disabled={!canUseMedia}
+                >
+                  Split
+                </button>
+              </div>
+
+              {playback.viewerMode === "split" ? (
+                <label className="split-control">
+                  <span>Split</span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value={playback.splitPosition}
+                    onChange={(event) =>
+                      setPlayback((current) => ({ ...current, splitPosition: Number(event.currentTarget.value) }))
+                    }
+                    disabled={!canUseMedia}
+                  />
+                </label>
+              ) : null}
+
+              <div className="scrub-row">
+                <span>{timecode}</span>
                 <input
                   type="range"
                   min="0"
-                  max="1"
-                  step="0.01"
-                  value={playback.splitPosition}
-                  onChange={(event) =>
-                    setPlayback((current) => ({ ...current, splitPosition: Number(event.currentTarget.value) }))
-                  }
+                  max={lastFrameIndex}
+                  value={playback.currentFrame}
+                  onChange={(event) => handleScrubChange(event.currentTarget.value)}
+                  onPointerUp={commitScrub}
+                  onKeyUp={commitScrub}
+                  onBlur={commitScrub}
                   disabled={!canUseMedia}
+                  aria-label="Scrub timeline"
                 />
-              </label>
-            ) : null}
+                <span>{playback.currentFrame + 1} / {totalFrames}</span>
+              </div>
 
-            <div className="scrub-row">
-              <span>{timecode}</span>
-              <input
-                type="range"
-                min="0"
-                max={lastFrameIndex}
-                value={playback.currentFrame}
-                onChange={(event) => handleScrubChange(event.currentTarget.value)}
-                onPointerUp={commitScrub}
-                onKeyUp={commitScrub}
-                onBlur={commitScrub}
-                disabled={!canUseMedia}
-                aria-label="Scrub timeline"
-              />
-              <span>{playback.currentFrame + 1} / {totalFrames}</span>
-            </div>
-
-            <div className="transport-controls" role="group" aria-label="Transport controls">
-              <IconButton label="First frame" onClick={() => commitFrame(0)} disabled={!canUseMedia}>
-                |&lt;
-              </IconButton>
-              <IconButton label="Step backward" onClick={() => commitFrame(playback.currentFrame - 1)} disabled={!canUseMedia}>
-                &lt;
-              </IconButton>
-              <button className="play-toggle" type="button" onClick={togglePlayback} disabled={!canUseMedia}>
-                {playback.isPlaying ? "Pause" : "Play"}
-              </button>
-              <IconButton label="Step forward" onClick={() => commitFrame(playback.currentFrame + 1)} disabled={!canUseMedia}>
-                &gt;
-              </IconButton>
-              <IconButton label="Last frame" onClick={() => commitFrame(lastFrameIndex)} disabled={!canUseMedia}>
-                &gt;|
-              </IconButton>
-            </div>
+              <div className="transport-controls" role="group" aria-label="Transport controls">
+                <IconButton label="First frame" onClick={() => commitFrame(0)} disabled={!canUseMedia}>
+                  |&lt;
+                </IconButton>
+                <IconButton label="Step backward" onClick={() => commitFrame(playback.currentFrame - 1)} disabled={!canUseMedia}>
+                  &lt;
+                </IconButton>
+                <button className="play-toggle" type="button" onClick={togglePlayback} disabled={!canUseMedia}>
+                  {playback.isPlaying ? "Pause" : "Play"}
+                </button>
+                <IconButton label="Step forward" onClick={() => commitFrame(playback.currentFrame + 1)} disabled={!canUseMedia}>
+                  &gt;
+                </IconButton>
+                <IconButton label="Last frame" onClick={() => commitFrame(lastFrameIndex)} disabled={!canUseMedia}>
+                  &gt;|
+                </IconButton>
+              </div>
+            </section>
           </section>
 
           <section className="scopes-panel" aria-label="Video scopes">
@@ -1636,142 +1666,154 @@ function ColorPanel({
   const isTracking = Boolean(trackingOperation);
   return (
     <aside className="color-panel" aria-label="Node graph and primary controls">
-      <div className="panel-title">Serial Nodes</div>
-      <div className="node-strip" role="list" aria-label="Serial node graph">
-        {nodes.map((node, index) => (
-          <div className={`node-card ${node.id === selectedNodeId ? "is-selected" : ""} ${node.enabled ? "" : "is-bypassed"}`} key={node.id}>
-            <button type="button" className="node-select" onClick={() => onSelectNode(node.id)} disabled={isTracking}>
-              <span className="node-index">{index + 1}</span>
-              <span className="node-label">{node.name}</span>
-              <span className="node-state">{node.enabled ? "On" : "Bypass"}</span>
-            </button>
-            {index < nodes.length - 1 ? <span className="node-arrow">-&gt;</span> : null}
+      <div className="control-stack">
+        <section className="control-section">
+          <div className="panel-title">Serial Nodes</div>
+          <div className="node-strip" role="list" aria-label="Serial node graph">
+            {nodes.map((node, index) => (
+              <div className={`node-card ${node.id === selectedNodeId ? "is-selected" : ""} ${node.enabled ? "" : "is-bypassed"}`} key={node.id}>
+                <button type="button" className="node-select" onClick={() => onSelectNode(node.id)} disabled={isTracking}>
+                  <span className="node-index">{index + 1}</span>
+                  <span className="node-label">{node.name}</span>
+                  <span className="node-state">{node.enabled ? "On" : "Bypass"}</span>
+                </button>
+                {index < nodes.length - 1 ? <span className="node-arrow">-&gt;</span> : null}
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-      <button className="add-node" type="button" onClick={onAddNode} disabled={nodes.length >= MAX_SERIAL_NODES || isTracking}>
-        Add Node
-      </button>
-
-      <div className="panel-title export-title">Node</div>
-      <div className="node-editor">
-        <label className="field-label">
-          <span>Name</span>
-          <input
-            type="text"
-            value={activeNode.name}
-            maxLength={48}
-            onChange={(event) => onUpdateNode((node) => ({ ...node, name: event.currentTarget.value }))}
-          />
-        </label>
-        <div className="node-actions">
-          <label className="toggle-row">
-            <input
-              type="checkbox"
-              checked={activeNode.enabled}
-              onChange={(event) => onUpdateNode((node) => ({ ...node, enabled: event.currentTarget.checked }))}
-            />
-            <span>Enabled</span>
-          </label>
-          <button type="button" onClick={() => onUpdateNode((node) => ({ ...node, primaries: createNeutralPrimaries() }))}>
-            Reset Node
+          <button className="add-node" type="button" onClick={onAddNode} disabled={nodes.length >= MAX_SERIAL_NODES || isTracking}>
+            Add Node
           </button>
-          <button type="button" onClick={onDeleteNode} disabled={nodes.length <= 1 || isTracking}>
-            Delete
-          </button>
-        </div>
+        </section>
+
+        <section className="control-section">
+          <div className="panel-title">Node</div>
+          <div className="node-editor">
+            <label className="field-label">
+              <span>Name</span>
+              <input
+                type="text"
+                value={activeNode.name}
+                maxLength={48}
+                onChange={(event) => onUpdateNode((node) => ({ ...node, name: event.currentTarget.value }))}
+              />
+            </label>
+            <div className="node-actions">
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={activeNode.enabled}
+                  onChange={(event) => onUpdateNode((node) => ({ ...node, enabled: event.currentTarget.checked }))}
+                />
+                <span>Enabled</span>
+              </label>
+              <button type="button" onClick={() => onUpdateNode((node) => ({ ...node, primaries: createNeutralPrimaries() }))}>
+                Reset Node
+              </button>
+              <button type="button" onClick={onDeleteNode} disabled={nodes.length <= 1 || isTracking}>
+                Delete
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section className="control-section">
+          <div className="panel-title">Primary</div>
+          <RgbControl label="Lift" value={activeNode.primaries.lift} rangeKey="lift" onChange={onUpdateRgb} onReset={onResetPrimary} />
+          <RgbControl label="Gamma" value={activeNode.primaries.gamma} rangeKey="gamma" onChange={onUpdateRgb} onReset={onResetPrimary} />
+          <RgbControl label="Gain" value={activeNode.primaries.gain} rangeKey="gain" onChange={onUpdateRgb} onReset={onResetPrimary} />
+          <RgbControl label="Offset" value={activeNode.primaries.offset} rangeKey="offset" onChange={onUpdateRgb} onReset={onResetPrimary} />
+
+          <div className="scalar-grid">
+            <ScalarControl label="Contrast" value={activeNode.primaries.contrast} rangeKey="contrast" onChange={onUpdateScalar} onReset={onResetPrimary} />
+            <ScalarControl label="Pivot" value={activeNode.primaries.pivot} rangeKey="pivot" onChange={onUpdateScalar} onReset={onResetPrimary} />
+            <ScalarControl label="Saturation" value={activeNode.primaries.saturation} rangeKey="saturation" onChange={onUpdateScalar} onReset={onResetPrimary} />
+            <ScalarControl label="Temperature" value={activeNode.primaries.temperature} rangeKey="temperature" onChange={onUpdateScalar} onReset={onResetPrimary} />
+            <ScalarControl label="Tint" value={activeNode.primaries.tint} rangeKey="tint" onChange={onUpdateScalar} onReset={onResetPrimary} />
+          </div>
+        </section>
+
+        <section className="control-section">
+          <div className="panel-title">Qualifier</div>
+          <section className="mask-card">
+            <div className="mask-toggle-grid">
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={activeNode.qualifier.enabled}
+                  onChange={(event) => onUpdateNode((node) => ({
+                    ...node,
+                    qualifier: { ...node.qualifier, enabled: event.currentTarget.checked }
+                  }))}
+                />
+                <span>Enable</span>
+              </label>
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={activeNode.qualifier.invert}
+                  onChange={(event) => onUpdateNode((node) => ({
+                    ...node,
+                    qualifier: { ...node.qualifier, invert: event.currentTarget.checked }
+                  }))}
+                />
+                <span>Invert</span>
+              </label>
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={showMatte}
+                  onChange={(event) => onShowMatteChange(event.currentTarget.checked)}
+                />
+                <span>Show Matte</span>
+              </label>
+            </div>
+            <QualifierControl label="Hue Center" value={activeNode.qualifier.hueCenter} rangeKey="hueCenter" onChange={onUpdateQualifierScalar} />
+            <QualifierControl label="Hue Width" value={activeNode.qualifier.hueWidth} rangeKey="hueWidth" onChange={onUpdateQualifierScalar} />
+            <QualifierControl label="Hue Softness" value={activeNode.qualifier.hueSoftness} rangeKey="hueSoftness" onChange={onUpdateQualifierScalar} />
+            <div className="mask-subtitle">Saturation</div>
+            <QualifierControl label="Min" value={activeNode.qualifier.saturationMin} rangeKey="saturationMin" onChange={onUpdateQualifierScalar} />
+            <QualifierControl label="Max" value={activeNode.qualifier.saturationMax} rangeKey="saturationMax" onChange={onUpdateQualifierScalar} />
+            <QualifierControl label="Softness" value={activeNode.qualifier.saturationSoftness} rangeKey="saturationSoftness" onChange={onUpdateQualifierScalar} />
+            <div className="mask-subtitle">Luminance</div>
+            <QualifierControl label="Min" value={activeNode.qualifier.luminanceMin} rangeKey="luminanceMin" onChange={onUpdateQualifierScalar} />
+            <QualifierControl label="Max" value={activeNode.qualifier.luminanceMax} rangeKey="luminanceMax" onChange={onUpdateQualifierScalar} />
+            <QualifierControl label="Softness" value={activeNode.qualifier.luminanceSoftness} rangeKey="luminanceSoftness" onChange={onUpdateQualifierScalar} />
+          </section>
+        </section>
+
+        <section className="control-section">
+          <div className="panel-title">Power Windows</div>
+          <section className="mask-card">
+            <div className="primary-card-header">
+              <h2>Windows</h2>
+              <button type="button" onClick={onResetWindows} disabled={isTracking}>Reset</button>
+            </div>
+            <TrackingControl
+              activeNode={activeNode}
+              canUseTracking={canUseTracking}
+              operation={trackingOperation}
+              onCancel={onCancelTracking}
+              onRun={onRunTracking}
+              onSetTarget={onSetTrackingTarget}
+            />
+            <WindowControl
+              disabled={isTracking}
+              shape="ellipse"
+              window={activeNode.windows.ellipse}
+              onUpdate={onUpdateWindow}
+              onUpdateScalar={onUpdateWindowScalar}
+            />
+            <WindowControl
+              disabled={isTracking}
+              shape="rectangle"
+              window={activeNode.windows.rectangle}
+              onUpdate={onUpdateWindow}
+              onUpdateScalar={onUpdateWindowScalar}
+            />
+          </section>
+        </section>
       </div>
-
-      <div className="panel-title export-title">Primary</div>
-      <RgbControl label="Lift" value={activeNode.primaries.lift} rangeKey="lift" onChange={onUpdateRgb} onReset={onResetPrimary} />
-      <RgbControl label="Gamma" value={activeNode.primaries.gamma} rangeKey="gamma" onChange={onUpdateRgb} onReset={onResetPrimary} />
-      <RgbControl label="Gain" value={activeNode.primaries.gain} rangeKey="gain" onChange={onUpdateRgb} onReset={onResetPrimary} />
-      <RgbControl label="Offset" value={activeNode.primaries.offset} rangeKey="offset" onChange={onUpdateRgb} onReset={onResetPrimary} />
-
-      <div className="scalar-grid">
-        <ScalarControl label="Contrast" value={activeNode.primaries.contrast} rangeKey="contrast" onChange={onUpdateScalar} onReset={onResetPrimary} />
-        <ScalarControl label="Pivot" value={activeNode.primaries.pivot} rangeKey="pivot" onChange={onUpdateScalar} onReset={onResetPrimary} />
-        <ScalarControl label="Saturation" value={activeNode.primaries.saturation} rangeKey="saturation" onChange={onUpdateScalar} onReset={onResetPrimary} />
-        <ScalarControl label="Temperature" value={activeNode.primaries.temperature} rangeKey="temperature" onChange={onUpdateScalar} onReset={onResetPrimary} />
-        <ScalarControl label="Tint" value={activeNode.primaries.tint} rangeKey="tint" onChange={onUpdateScalar} onReset={onResetPrimary} />
-      </div>
-
-      <div className="panel-title export-title">Qualifier</div>
-      <section className="mask-card">
-        <div className="mask-toggle-grid">
-          <label className="toggle-row">
-            <input
-              type="checkbox"
-              checked={activeNode.qualifier.enabled}
-              onChange={(event) => onUpdateNode((node) => ({
-                ...node,
-                qualifier: { ...node.qualifier, enabled: event.currentTarget.checked }
-              }))}
-            />
-            <span>Enable</span>
-          </label>
-          <label className="toggle-row">
-            <input
-              type="checkbox"
-              checked={activeNode.qualifier.invert}
-              onChange={(event) => onUpdateNode((node) => ({
-                ...node,
-                qualifier: { ...node.qualifier, invert: event.currentTarget.checked }
-              }))}
-            />
-            <span>Invert</span>
-          </label>
-          <label className="toggle-row">
-            <input
-              type="checkbox"
-              checked={showMatte}
-              onChange={(event) => onShowMatteChange(event.currentTarget.checked)}
-            />
-            <span>Show Matte</span>
-          </label>
-        </div>
-        <QualifierControl label="Hue Center" value={activeNode.qualifier.hueCenter} rangeKey="hueCenter" onChange={onUpdateQualifierScalar} />
-        <QualifierControl label="Hue Width" value={activeNode.qualifier.hueWidth} rangeKey="hueWidth" onChange={onUpdateQualifierScalar} />
-        <QualifierControl label="Hue Softness" value={activeNode.qualifier.hueSoftness} rangeKey="hueSoftness" onChange={onUpdateQualifierScalar} />
-        <div className="mask-subtitle">Saturation</div>
-        <QualifierControl label="Min" value={activeNode.qualifier.saturationMin} rangeKey="saturationMin" onChange={onUpdateQualifierScalar} />
-        <QualifierControl label="Max" value={activeNode.qualifier.saturationMax} rangeKey="saturationMax" onChange={onUpdateQualifierScalar} />
-        <QualifierControl label="Softness" value={activeNode.qualifier.saturationSoftness} rangeKey="saturationSoftness" onChange={onUpdateQualifierScalar} />
-        <div className="mask-subtitle">Luminance</div>
-        <QualifierControl label="Min" value={activeNode.qualifier.luminanceMin} rangeKey="luminanceMin" onChange={onUpdateQualifierScalar} />
-        <QualifierControl label="Max" value={activeNode.qualifier.luminanceMax} rangeKey="luminanceMax" onChange={onUpdateQualifierScalar} />
-        <QualifierControl label="Softness" value={activeNode.qualifier.luminanceSoftness} rangeKey="luminanceSoftness" onChange={onUpdateQualifierScalar} />
-      </section>
-
-      <div className="panel-title export-title">Power Windows</div>
-      <section className="mask-card">
-        <div className="primary-card-header">
-          <h2>Windows</h2>
-          <button type="button" onClick={onResetWindows} disabled={isTracking}>Reset</button>
-        </div>
-        <TrackingControl
-          activeNode={activeNode}
-          canUseTracking={canUseTracking}
-          operation={trackingOperation}
-          onCancel={onCancelTracking}
-          onRun={onRunTracking}
-          onSetTarget={onSetTrackingTarget}
-        />
-        <WindowControl
-          disabled={isTracking}
-          shape="ellipse"
-          window={activeNode.windows.ellipse}
-          onUpdate={onUpdateWindow}
-          onUpdateScalar={onUpdateWindowScalar}
-        />
-        <WindowControl
-          disabled={isTracking}
-          shape="rectangle"
-          window={activeNode.windows.rectangle}
-          onUpdate={onUpdateWindow}
-          onUpdateScalar={onUpdateWindowScalar}
-        />
-      </section>
     </aside>
   );
 }
