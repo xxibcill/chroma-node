@@ -30,9 +30,11 @@ interface FfprobeJson {
   format?: FfprobeFormat;
 }
 
-const supportedExtensions = new Set([".mp4", ".mov"]);
-const maxDisplayWidth = 1920;
-const maxDisplayHeight = 1080;
+const SUPPORTED_EXTENSIONS = [".mp4", ".mov"] as const;
+export const MAX_DISPLAY_WIDTH = 3840;
+export const MAX_DISPLAY_HEIGHT = 2160;
+const maxDisplayWidth = MAX_DISPLAY_WIDTH;
+const maxDisplayHeight = MAX_DISPLAY_HEIGHT;
 
 export async function probeMedia(sourcePath: string): Promise<MediaRef> {
   await assertSupportedPath(sourcePath);
@@ -99,7 +101,7 @@ export function mapProbeOutput(sourcePath: string, parsed: FfprobeJson): MediaRe
   if (displaySize.width > maxDisplayWidth || displaySize.height > maxDisplayHeight) {
     throw appError(
       "UNSUPPORTED_MEDIA",
-      "Media exceeds the Phase 01 limit of 1920 x 1080.",
+      `Media exceeds the display raster limit of ${maxDisplayWidth} x ${maxDisplayHeight}.`,
       `${displaySize.width} x ${displaySize.height}`
     );
   }
@@ -118,6 +120,8 @@ export function mapProbeOutput(sourcePath: string, parsed: FfprobeJson): MediaRe
     codec: videoStream.codec_name,
     width: videoStream.width,
     height: videoStream.height,
+    displayWidth: displaySize.width,
+    displayHeight: displaySize.height,
     durationSeconds,
     frameRate,
     totalFrames,
@@ -129,7 +133,7 @@ export function mapProbeOutput(sourcePath: string, parsed: FfprobeJson): MediaRe
 
 async function assertSupportedPath(sourcePath: string): Promise<void> {
   const extension = path.extname(sourcePath).toLowerCase();
-  if (!supportedExtensions.has(extension)) {
+  if (!SUPPORTED_EXTENSIONS.includes(extension as ".mp4" | ".mov")) {
     throw appError("UNSUPPORTED_MEDIA", "Only MP4 and MOV files are supported in this phase.");
   }
 

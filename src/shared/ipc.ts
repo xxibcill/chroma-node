@@ -81,12 +81,21 @@ export interface MediaRef {
   codec: string;
   width: number;
   height: number;
+  displayWidth: number;
+  displayHeight: number;
   durationSeconds: number;
   frameRate: number;
   totalFrames?: number;
   hasAudio: boolean;
   rotation: number;
   videoStreamIndex: number;
+}
+
+export function getDisplaySize(media: { width: number; height: number; rotation: number }): { displayWidth: number; displayHeight: number } {
+  const rotated = media.rotation === 90 || media.rotation === 270;
+  return rotated
+    ? { displayWidth: media.height, displayHeight: media.width }
+    : { displayWidth: media.width, displayHeight: media.height };
 }
 
 export interface FrameExtractRequest {

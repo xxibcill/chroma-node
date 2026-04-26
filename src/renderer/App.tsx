@@ -149,10 +149,10 @@ export function App() {
     () => getContainedRect(
       viewerSize.width,
       viewerSize.height,
-      state.media?.width ?? state.frame?.width ?? 1,
-      state.media?.height ?? state.frame?.height ?? 1
+      state.media?.displayWidth ?? state.frame?.width ?? 1,
+      state.media?.displayHeight ?? state.frame?.height ?? 1
     ),
-    [state.frame?.height, state.frame?.width, state.media?.height, state.media?.width, viewerSize.height, viewerSize.width]
+    [state.frame?.height, state.frame?.width, state.media?.displayHeight, state.media?.displayWidth, viewerSize.height, viewerSize.width]
   );
 
   const diagnosticsLabel = useMemo(() => {
@@ -1398,7 +1398,7 @@ export function App() {
                 <div className="empty-state">
                   <p className="eyebrow">Viewer</p>
                   <h2>Import a supported clip</h2>
-                  <p>Load one MP4 or MOV up to 1920 x 1080, then inspect playback with frame stepping, scrubbing, and before-after modes.</p>
+                  <p>Load one MP4 or MOV, then inspect playback with frame stepping, scrubbing, and before-after modes. Portrait, square, and rotated media are supported.</p>
                   <button className="primary-action" type="button" onClick={importMedia} disabled={state.status === "busy"}>
                     Import Clip
                   </button>
@@ -2297,12 +2297,13 @@ function MetadataTable({ media }: { media: MediaRef }) {
     <dl className="metadata-table">
       <MetadataRow label="File" value={media.fileName} />
       <MetadataRow label="Codec" value={media.codec} />
-      <MetadataRow label="Raster" value={`${media.width} x ${media.height}`} />
+      <MetadataRow label="Coded Raster" value={`${media.width} x ${media.height}`} />
+      <MetadataRow label="Display Raster" value={`${media.displayWidth} x ${media.displayHeight}`} />
       <MetadataRow label="Duration" value={`${media.durationSeconds.toFixed(2)}s`} />
       <MetadataRow label="Frame Rate" value={`${media.frameRate.toFixed(3)} fps`} />
       <MetadataRow label="Frames" value={String(media.totalFrames ?? "Unknown")} />
       <MetadataRow label="Audio" value={media.hasAudio ? "Present" : "Ignored"} />
-      <MetadataRow label="Rotation" value={`${media.rotation} deg`} />
+      {media.rotation !== 0 ? <MetadataRow label="Rotation" value={`${media.rotation} deg`} /> : null}
     </dl>
   );
 }
@@ -2586,7 +2587,7 @@ function RelinkPanel({
         <p>Select a replacement media file to continue. The replacement must be:</p>
         <ul>
           <li>An MP4 or MOV file with H.264 video codec</li>
-          <li>Maximum resolution of 1920 x 1080</li>
+          <li>Has a display raster no larger than 3840 x 2160</li>
         </ul>
         <div className="relink-actions">
           <button type="button" className="primary-action" onClick={onRelink}>

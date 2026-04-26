@@ -237,19 +237,32 @@ function readMedia(
     errors.push(issue("media.sourcePath", "INVALID_TYPE", "Media sourcePath is required when media is present.", input.sourcePath));
   }
 
+  const rawWidth = clampInteger(readNumber(input.width, "media.width", 0, warnings), 0, 7680);
+  const rawHeight = clampInteger(readNumber(input.height, "media.height", 0, warnings), 0, 4320);
+  const rawDisplayWidth = clampInteger(readNumber(input.displayWidth, "media.displayWidth", 0, warnings), 0, 7680);
+  const rawDisplayHeight = clampInteger(readNumber(input.displayHeight, "media.displayHeight", 0, warnings), 0, 4320);
+  const rotation = clampInteger(readNumber(input.rotation, "media.rotation", 0, warnings), -360, 360);
+
+  // Legacy project migration: compute display dimensions from rotation
+  const rotated = rotation === 90 || rotation === 270;
+  const displayWidth = rawDisplayWidth > 0 ? rawDisplayWidth : rotated ? rawHeight : rawWidth;
+  const displayHeight = rawDisplayHeight > 0 ? rawDisplayHeight : rotated ? rawWidth : rawHeight;
+
   return {
     id: readString(input.id, "media.id", sourcePath || "missing-media", warnings),
     sourcePath,
     fileName: readString(input.fileName, "media.fileName", sourcePath.split(/[\\/]/).pop() || "Unknown", warnings),
     container: readString(input.container, "media.container", "unknown", warnings),
     codec: readString(input.codec, "media.codec", "unknown", warnings),
-    width: clampInteger(readNumber(input.width, "media.width", 0, warnings), 0, 7680),
-    height: clampInteger(readNumber(input.height, "media.height", 0, warnings), 0, 4320),
+    width: rawWidth,
+    height: rawHeight,
+    displayWidth,
+    displayHeight,
     durationSeconds: clampNumber(readNumber(input.durationSeconds, "media.durationSeconds", 0, warnings), 0, Number.MAX_SAFE_INTEGER, "media.durationSeconds", warnings),
     frameRate: clampNumber(readNumber(input.frameRate, "media.frameRate", 24, warnings), 1, 240, "media.frameRate", warnings),
     totalFrames: input.totalFrames === undefined ? undefined : clampInteger(readNumber(input.totalFrames, "media.totalFrames", 0, warnings), 0, Number.MAX_SAFE_INTEGER),
     hasAudio: typeof input.hasAudio === "boolean" ? input.hasAudio : false,
-    rotation: clampInteger(readNumber(input.rotation, "media.rotation", 0, warnings), -360, 360),
+    rotation,
     videoStreamIndex: clampInteger(readNumber(input.videoStreamIndex, "media.videoStreamIndex", 0, warnings), 0, Number.MAX_SAFE_INTEGER)
   };
 }

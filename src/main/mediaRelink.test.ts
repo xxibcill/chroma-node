@@ -43,8 +43,10 @@ describe("relinkMedia", () => {
       fileName: "path.mp4",
       container: "mp4",
       codec: "h264",
-      width: 3840,
-      height: 2160,
+      width: 7680,
+      height: 4320,
+      displayWidth: 7680,
+      displayHeight: 4320,
       durationSeconds: 10,
       frameRate: 24,
       hasAudio: false,
@@ -55,7 +57,7 @@ describe("relinkMedia", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error.code).toBe("UNSUPPORTED_MEDIA");
-      expect(result.error.message).toContain("1920x1080");
+      expect(result.error.message).toContain("3840x2160");
     }
   });
 
@@ -69,6 +71,8 @@ describe("relinkMedia", () => {
       codec: "divx",
       width: 1920,
       height: 1080,
+      displayWidth: 1920,
+      displayHeight: 1080,
       durationSeconds: 10,
       frameRate: 24,
       hasAudio: false,
@@ -92,6 +96,8 @@ describe("relinkMedia", () => {
       codec: "h264",
       width: 1920,
       height: 1080,
+      displayWidth: 1920,
+      displayHeight: 1080,
       durationSeconds: 10,
       frameRate: 24,
       hasAudio: false,
@@ -116,6 +122,8 @@ describe("relinkMedia", () => {
       codec: "avc1",
       width: 1280,
       height: 720,
+      displayWidth: 1280,
+      displayHeight: 720,
       durationSeconds: 10,
       frameRate: 30,
       hasAudio: true,

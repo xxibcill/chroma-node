@@ -3,8 +3,8 @@ import { appError } from "./errors.js";
 import { probeMedia } from "./mediaProbe.js";
 import type { MediaRef, RelinkMediaResult } from "../shared/ipc.js";
 
-const MAX_WIDTH = 1920;
-const MAX_HEIGHT = 1080;
+const MAX_DISPLAY_WIDTH = 3840;
+const MAX_DISPLAY_HEIGHT = 2160;
 const SUPPORTED_CODECS = ["h264", "avc1", "mp4v", "mov"];
 const SUPPORTED_CONTAINERS = ["mp4", "mov"];
 
@@ -42,11 +42,11 @@ export async function relinkMedia(originalPath: string, replacementPath: string)
 }
 
 function validateMediaCompatibility(media: MediaRef, _originalPath: string): ReturnType<typeof appError> | undefined {
-  if (media.width > MAX_WIDTH || media.height > MAX_HEIGHT) {
+  if (media.displayWidth > MAX_DISPLAY_WIDTH || media.displayHeight > MAX_DISPLAY_HEIGHT) {
     return appError(
       "UNSUPPORTED_MEDIA",
-      `Replacement media exceeds MVP resolution limit of ${MAX_WIDTH}x${MAX_HEIGHT}.`,
-      `Got ${media.width}x${media.height}.`
+      `Replacement media exceeds display raster limit of ${MAX_DISPLAY_WIDTH}x${MAX_DISPLAY_HEIGHT}.`,
+      `Got ${media.displayWidth}x${media.displayHeight}.`
     );
   }
 

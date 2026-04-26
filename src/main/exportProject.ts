@@ -90,8 +90,8 @@ export function createExportJobSnapshot(request: ExportProjectRequest): ExportJo
   }
 
   const quality = request.quality ?? project.exportSettings.quality ?? "standard";
-  const width = clampInteger(media.width, 1, 7680);
-  const height = clampInteger(media.height, 1, 4320);
+  const width = clampInteger(media.displayWidth, 1, 7680);
+  const height = clampInteger(media.displayHeight, 1, 4320);
   const fps = clampNumber(media.frameRate, 1, 240);
   const totalFrames = Math.max(1, media.totalFrames ?? (Math.round(media.durationSeconds * fps) || 1));
   const id = `export-${crypto.randomUUID()}`;

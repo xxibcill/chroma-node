@@ -17,6 +17,8 @@ const media: MediaRef = {
   codec: "h264",
   width: 1920,
   height: 1080,
+  displayWidth: 1920,
+  displayHeight: 1080,
   durationSeconds: 10,
   frameRate: 24,
   totalFrames: 240,
