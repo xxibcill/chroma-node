@@ -15,8 +15,8 @@ import {
   invalidateTrackingForWindow,
   resolveTrackedNode
 } from "../shared/colorEngine";
-import type { ChromaProject, ViewerMode } from "../shared/project";
-import { createDefaultProject, sanitizeProject } from "../shared/project";
+import type { ChromaProject, ExportCodec, ViewerMode, AudioBehavior, WorkflowPreset } from "../shared/project";
+import { applyWorkflowPreset, createDefaultProject, sanitizeProject } from "../shared/project";
 import {
   createGradedScopeFrame,
   createVectorscopeGuides,
@@ -1339,6 +1339,73 @@ export function App() {
                   <option value="draft">Draft</option>
                   <option value="standard">Standard</option>
                   <option value="high">High</option>
+                </select>
+              </label>
+              <label className="field-label">
+                <span>Codec</span>
+                <select
+                  value={project.exportSettings.codec}
+                  onChange={(event) => {
+                    const codec = event.currentTarget.value as ExportCodec;
+                    commitProject((current) => ({
+                      ...current,
+                      exportSettings: {
+                        ...current.exportSettings,
+                        codec
+                      }
+                    }));
+                  }}
+                  disabled={isExporting}
+                >
+                  <option value="h264">H.264</option>
+                  <option value="hevc">HEVC</option>
+                  <option value="prores">ProRes</option>
+                  <option value="vp9">VP9</option>
+                </select>
+              </label>
+              {state.media?.hasAudio && (
+                <label className="field-label">
+                  <span>Audio</span>
+                  <select
+                    value={project.exportSettings.audioBehavior}
+                    onChange={(event) => {
+                      const audioBehavior = event.currentTarget.value as AudioBehavior;
+                      commitProject((current) => ({
+                        ...current,
+                        exportSettings: {
+                          ...current.exportSettings,
+                          audioBehavior
+                        }
+                      }));
+                    }}
+                    disabled={isExporting}
+                  >
+                    <option value="strip">Strip</option>
+                    <option value="passthrough">Passthrough</option>
+                  </select>
+                </label>
+              )}
+              <label className="field-label">
+                <span>Workflow</span>
+                <select
+                  value={project.exportSettings.workflowPreset ?? ""}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value as WorkflowPreset | "";
+                    if (!value) {
+                      // User cleared the preset - no change to settings
+                      return;
+                    }
+                    commitProject((current) => ({
+                      ...current,
+                      exportSettings: applyWorkflowPreset(current.exportSettings, value)
+                    }));
+                  }}
+                  disabled={isExporting}
+                >
+                  <option value="">Manual</option>
+                  <option value="review">Review (Draft H.264)</option>
+                  <option value="social">Social (Standard + Audio)</option>
+                  <option value="archive">Archive (ProRes Master)</option>
                 </select>
               </label>
               <ExportSettingsPanel

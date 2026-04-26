@@ -109,6 +109,7 @@ export function mapProbeOutput(sourcePath: string, parsed: FfprobeJson): MediaRe
   const nbFrames = toPositiveInteger(videoStream.nb_frames);
   const totalFrames = nbFrames ?? (durationSeconds > 0 && frameRate > 0 ? Math.round(durationSeconds * frameRate) : undefined);
 
+  const audioStream = streams.find((stream) => stream.codec_type === "audio");
   return {
     id: crypto.createHash("sha1").update(sourcePath).digest("hex"),
     sourcePath,
@@ -122,7 +123,8 @@ export function mapProbeOutput(sourcePath: string, parsed: FfprobeJson): MediaRe
     durationSeconds,
     frameRate,
     totalFrames,
-    hasAudio: streams.some((stream) => stream.codec_type === "audio"),
+    hasAudio: audioStream !== undefined,
+    audioStreamIndex: audioStream?.index,
     rotation,
     videoStreamIndex: videoStream.index ?? 0
   };

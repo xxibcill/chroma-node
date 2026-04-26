@@ -13,7 +13,7 @@ import { evaluateNodeGraph, normalizeNodeGraph, resolveTrackedNode, type ColorNo
 import { sanitizeProject } from "../shared/project.js";
 import { createExportJobSnapshot, type ExportJobSnapshot } from "./exportPlanning.js";
 import { appError, isAppError } from "./errors.js";
-import { requireFfmpeg, requireFfprobe } from "./ffmpeg.js";
+import { requireFfmpeg, requireFfprobe, getFfmpegDiagnostics } from "./ffmpeg.js";
 import { runProcess } from "./process.js";
 import { computeProfileResult, createProfilingTimers, formatProfileReport, type ProfilingTimers } from "./exportProfiling.js";
 
@@ -76,6 +76,19 @@ export async function exportProject(
   };
   const snapshot = createExportJobSnapshot(sanitizedRequest);
 
+  // Validate encoder availability before starting export
+  const diagnostics = await getFfmpegDiagnostics();
+  const codec = snapshot.project.exportSettings.codec;
+  const encoderMap: Record<string, boolean> = {
+    h264: diagnostics.h264EncoderAvailable,
+    hevc: diagnostics.hevcEncoderAvailable,
+    prores: diagnostics.proresEncoderAvailable,
+    vp9: diagnostics.vp9EncoderAvailable
+  };
+  if (!encoderMap[codec]) {
+    throw appError("EXPORT_FAILED", `The ${codec.toUpperCase()} encoder is not available in this FFmpeg build.`, diagnostics.ffmpegVersion ?? "unknown version");
+  }
+
   if (await outputPathExists(snapshot.outputPath) && !request.overwriteConfirmed) {
     throw appError("EXPORT_OUTPUT_EXISTS", "Export output already exists and needs confirmation.", snapshot.outputPath);
   }
@@ -87,9 +100,17 @@ export async function exportProject(
   try {
     await fs.mkdir(path.dirname(snapshot.outputPath), { recursive: true });
     await fs.rm(snapshot.tempOutputPath, { force: true });
-    emitProgress(snapshot, "running", 0, "Starting FFmpeg decode and H.264 encode.", onProgress);
+    emitProgress(snapshot, "running", 0, "Starting FFmpeg video encode.", onProgress);
 
     const renderedFrames = await processFrames(ffmpegPath, job, onProgress);
+
+    // Audio passthrough: merge source audio into graded video if requested
+    const { audioBehavior } = snapshot.project.exportSettings;
+    if (audioBehavior === "passthrough" && snapshot.media.hasAudio) {
+      emitProgress(snapshot, "running", renderedFrames, "Merging source audio.", onProgress);
+      await mergeAudioPassthrough(ffmpegPath, snapshot);
+    }
+
     const result = await finalizeExport(snapshot, renderedFrames);
     emitProgress(snapshot, "completed", renderedFrames, "Export complete.", onProgress);
 
@@ -338,18 +359,48 @@ async function processFrames(
   return frameIndex;
 }
 
+async function mergeAudioPassthrough(ffmpegPath: string, snapshot: ExportJobSnapshot): Promise<void> {
+  const tempWithAudioPath = `${snapshot.tempOutputPath}.audio-temp`;
+  const audioStreamIndex = snapshot.media.audioStreamIndex ?? snapshot.media.videoStreamIndex + 1;
+
+  const args = [
+    "-hide_banner",
+    "-y",
+    "-i",
+    snapshot.tempOutputPath,
+    "-i",
+    snapshot.media.sourcePath,
+    "-map",
+    "0:v",
+    "-map",
+    `1:a:${audioStreamIndex}`,
+    "-c:v",
+    "copy",
+    "-c:a",
+    "copy",
+    "-shortest",
+    tempWithAudioPath
+  ];
+
+  const result = await runProcess(ffmpegPath, args, { timeoutMs: 120_000 });
+  if (result.exitCode !== 0) {
+    throw appError("EXPORT_FAILED", "Failed to merge source audio into export.", result.stderr.toString("utf8").trim());
+  }
+
+  await fs.rm(snapshot.tempOutputPath, { force: true });
+  await fs.rename(tempWithAudioPath, snapshot.tempOutputPath);
+}
+
 async function finalizeExport(snapshot: ExportJobSnapshot, renderedFrames: number): Promise<ExportJobResult> {
   const metadata = await probeExport(snapshot.tempOutputPath);
   const issues: string[] = [];
 
-  if (metadata.codec !== "h264") {
+  const expectedCodec = snapshot.project.exportSettings.codec === "prores" ? "prores" : snapshot.project.exportSettings.codec === "vp9" ? "vp9" : snapshot.project.exportSettings.codec === "hevc" ? "hevc" : "h264";
+  if (metadata.codec !== expectedCodec) {
     issues.push(`codec=${metadata.codec}`);
   }
   if (metadata.width !== snapshot.width || metadata.height !== snapshot.height) {
     issues.push(`resolution=${metadata.width}x${metadata.height}`);
-  }
-  if (metadata.hasAudio) {
-    issues.push("audio stream present");
   }
   if (Math.abs(metadata.fps - snapshot.fps) > 0.01) {
     issues.push(`fps=${metadata.fps}`);
@@ -375,6 +426,7 @@ async function finalizeExport(snapshot: ExportJobSnapshot, renderedFrames: numbe
     codec: metadata.codec,
     container: metadata.container,
     hasAudio: metadata.hasAudio,
+    audioBehavior: snapshot.project.exportSettings.audioBehavior,
     durationSeconds: metadata.durationSeconds
   };
 }
@@ -474,7 +526,8 @@ function buildDecodeArgs(snapshot: ExportJobSnapshot): string[] {
 }
 
 function buildEncodeArgs(snapshot: ExportJobSnapshot): string[] {
-  return [
+  const { codec, quality } = snapshot.project.exportSettings;
+  const args = [
     "-hide_banner",
     "-y",
     "-f",
@@ -486,17 +539,60 @@ function buildEncodeArgs(snapshot: ExportJobSnapshot): string[] {
     "-r",
     String(snapshot.fps),
     "-i",
-    "pipe:0",
-    "-an",
-    "-c:v",
-    "libx264",
-    ...codecPresets[snapshot.quality],
-    "-pix_fmt",
-    "yuv420p",
-    "-movflags",
-    "+faststart",
-    snapshot.tempOutputPath
+    "pipe:0"
   ];
+
+  switch (codec) {
+    case "h264":
+      args.push(
+        "-an",
+        "-c:v",
+        "libx264",
+        ...codecPresets[quality],
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart"
+      );
+      break;
+    case "hevc":
+      args.push(
+        "-an",
+        "-c:v",
+        "libx265",
+        ...codecPresets[quality],
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart"
+      );
+      break;
+    case "prores":
+      args.push(
+        "-an",
+        "-c:v",
+        "prores_ks",
+        "-pix_fmt",
+        "yuv420p10le"
+      );
+      break;
+    case "vp9":
+      args.push(
+        "-an",
+        "-c:v",
+        "libvpx-vp9",
+        "-b:v",
+        "0",
+        quality === "draft" ? "-crf" : "-b:v",
+        quality === "draft" ? "40" : quality === "standard" ? "8M" : "16M",
+        "-pix_fmt",
+        "yuv420p"
+      );
+      break;
+  }
+
+  args.push(snapshot.tempOutputPath);
+  return args;
 }
 
 function spawnFfmpeg(executable: string, args: string[]): ChildProcessWithoutNullStreams {

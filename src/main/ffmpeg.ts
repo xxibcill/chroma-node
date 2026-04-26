@@ -21,12 +21,18 @@ export async function getFfmpegDiagnostics(): Promise<FfmpegDiagnostics> {
   let ffmpegVersion: string | undefined;
   let ffprobeVersion: string | undefined;
   let h264EncoderAvailable = false;
+  let hevcEncoderAvailable = false;
+  let proresEncoderAvailable = false;
+  let vp9EncoderAvailable = false;
 
   if (!paths.ffmpegPath) {
     errors.push(appError("FFMPEG_MISSING", "FFmpeg was not found on PATH or in bundled resources."));
   } else {
     ffmpegVersion = await readVersion(paths.ffmpegPath);
-    h264EncoderAvailable = await hasH264Encoder(paths.ffmpegPath);
+    h264EncoderAvailable = await hasEncoder(paths.ffmpegPath, "libx264");
+    hevcEncoderAvailable = await hasEncoder(paths.ffmpegPath, "libx265");
+    proresEncoderAvailable = await hasEncoder(paths.ffmpegPath, "prores_ks");
+    vp9EncoderAvailable = await hasEncoder(paths.ffmpegPath, "libvpx-vp9");
     if (!h264EncoderAvailable) {
       errors.push(appError("FFMPEG_MISSING", "FFmpeg was found, but the libx264 encoder is unavailable."));
     }
@@ -43,6 +49,9 @@ export async function getFfmpegDiagnostics(): Promise<FfmpegDiagnostics> {
     ffmpegVersion,
     ffprobeVersion,
     h264EncoderAvailable,
+    hevcEncoderAvailable,
+    proresEncoderAvailable,
+    vp9EncoderAvailable,
     available: errors.length === 0,
     errors
   };
@@ -118,10 +127,10 @@ async function readVersion(executable: string): Promise<string | undefined> {
   }
 }
 
-async function hasH264Encoder(executable: string): Promise<boolean> {
+async function hasEncoder(executable: string, encoderName: string): Promise<boolean> {
   try {
     const output = await runProcess(executable, ["-hide_banner", "-encoders"], { timeoutMs: 5_000 });
-    return output.exitCode === 0 && /\blibx264\b/.test(output.stdout.toString("utf8"));
+    return output.exitCode === 0 && new RegExp(`\\b${encoderName}\\b`).test(output.stdout.toString("utf8"));
   } catch {
     return false;
   }

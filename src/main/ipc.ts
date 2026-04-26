@@ -5,6 +5,8 @@ import type {
   ExportJobResult,
   ExportProgress,
   ExportProjectRequest,
+  ExportSequenceRequest,
+  ExportStillRequest,
   ExportSyntheticRequest,
   FfmpegDiagnostics,
   FrameExtractRequest,
@@ -19,6 +21,8 @@ import type {
 import { IpcChannel } from "../shared/ipc.js";
 import { appError, fail, isAppError, ok } from "./errors.js";
 import { cancelExport, exportProject, outputPathExists } from "./exportProject.js";
+import { exportSequence } from "./exportSequence.js";
+import { exportStill } from "./exportStill.js";
 import { exportSynthetic } from "./exportSynthetic.js";
 import { extractFrame } from "./frame.js";
 import { getFfmpegDiagnostics } from "./ffmpeg.js";
@@ -140,29 +144,54 @@ export function registerIpcHandlers(): void {
       }
     }
   );
+
+  ipcMain.handle(
+    IpcChannel.ExportStill,
+    async (_event, request: ExportStillRequest): Promise<VersionedResponse<ExportJobResult>> => {
+      try {
+        return ok(await exportStill(request));
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.ExportSequence,
+    async (_event, request: ExportSequenceRequest): Promise<VersionedResponse<ExportJobResult>> => {
+      try {
+        const preparedRequest = await prepareSequenceRequest(request);
+        return ok(await exportSequence(preparedRequest));
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
 }
 
 async function prepareExportRequest(request: ExportProjectRequest): Promise<ExportProjectRequest> {
-  const defaultPath = request.outputPath ?? request.project.exportSettings.outputPath ?? defaultProjectExportName(request);
+  const codec = request.project.exportSettings.codec;
+  const { ext, filterName, filterExt } = codecDialogInfo(codec);
+  const defaultPath = request.outputPath ?? request.project.exportSettings.outputPath ?? defaultProjectExportName(request, ext);
   const selection = request.outputPath
     ? { canceled: false, filePath: request.outputPath }
     : await dialog.showSaveDialog({
-        title: "Export H.264 MP4",
+        title: `Export ${codec.toUpperCase()} ${filterName}`,
         defaultPath,
-        filters: [{ name: "MP4 Video", extensions: ["mp4"] }]
+        filters: [{ name: filterName, extensions: [filterExt] }]
       });
 
   if (selection.canceled || !selection.filePath) {
     throw appError("USER_CANCELLED", "Export was cancelled before encoding started.");
   }
 
-  const outputPath = selection.filePath.endsWith(".mp4") ? selection.filePath : `${selection.filePath}.mp4`;
+  const outputPath = selection.filePath.toLowerCase().endsWith(ext) ? selection.filePath : `${selection.filePath}${ext}`;
   let overwriteConfirmed = request.overwriteConfirmed ?? false;
   if (!overwriteConfirmed && await outputPathExists(outputPath)) {
     const confirmation = await dialog.showMessageBox({
       type: "warning",
       title: "Replace existing export?",
-      message: "The selected MP4 already exists.",
+      message: `The selected ${filterName} already exists.`,
       detail: outputPath,
       buttons: ["Replace", "Cancel"],
       defaultId: 1,
@@ -182,13 +211,75 @@ async function prepareExportRequest(request: ExportProjectRequest): Promise<Expo
   };
 }
 
-function defaultProjectExportName(request: ExportProjectRequest): string {
+function codecDialogInfo(codec: string): { ext: string; filterName: string; filterExt: string } {
+  switch (codec) {
+    case "hevc":
+      return { ext: ".mp4", filterName: "HEVC MP4", filterExt: "mp4" };
+    case "prores":
+      return { ext: ".mov", filterName: "ProRes MOV", filterExt: "mov" };
+    case "vp9":
+      return { ext: ".webm", filterName: "VP9 WebM", filterExt: "webm" };
+    default:
+      return { ext: ".mp4", filterName: "H.264 MP4", filterExt: "mp4" };
+  }
+}
+
+function defaultProjectExportName(request: ExportProjectRequest, ext: string): string {
   const media = request.project.media;
   if (!media) {
-    return "chroma-node-export.mp4";
+    return `chroma-node-export${ext}`;
   }
 
-  return media.sourcePath.replace(/\.[^.\\/]+$/, "-graded.mp4");
+  return media.sourcePath.replace(/\.[^.\\/]+$/, `-graded${ext}`);
+}
+
+async function prepareSequenceRequest(request: ExportSequenceRequest): Promise<ExportSequenceRequest> {
+  const media = request.project.media;
+  if (!media) {
+    throw appError("EXPORT_FAILED", "Export sequence requires imported media.");
+  }
+
+  const defaultPath = request.outputPath ?? media.sourcePath.replace(/\.[^.\\/]+$/, `-seq-%04d.png`);
+  const selection = request.outputPath
+    ? { canceled: false, filePath: request.outputPath }
+    : await dialog.showSaveDialog({
+        title: "Export Image Sequence",
+        defaultPath,
+        filters: [{ name: "PNG Sequence", extensions: ["png"] }]
+      });
+
+  if (selection.canceled || !selection.filePath) {
+    throw appError("USER_CANCELLED", "Export sequence was cancelled.");
+  }
+
+  let outputPath = selection.filePath;
+  if (!outputPath.toLowerCase().endsWith(".png")) {
+    outputPath = `${outputPath}.png`;
+  }
+
+  let overwriteConfirmed = request.overwriteConfirmed ?? false;
+  if (!overwriteConfirmed) {
+    // Check if any files would be overwritten - for sequence, we check a sample path
+    const samplePath = outputPath.replace("%04d", "0001");
+    if (await outputPathExists(samplePath)) {
+      const confirmation = await dialog.showMessageBox({
+        type: "warning",
+        title: "Replace existing sequence?",
+        message: "Some files in this sequence already exist.",
+        detail: outputPath,
+        buttons: ["Replace", "Cancel"],
+        defaultId: 1,
+        cancelId: 1
+      });
+      overwriteConfirmed = confirmation.response === 0;
+    }
+  }
+
+  if (!overwriteConfirmed) {
+    throw appError("EXPORT_OUTPUT_EXISTS", "Export sequence output already exists and needs confirmation.", outputPath);
+  }
+
+  return { ...request, outputPath, overwriteConfirmed };
 }
 
 function toAppError(error: unknown) {

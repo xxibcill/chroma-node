@@ -2,9 +2,9 @@
 
 ## Current Phase
 
-- Phase: Phase 08 - Media Geometry and Vertical Video
-- Status: Not started
-- Last updated: 2026-04-25
+- Phase: Phase 11 - Format and Delivery Expansion
+- Status: Implemented (2026-04-26)
+- Last updated: 2026-04-26
 
 ## Active Decisions
 
@@ -16,6 +16,9 @@
 | Media backend | Local or bundled FFmpeg | Phase 00 verifies local discovery; packaging can add bundled binaries later. |
 | Color space | Rec.709 SDR | Advanced color management is out of scope. |
 | Geometry model | Add coded vs display raster fields | Vertical and rotated media should stop relying on ad hoc width/height swaps. |
+| Audio handling | Source audio passthrough with stream copy | Audio re-encoding out of scope for Phase 11. |
+| Additional codecs | HEVC, ProRes, VP9 supported | Encoder availability validated at export start. |
+| Image sequence export | PNG sequence output with graded frames | Naming pattern: `-seq-%04d.png` |
 
 ## Open Questions
 
@@ -51,3 +54,9 @@
 | 2026-04-22 | Phase 05 | `npm run typecheck`, `npm test`, `npm run lint`, `npm run build`, and `npm run test:phase05`. | Passed |
 | 2026-04-23 | Phase 06 | `npm run test:phase06`, `npm run lint`, and a real FFmpeg export smoke test. | Passed |
 | 2026-04-25 | Roadmap extension | Added Phases 08-11 and task breakdowns for vertical video, export geometry, performance, and delivery expansion. | Planned |
+| 2026-04-26 | Phase 11 | `npm run typecheck` and `npm run build`. | Passed |
+| 2026-04-26 | Phase 11-T1 | Audio passthrough with correct stream index detection. | Passed |
+| 2026-04-26 | Phase 11-T2 | HEVC/ProRes/VP9 codec paths with encoder availability checks. | Passed |
+| 2026-04-26 | Phase 11-T3 | Still frame and image sequence export IPC handlers. | Passed |
+| 2026-04-26 | Phase 11-T4 | Workflow presets (review/social/archive) wired to codec, quality, audio. | Passed |
+| 2026-04-26 | Phase 11-T5 | Delivery compatibility matrix documented in `docs/delivery-compatibility.md`. | Passed |

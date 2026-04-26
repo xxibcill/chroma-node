@@ -57,8 +57,10 @@ export function validateExportRequest(request: {
     return issues;
   }
 
-  if (path.extname(outputPath).toLowerCase() !== ".mp4") {
-    issues.push("H.264 export must use an .mp4 output path.");
+  const codec = project.exportSettings.codec;
+  const ext = codecContainerExt(codec);
+  if (!outputPath.toLowerCase().endsWith(ext)) {
+    issues.push(`${codec.toUpperCase()} export must use a${ext.startsWith(".m") ? "n" : ""} ${ext} output path.`);
   }
 
   if (path.resolve(outputPath) === path.resolve(media.sourcePath)) {
@@ -180,8 +182,10 @@ export function createExportJobSnapshot(request: {
     throw appError("EXPORT_FAILED", "Export output path is required.");
   }
 
-  if (path.extname(outputPath).toLowerCase() !== ".mp4") {
-    throw appError("EXPORT_FAILED", "H.264 export must use an .mp4 output path.", outputPath);
+  const codec = project.exportSettings.codec;
+  const ext = codecContainerExt(codec);
+  if (!outputPath.toLowerCase().endsWith(ext)) {
+    throw appError("EXPORT_FAILED", `${codec.toUpperCase()} export must use a${ext.startsWith(".m") ? "n" : ""} ${ext} output path.`, outputPath);
   }
 
   if (path.resolve(outputPath) === path.resolve(media.sourcePath)) {
@@ -203,7 +207,7 @@ export function createExportJobSnapshot(request: {
     project,
     media,
     outputPath,
-    tempOutputPath: `${outputPath}.part-${id}.mp4`,
+    tempOutputPath: `${outputPath}.part-${id}${ext}`,
     quality,
     width,
     height,
@@ -211,6 +215,20 @@ export function createExportJobSnapshot(request: {
     totalFrames,
     startedAt: Date.now()
   };
+}
+
+function codecContainerExt(codec: string): string {
+  switch (codec) {
+    case "h264":
+    case "hevc":
+      return ".mp4";
+    case "prores":
+      return ".mov";
+    case "vp9":
+      return ".webm";
+    default:
+      return ".mp4";
+  }
 }
 
 function cloneJson<T>(value: T): T {

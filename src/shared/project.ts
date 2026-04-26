@@ -21,9 +21,12 @@ export interface ProjectPlaybackState {
 export type ExportSizeMode = "source" | "preset" | "custom";
 export type ExportPreset = "1080p" | "720p" | "480p" | "square-1:1" | "square-4:5" | "portrait-9:16" | "portrait-4:5" | "portrait-3:4";
 export type ExportResizePolicy = "fit" | "crop" | "pad";
+export type ExportCodec = "h264" | "hevc" | "prores" | "vp9";
+export type AudioBehavior = "passthrough" | "strip";
+export type WorkflowPreset = "review" | "social" | "archive";
 
 export interface ProjectExportSettings {
-  codec: "h264";
+  codec: ExportCodec;
   outputPath?: string;
   quality: ExportQuality;
   sizeMode: ExportSizeMode;
@@ -31,6 +34,8 @@ export interface ProjectExportSettings {
   customWidth?: number;
   customHeight?: number;
   resizePolicy: ExportResizePolicy;
+  audioBehavior: AudioBehavior;
+  workflowPreset?: WorkflowPreset;
 }
 
 export interface ChromaProject {
@@ -71,7 +76,9 @@ export function createDefaultProject(): ChromaProject {
       codec: "h264",
       quality: "standard",
       sizeMode: "source",
-      resizePolicy: "fit"
+      resizePolicy: "fit",
+      audioBehavior: "strip",
+      workflowPreset: undefined
     }
   };
 }
@@ -212,14 +219,16 @@ function readExportSettings(input: unknown, warnings: ProjectValidationIssue[]):
   }
 
   return {
-    codec: "h264",
+    codec: readExportCodec(source.codec, warnings),
     outputPath: typeof source.outputPath === "string" && source.outputPath.trim() ? source.outputPath : undefined,
     quality: readExportQuality(source.quality, warnings),
     sizeMode: readExportSizeMode(source.sizeMode, warnings),
     preset: readExportPreset(source.preset, warnings),
     customWidth: readExportCustomDimension(source.customWidth, "customWidth", warnings),
     customHeight: readExportCustomDimension(source.customHeight, "customHeight", warnings),
-    resizePolicy: readExportResizePolicy(source.resizePolicy, warnings)
+    resizePolicy: readExportResizePolicy(source.resizePolicy, warnings),
+    audioBehavior: readAudioBehavior(source.audioBehavior, warnings),
+    workflowPreset: readWorkflowPreset(source.workflowPreset, warnings)
   };
 }
 
@@ -282,6 +291,42 @@ function readExportQuality(input: unknown, warnings: ProjectValidationIssue[]): 
   }
 
   return "standard";
+}
+
+function readExportCodec(input: unknown, warnings: ProjectValidationIssue[]): ExportCodec {
+  if (input === "h264" || input === "hevc" || input === "prores" || input === "vp9") {
+    return input;
+  }
+
+  if (input !== undefined) {
+    warnings.push(issue("exportSettings.codec", "DEFAULTED", "Invalid export codec; H.264 was used.", input));
+  }
+
+  return "h264";
+}
+
+function readAudioBehavior(input: unknown, warnings: ProjectValidationIssue[]): AudioBehavior {
+  if (input === "passthrough" || input === "strip") {
+    return input;
+  }
+
+  if (input !== undefined) {
+    warnings.push(issue("exportSettings.audioBehavior", "DEFAULTED", "Invalid audio behavior; audio was stripped.", input));
+  }
+
+  return "strip";
+}
+
+function readWorkflowPreset(input: unknown, warnings: ProjectValidationIssue[]): WorkflowPreset | undefined {
+  if (input === "review" || input === "social" || input === "archive") {
+    return input;
+  }
+
+  if (input !== undefined) {
+    warnings.push(issue("exportSettings.workflowPreset", "DEFAULTED", "Invalid workflow preset; none was used.", input));
+  }
+
+  return undefined;
 }
 
 function readMedia(
@@ -479,11 +524,52 @@ function issue(
   return { path, code, message, received };
 }
 
-function createProjectId(): string {
+export function createProjectId(): string {
   const cryptoApi = globalThis.crypto;
   if (cryptoApi && "randomUUID" in cryptoApi) {
     return cryptoApi.randomUUID();
   }
 
   return `project-${Date.now().toString(36)}`;
+}
+
+export interface WorkflowPresetDefinition {
+  codec: ExportCodec;
+  quality: ExportQuality;
+  audioBehavior: AudioBehavior;
+  description: string;
+}
+
+export const WORKFLOW_PRESET_DEFINITIONS: Record<WorkflowPreset, WorkflowPresetDefinition> = {
+  review: {
+    codec: "h264",
+    quality: "draft",
+    audioBehavior: "strip",
+    description: "Fast, compressed grade preview"
+  },
+  social: {
+    codec: "h264",
+    quality: "standard",
+    audioBehavior: "passthrough",
+    description: "Ready-to-share with audio retained"
+  },
+  archive: {
+    codec: "prores",
+    quality: "high",
+    audioBehavior: "passthrough",
+    description: "Maximum quality master with audio"
+  }
+};
+
+export function applyWorkflowPreset(
+  current: ProjectExportSettings,
+  preset: WorkflowPreset
+): ProjectExportSettings {
+  const def = WORKFLOW_PRESET_DEFINITIONS[preset];
+  return {
+    ...current,
+    codec: def.codec,
+    quality: def.quality,
+    audioBehavior: def.audioBehavior
+  };
 }
