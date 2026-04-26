@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeExportFps, createExportJobSnapshot, planExportGeometry, validateExportRequest } from "./exportPlanning";
+import { computeExportFps, computeExportGeometry, createExportJobSnapshot, planExportGeometry, validateExportGeometry, validateExportRequest } from "./exportPlanning";
 
 const createMockMedia = (overrides = {}) => ({
   id: "test-media",
@@ -217,6 +217,80 @@ describe("exportPlanning", () => {
         quality: "draft"
       });
       expect(snapshot.quality).toBe("draft");
+    });
+  });
+
+  describe("computeExportGeometry", () => {
+    it("returns source dimensions when sizeMode is source", () => {
+      const project = createMockProject({
+        media: createMockMedia({ displayWidth: 1920, displayHeight: 1080 }),
+        exportSettings: { codec: "h264", quality: "standard", sizeMode: "source", resizePolicy: "fit" }
+      });
+      const result = computeExportGeometry(project.exportSettings, project.media!);
+      expect(result.width).toBe(1920);
+      expect(result.height).toBe(1080);
+    });
+
+    it("applies fit policy to portrait-9:16 preset from landscape source", () => {
+      const project = createMockProject({
+        media: createMockMedia({ displayWidth: 1920, displayHeight: 1080 }),
+        exportSettings: { codec: "h264", quality: "standard", sizeMode: "preset", preset: "portrait-9:16", resizePolicy: "fit" }
+      });
+      const result = computeExportGeometry(project.exportSettings, project.media!);
+      // landscape source (1.78) taller than portrait target (0.56) -> fit to width, letterbox height
+      expect(result.width).toBe(1080);
+      expect(result.height).toBe(608);
+    });
+
+    it("applies crop policy to portrait-9:16 preset from landscape source", () => {
+      const project = createMockProject({
+        media: createMockMedia({ displayWidth: 1920, displayHeight: 1080 }),
+        exportSettings: { codec: "h264", quality: "standard", sizeMode: "preset", preset: "portrait-9:16", resizePolicy: "crop" }
+      });
+      const result = computeExportGeometry(project.exportSettings, project.media!);
+      // crop: landscape source fills portrait target (extra width is cropped off)
+      expect(result.width).toBe(3413);
+      expect(result.height).toBe(1920);
+    });
+
+    it("applies pad policy to portrait-9:16 preset from landscape source", () => {
+      const project = createMockProject({
+        media: createMockMedia({ displayWidth: 1920, displayHeight: 1080 }),
+        exportSettings: { codec: "h264", quality: "standard", sizeMode: "preset", preset: "portrait-9:16", resizePolicy: "pad" }
+      });
+      const result = computeExportGeometry(project.exportSettings, project.media!);
+      // pad: target raster is returned as-is
+      expect(result.width).toBe(1080);
+      expect(result.height).toBe(1920);
+    });
+  });
+
+  describe("validateExportGeometry", () => {
+    it("returns no issues for valid custom dimensions", () => {
+      const project = createMockProject({
+        media: createMockMedia(),
+        exportSettings: { codec: "h264", quality: "standard", sizeMode: "custom", customWidth: 1920, customHeight: 1080, resizePolicy: "fit" }
+      });
+      const issues = validateExportGeometry(project.exportSettings, project.media!);
+      expect(issues).toHaveLength(0);
+    });
+
+    it("returns issue for custom width exceeding max", () => {
+      const project = createMockProject({
+        media: createMockMedia(),
+        exportSettings: { codec: "h264", quality: "standard", sizeMode: "custom", customWidth: 10000, customHeight: 1080, resizePolicy: "fit" }
+      });
+      const issues = validateExportGeometry(project.exportSettings, project.media!);
+      expect(issues.some((i) => i.includes("width"))).toBe(true);
+    });
+
+    it("returns issue for custom height of 0", () => {
+      const project = createMockProject({
+        media: createMockMedia(),
+        exportSettings: { codec: "h264", quality: "standard", sizeMode: "custom", customWidth: 1920, customHeight: 0, resizePolicy: "fit" }
+      });
+      const issues = validateExportGeometry(project.exportSettings, project.media!);
+      expect(issues.some((i) => i.includes("height"))).toBe(true);
     });
   });
 });

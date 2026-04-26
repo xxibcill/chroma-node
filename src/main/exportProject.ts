@@ -122,13 +122,13 @@ export function cancelExport(jobId: string): ExportProgress {
   return job.cancel();
 }
 
-export function renderRgbaFrame(source: Buffer, width: number, height: number, nodes: readonly ColorNode[], frameIndex: number): Buffer {
+export function renderRgbaFrame(source: Buffer, sourceWidth: number, sourceHeight: number, nodes: readonly ColorNode[], frameIndex: number): Buffer {
   const output = Buffer.allocUnsafe(source.length);
   const resolvedNodes = normalizeNodeGraph(nodes).map((node) => resolveTrackedNode(node, frameIndex));
 
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const offset = (y * width + x) * 4;
+  for (let y = 0; y < sourceHeight; y += 1) {
+    for (let x = 0; x < sourceWidth; x += 1) {
+      const offset = (y * sourceWidth + x) * 4;
       const pixel = {
         r: source[offset] / 255,
         g: source[offset + 1] / 255,
@@ -136,8 +136,8 @@ export function renderRgbaFrame(source: Buffer, width: number, height: number, n
         a: source[offset + 3] / 255
       };
       const graded = evaluateNodeGraph(pixel, resolvedNodes, {
-        x: (x + 0.5) / width,
-        y: (y + 0.5) / height
+        x: (x + 0.5) / sourceWidth,
+        y: (y + 0.5) / sourceHeight
       });
 
       output[offset] = floatToByte(graded.r);
@@ -150,13 +150,99 @@ export function renderRgbaFrame(source: Buffer, width: number, height: number, n
   return output;
 }
 
+export function transformRgbaFrame(
+  source: Buffer,
+  sourceWidth: number,
+  sourceHeight: number,
+  targetWidth: number,
+  targetHeight: number,
+  policy: "fit" | "crop" | "pad"
+): Buffer {
+  const output = Buffer.alloc(targetWidth * targetHeight * 4);
+  const sourceAspect = sourceWidth / sourceHeight;
+  const targetAspect = targetWidth / targetHeight;
+
+  let srcX = 0;
+  let srcY = 0;
+  let srcVisibleWidth = sourceWidth;
+  let srcVisibleHeight = sourceHeight;
+
+  if (policy === "fit") {
+    if (sourceAspect > targetAspect) {
+      srcVisibleHeight = Math.round(sourceWidth / targetAspect);
+      srcY = Math.round((sourceHeight - srcVisibleHeight) / 2);
+    } else if (sourceAspect < targetAspect) {
+      srcVisibleWidth = Math.round(sourceHeight * targetAspect);
+      srcX = Math.round((sourceWidth - srcVisibleWidth) / 2);
+    }
+  } else if (policy === "crop") {
+    if (sourceAspect > targetAspect) {
+      srcVisibleWidth = Math.round(sourceHeight * targetAspect);
+      srcX = Math.round((sourceWidth - srcVisibleWidth) / 2);
+    } else if (sourceAspect < targetAspect) {
+      srcVisibleHeight = Math.round(sourceWidth / targetAspect);
+      srcY = Math.round((sourceHeight - srcVisibleHeight) / 2);
+    }
+  }
+  // For "pad", use full source, output has padding (handled separately)
+
+  const sx = srcVisibleWidth / targetWidth;
+  const sy = srcVisibleHeight / targetHeight;
+
+  for (let ty = 0; ty < targetHeight; ty += 1) {
+    for (let tx = 0; tx < targetWidth; tx += 1) {
+      let r: number, g: number, b: number, a: number;
+
+      if (policy === "pad") {
+        const normX = (tx + 0.5) / targetWidth;
+        const normY = (ty + 0.5) / targetHeight;
+        const aspectOk = sourceAspect <= targetAspect
+          ? normX >= (1 - targetAspect / sourceAspect) / 2 && normX <= (1 + targetAspect / sourceAspect) / 2
+          : normY >= (1 - sourceAspect / targetAspect) / 2 && normY <= (1 + sourceAspect / targetAspect) / 2;
+        if (aspectOk) {
+          const srcX = Math.round((normX - 0.5) * sourceWidth + sourceWidth / 2);
+          const srcY = Math.round((normY - 0.5) * sourceHeight + sourceHeight / 2);
+          const idx = (Math.max(0, Math.min(sourceHeight - 1, srcY)) * sourceWidth + Math.max(0, Math.min(sourceWidth - 1, srcX))) * 4;
+          r = source[idx];
+          g = source[idx + 1];
+          b = source[idx + 2];
+          a = source[idx + 3];
+        } else {
+          r = 16;
+          g = 128;
+          b = 128;
+          a = 255;
+        }
+      } else {
+        const px = Math.round(srcX + tx * sx);
+        const py = Math.round(srcY + ty * sy);
+        const idx = (Math.max(0, Math.min(sourceHeight - 1, py)) * sourceWidth + Math.max(0, Math.min(sourceWidth - 1, px))) * 4;
+        r = source[idx];
+        g = source[idx + 1];
+        b = source[idx + 2];
+        a = source[idx + 3];
+      }
+
+      const outOffset = (ty * targetWidth + tx) * 4;
+      output[outOffset] = r;
+      output[outOffset + 1] = g;
+      output[outOffset + 2] = b;
+      output[outOffset + 3] = a;
+    }
+  }
+
+  return output;
+}
+
 async function processFrames(
   ffmpegPath: string,
   job: ActiveExportJob,
   onProgress: ProgressListener
 ): Promise<number> {
   const { snapshot } = job;
-  const frameSize = snapshot.width * snapshot.height * 4;
+  const sourceWidth = snapshot.media.displayWidth;
+  const sourceHeight = snapshot.media.displayHeight;
+  const sourceFrameSize = sourceWidth * sourceHeight * 4;
   const decoder = spawnFfmpeg(ffmpegPath, buildDecodeArgs(snapshot));
   const encoder = spawnFfmpeg(ffmpegPath, buildEncodeArgs(snapshot));
   decoder.stdin.end();
@@ -177,12 +263,13 @@ async function processFrames(
       throwIfCancelled(job);
       pending = pending.length === 0 ? (chunk as Buffer) : Buffer.concat([pending, chunk as Buffer]);
 
-      while (pending.length >= frameSize) {
+      while (pending.length >= sourceFrameSize) {
         throwIfCancelled(job);
-        const sourceFrame = pending.subarray(0, frameSize);
-        pending = pending.subarray(frameSize);
-        const rendered = renderRgbaFrame(sourceFrame, snapshot.width, snapshot.height, snapshot.project.nodes, frameIndex);
-        await writeBuffer(encoder.stdin, rendered);
+        const sourceFrame = pending.subarray(0, sourceFrameSize);
+        pending = pending.subarray(sourceFrameSize);
+        const graded = renderRgbaFrame(sourceFrame, sourceWidth, sourceHeight, snapshot.project.nodes, frameIndex);
+        const resized = transformRgbaFrame(graded, sourceWidth, sourceHeight, snapshot.width, snapshot.height, snapshot.project.exportSettings.resizePolicy);
+        await writeBuffer(encoder.stdin, resized);
         frameIndex += 1;
         emitProgress(snapshot, "running", frameIndex, `Rendered ${frameIndex} / ${snapshot.totalFrames} frames.`, onProgress);
       }

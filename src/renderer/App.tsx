@@ -36,6 +36,7 @@ import {
 import type { LumaFrame } from "./tracking/templateTracker";
 import { TrackingFailure, getScaledSearchRadius, matchTranslation } from "./tracking/templateTracker";
 import { FrameRenderer } from "./webgl/FrameRenderer";
+import { ExportSettingsPanel } from "./components/ExportSettingsPanel";
 
 type Status = "idle" | "busy" | "ready" | "error";
 type RgbPrimaryKey = "lift" | "gamma" | "gain" | "offset";
@@ -1327,6 +1328,34 @@ export function App() {
                   <option value="high">High</option>
                 </select>
               </label>
+              <ExportSettingsPanel
+                sizeMode={project.exportSettings.sizeMode}
+                preset={project.exportSettings.preset}
+                customWidth={project.exportSettings.customWidth}
+                customHeight={project.exportSettings.customHeight}
+                resizePolicy={project.exportSettings.resizePolicy}
+                media={state.media}
+                onSizeModeChange={(sizeMode) => commitProject((current) => ({
+                  ...current,
+                  exportSettings: { ...current.exportSettings, sizeMode }
+                }))}
+                onPresetChange={(preset) => commitProject((current) => ({
+                  ...current,
+                  exportSettings: { ...current.exportSettings, preset }
+                }))}
+                onCustomWidthChange={(customWidth) => commitProject((current) => ({
+                  ...current,
+                  exportSettings: { ...current.exportSettings, customWidth }
+                }))}
+                onCustomHeightChange={(customHeight) => commitProject((current) => ({
+                  ...current,
+                  exportSettings: { ...current.exportSettings, customHeight }
+                }))}
+                onResizePolicyChange={(resizePolicy) => commitProject((current) => ({
+                  ...current,
+                  exportSettings: { ...current.exportSettings, resizePolicy }
+                }))}
+              />
               {exportOperation && exportOperation.state !== "completed" ? (
                 <ExportProgressPanel progress={exportOperation} onCancel={cancelProjectExport} />
               ) : state.exportResult ? (

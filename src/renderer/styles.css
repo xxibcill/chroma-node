@@ -926,6 +926,54 @@ h2 {
   background: none;
 }
 
+.export-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 0;
+}
+
+.export-settings .field-label {
+  display: grid;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.export-settings .field-label input,
+.export-settings .field-label select {
+  background: rgba(8, 12, 18, 0.6);
+  border: 1px solid rgba(136, 151, 185, 0.15);
+  border-radius: 6px;
+  color: var(--text-primary);
+  padding: 5px 8px;
+  font-size: 0.8rem;
+}
+
+.export-settings .custom-dims {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.export-preview-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.export-preview-dims {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.export-preview-warning {
+  color: var(--amber-500);
+}
+
 .field-label,
 .toggle-row {
   display: grid;
