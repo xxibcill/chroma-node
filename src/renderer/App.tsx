@@ -37,6 +37,11 @@ import type { LumaFrame } from "./tracking/templateTracker";
 import { TrackingFailure, getScaledSearchRadius, matchTranslation } from "./tracking/templateTracker";
 import { FrameRenderer } from "./webgl/FrameRenderer";
 import { ExportSettingsPanel } from "./components/ExportSettingsPanel";
+import {
+  getPreviewPolicy,
+  getTrackingMaxWidth,
+  getScopeMaxWidth
+} from "../shared/previewPolicy";
 
 type Status = "idle" | "busy" | "ready" | "error";
 type RgbPrimaryKey = "lift" | "gamma" | "gain" | "offset";
@@ -87,8 +92,6 @@ const initialProject = createDefaultProject();
 const initialMessage = "Import an MP4 or MOV clip to start playback inspection.";
 const scopeDebounceMs = 50;
 const playbackScopeIntervalMs = 1000 / 15;
-const pausedScopeMaxWidth = 1280;
-const playbackScopeMaxWidth = 640;
 const waveformHistogramSize = { width: 320, height: 160 };
 const vectorscopeHistogramSize = 220;
 
@@ -129,6 +132,11 @@ export function App() {
   const [relinkState, setRelinkState] = useState<RelinkState>({ isRelinking: false });
 
   const mediaUrl = useMemo(() => (state.media ? filePathToUrl(state.media.sourcePath) : undefined), [state.media]);
+  const proxyIndicator = useMemo(() => {
+    if (!state.media) return null;
+    const policy = getPreviewPolicy(state.media.displayWidth, state.media.displayHeight);
+    return policy.isProxy ? `PROXY ${policy.maxWidth}px` : null;
+  }, [state.media]);
   const totalFrames = useMemo(() => getTotalFrameCount(state.media), [state.media]);
   const lastFrameIndex = useMemo(() => getLastFrameIndex(state.media), [state.media]);
   const timecode = useMemo(() => formatTimecode(playback.currentFrame, state.media), [playback.currentFrame, state.media]);
@@ -209,7 +217,9 @@ export function App() {
     }
 
     const requestId = ++scopeRequestId.current;
-    const maxWidth = isPlaybackSample ? playbackScopeMaxWidth : pausedScopeMaxWidth;
+    const displayWidth = state.media?.displayWidth ?? state.frame?.width ?? 0;
+    const displayHeight = state.media?.displayHeight ?? state.frame?.height ?? 0;
+    const maxWidth = getScopeMaxWidth(displayWidth, displayHeight, isPlaybackSample);
 
     try {
       let sourceFrame: RgbaFrame | undefined;
@@ -258,7 +268,7 @@ export function App() {
       clearScopeCanvas(vectorscopeCanvas, "Scope error");
       setScopeInfo(error instanceof Error ? error.message : "Scope analysis failed.");
     }
-  }, [loadScopeImage, project.nodes, state.frame]);
+  }, [loadScopeImage, project.nodes, state.frame, state.media]);
 
   const scheduleScopeAnalysis = useCallback((isPlaybackSample: boolean) => {
     if (scopeDebounceTimer.current !== undefined) {
@@ -284,10 +294,11 @@ export function App() {
 
     const requestId = ++frameRequestId.current;
     setPreviewBusy(true);
+    const policy = getPreviewPolicy(media.displayWidth, media.displayHeight);
     const response = await api.extractFrame({
       sourcePath: media.sourcePath,
       frameIndex: clampFrameIndex(frameIndex, media),
-      maxWidth: 1920
+      maxWidth: policy.maxWidth
     });
 
     if (requestId !== frameRequestId.current) {
@@ -311,7 +322,7 @@ export function App() {
       ...current,
       status: "ready",
       frame: result.value,
-      message: `Decoded frame ${clampFrameIndex(frameIndex, media) + 1}.`,
+      message: `Decoded frame ${clampFrameIndex(frameIndex, media) + 1} (${policy.sourceDescription}).`,
       error: undefined
     }));
   }, []);
@@ -322,10 +333,11 @@ export function App() {
     }
 
     const targetFrame = clampFrameIndex(frameIndex, media);
+    const trackingMaxWidth = getTrackingMaxWidth(media.displayWidth, media.displayHeight);
     const response = await api.extractFrame({
       sourcePath: media.sourcePath,
       frameIndex: targetFrame,
-      maxWidth: 640
+      maxWidth: trackingMaxWidth
     });
     const result = response.result;
 
@@ -624,7 +636,8 @@ export function App() {
       error: undefined
     }));
 
-    const frame = await api.extractFrame({ sourcePath: media.sourcePath, frameIndex: 0, maxWidth: 1920 });
+    const policy = getPreviewPolicy(media.displayWidth, media.displayHeight);
+    const frame = await api.extractFrame({ sourcePath: media.sourcePath, frameIndex: 0, maxWidth: policy.maxWidth });
     const frameResult = frame.result;
     if (!frameResult.ok) {
       setState((current) => ({
@@ -640,7 +653,7 @@ export function App() {
     setState((current) => ({
       ...current,
       status: "ready",
-      message: "Clip imported. Viewer is ready for playback.",
+      message: `Clip imported${policy.isProxy ? " (proxy preview)" : ""}. Viewer is ready for playback.`,
       media,
       frame: frameResult.value,
       error: undefined
@@ -1556,6 +1569,11 @@ export function App() {
               >
                 {diagnosticsLabel}
               </span>
+              {proxyIndicator && (
+                <span className="status-pill status-busy" title="Preview is using a reduced resolution for interactivity">
+                  {proxyIndicator}
+                </span>
+              )}
             </div>
             <div className="action-row">
               <button type="button" onClick={() => { const prev = undo(); if (prev) { setProject(prev); setSelectedNodeId(prev.nodes[0]?.id ?? selectedNodeId); } }} disabled={!canUndo}>

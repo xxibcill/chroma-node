@@ -3,11 +3,17 @@ import { appError } from "./errors.js";
 import { requireFfmpeg } from "./ffmpeg.js";
 import { probeMedia } from "./mediaProbe.js";
 import { runProcess } from "./process.js";
+import { getCachedFrame, setPreviewFrame } from "./frameCache.js";
 
 export async function extractFrame(request: FrameExtractRequest): Promise<DecodedFrame> {
+  const maxWidth = clampInteger(request.maxWidth ?? 1280, 32, 4096);
+  const cached = getCachedFrame(request.sourcePath, request.frameIndex, maxWidth);
+  if (cached) {
+    return cached;
+  }
+
   const ffmpegPath = requireFfmpeg();
   const metadata = await probeMedia(request.sourcePath);
-  const maxWidth = clampInteger(request.maxWidth ?? 1280, 32, 4096);
   const filter = `scale='min(${maxWidth},iw)':-2`;
   const args =
     request.frameIndex === undefined
@@ -25,12 +31,15 @@ export async function extractFrame(request: FrameExtractRequest): Promise<Decode
   }
 
   const size = readPngSize(output.stdout);
-  return {
+  const frame: DecodedFrame = {
     width: size.width,
     height: size.height,
     mimeType: "image/png",
     dataUrl: `data:image/png;base64,${output.stdout.toString("base64")}`
   };
+
+  setPreviewFrame(request.sourcePath, request.frameIndex, maxWidth, frame);
+  return frame;
 }
 
 function buildTimeSeekArgs(request: FrameExtractRequest, durationSeconds: number, filter: string): string[] {

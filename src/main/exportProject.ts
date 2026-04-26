@@ -15,6 +15,7 @@ import { createExportJobSnapshot, type ExportJobSnapshot } from "./exportPlannin
 import { appError, isAppError } from "./errors.js";
 import { requireFfmpeg, requireFfprobe } from "./ffmpeg.js";
 import { runProcess } from "./process.js";
+import { computeProfileResult, createProfilingTimers, formatProfileReport, type ProfilingTimers } from "./exportProfiling.js";
 
 type ProgressListener = (progress: ExportProgress) => void;
 
@@ -22,6 +23,7 @@ interface ActiveExportJob {
   snapshot: ExportJobSnapshot;
   cancelled: boolean;
   processes: Set<ChildProcessWithoutNullStreams>;
+  profiling?: ProfilingTimers;
   cancel(): ExportProgress;
 }
 
@@ -90,6 +92,19 @@ export async function exportProject(
     const renderedFrames = await processFrames(ffmpegPath, job, onProgress);
     const result = await finalizeExport(snapshot, renderedFrames);
     emitProgress(snapshot, "completed", renderedFrames, "Export complete.", onProgress);
+
+    if (job.profiling) {
+      const profile = computeProfileResult(
+        snapshot.media.displayWidth,
+        snapshot.media.displayHeight,
+        snapshot.width,
+        snapshot.height,
+        renderedFrames,
+        job.profiling
+      );
+      console.log(formatProfileReport(profile));
+    }
+
     return result;
   } catch (error) {
     await fs.rm(snapshot.tempOutputPath, { force: true }).catch(() => undefined);
@@ -239,7 +254,7 @@ async function processFrames(
   job: ActiveExportJob,
   onProgress: ProgressListener
 ): Promise<number> {
-  const { snapshot } = job;
+  const { snapshot, profiling } = job;
   const sourceWidth = snapshot.media.displayWidth;
   const sourceHeight = snapshot.media.displayHeight;
   const sourceFrameSize = sourceWidth * sourceHeight * 4;
@@ -258,6 +273,10 @@ async function processFrames(
   let pending: Buffer<ArrayBufferLike> = Buffer.alloc(0);
   let frameIndex = 0;
 
+  if (profiling) {
+    profiling.decodeStart = performance.now();
+  }
+
   try {
     for await (const chunk of decoder.stdout) {
       throwIfCancelled(job);
@@ -267,8 +286,19 @@ async function processFrames(
         throwIfCancelled(job);
         const sourceFrame = pending.subarray(0, sourceFrameSize);
         pending = pending.subarray(sourceFrameSize);
+
+        if (profiling) {
+          profiling.decodeEnd = performance.now();
+          profiling.renderStart = performance.now();
+        }
+
         const graded = renderRgbaFrame(sourceFrame, sourceWidth, sourceHeight, snapshot.project.nodes, frameIndex);
         const resized = transformRgbaFrame(graded, sourceWidth, sourceHeight, snapshot.width, snapshot.height, snapshot.project.exportSettings.resizePolicy);
+
+        if (profiling) {
+          profiling.renderEnd = performance.now();
+        }
+
         await writeBuffer(encoder.stdin, resized);
         frameIndex += 1;
         emitProgress(snapshot, "running", frameIndex, `Rendered ${frameIndex} / ${snapshot.totalFrames} frames.`, onProgress);
@@ -290,8 +320,17 @@ async function processFrames(
     throw appError("EXPORT_FAILED", "FFmpeg could not decode the source media.", decoderStderr());
   }
 
+  if (profiling) {
+    profiling.encodeStart = performance.now();
+  }
+
   encoder.stdin.end();
   const encoderExit = await encoderClosed;
+
+  if (profiling) {
+    profiling.encodeEnd = performance.now();
+  }
+
   if (encoderExit.code !== 0) {
     throw appError("EXPORT_FAILED", "FFmpeg could not encode the H.264 MP4.", encoderStderr());
   }
@@ -400,6 +439,7 @@ function createActiveJob(snapshot: ExportJobSnapshot): ActiveExportJob {
     snapshot,
     cancelled: false,
     processes: new Set(),
+    profiling: createProfilingTimers(),
     cancel() {
       job.cancelled = true;
       for (const child of job.processes) {
