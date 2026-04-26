@@ -1,4 +1,5 @@
 import type { PowerWindow } from "../../shared/colorEngine";
+import { MAX_DISPLAY_WIDTH, MAX_DISPLAY_HEIGHT } from "../../shared/mediaGeometry";
 
 export interface LumaFrame {
   width: number;
@@ -86,7 +87,7 @@ export function matchTranslation(
 }
 
 export function getScaledSearchRadius(width: number, height: number): number {
-  const referenceScale = Math.min(width / 1920, height / 1080);
+  const referenceScale = Math.min(width / MAX_DISPLAY_WIDTH, height / MAX_DISPLAY_HEIGHT);
   return Math.max(8, Math.round(48 * referenceScale));
 }
 

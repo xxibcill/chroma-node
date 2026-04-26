@@ -231,12 +231,12 @@ export function App() {
         }
       }
 
-      if (!sourceFrame && state.frame) {
+      if (!sourceFrame && state.frame && displayWidth > 0 && displayHeight > 0) {
         const image = await loadScopeImage(state.frame.dataUrl);
         if (requestId !== scopeRequestId.current) {
           return;
         }
-        sourceFrame = captureScopeFrame(image, state.frame.width || image.naturalWidth, state.frame.height || image.naturalHeight, maxWidth);
+        sourceFrame = captureScopeFrame(image, displayWidth, displayHeight, maxWidth);
       }
 
       if (!sourceFrame) {
