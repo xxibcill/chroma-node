@@ -1277,37 +1277,6 @@ export function App() {
 
   return (
     <main className="app-shell">
-      <header className="topbar">
-        <div className="topbar-brand">
-          <p className="eyebrow">Import, viewer, playback</p>
-          <div className="title-row">
-            <h1>Chroma Node</h1>
-            <span className={`title-chip ${state.media ? "is-active" : ""}`}>{state.media ? "Clip online" : "Awaiting media"}</span>
-          </div>
-          <p className="topbar-summary">Study-grade color workstation for node flow, scopes, tracked windows, and export verification.</p>
-        </div>
-        <div className="topbar-status">
-          <div className={`diagnostic ${diagnostics?.available ? "is-ok" : "is-warning"}`}>
-            <span className="diagnostic-dot" />
-            {diagnosticsLabel}
-          </div>
-          <dl className="topbar-stats" aria-label="Viewer summary">
-            <div>
-              <dt>Mode</dt>
-              <dd>{playback.viewerMode}</dd>
-            </div>
-            <div>
-              <dt>Frame</dt>
-              <dd>{state.media ? `${playback.currentFrame + 1}/${totalFrames}` : "—"}</dd>
-            </div>
-            <div>
-              <dt>Time</dt>
-              <dd>{state.media ? timecode : "Idle"}</dd>
-            </div>
-          </dl>
-        </div>
-      </header>
-
       <section className="workspace" aria-label="Chroma Node workspace">
         <aside className="inspector" aria-label="Media diagnostics">
           <section className="side-card">
@@ -1336,7 +1305,7 @@ export function App() {
 
           <section className="side-card side-card-export">
             <div className="panel-title">Export</div>
-            <section className="export-card" aria-label="H.264 export settings and progress">
+            <section className="export-card export-card-flat" aria-label="H.264 export settings and progress">
               <label className="field-label">
                 <span>Quality</span>
                 <select
@@ -1550,9 +1519,14 @@ export function App() {
           </section>
 
           <footer className="transport">
-            <div>
+            <div className="transport-status">
               <span className={`status-pill status-${previewBusy ? "busy" : state.status}`}>{previewBusy ? "decode" : state.status}</span>
               <span className="status-message">{previewBusy ? "Settling to exact frame..." : state.message}</span>
+              <span
+                className={`status-pill status-${diagnostics?.available === false ? "error" : diagnostics?.available ? "ready" : "busy"}`}
+              >
+                {diagnosticsLabel}
+              </span>
             </div>
             <div className="action-row">
               <button type="button" onClick={() => { const prev = undo(); if (prev) { setProject(prev); setSelectedNodeId(prev.nodes[0]?.id ?? selectedNodeId); } }} disabled={!canUndo}>
