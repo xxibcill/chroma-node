@@ -91,6 +91,8 @@ export interface MediaRef {
   videoStreamIndex: number;
 }
 
+export { normalizeRotation } from "./mediaGeometry.js";
+
 export function getDisplaySize(media: { width: number; height: number; rotation: number }): { displayWidth: number; displayHeight: number } {
   const rotated = media.rotation === 90 || media.rotation === 270;
   return rotated

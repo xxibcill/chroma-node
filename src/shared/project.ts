@@ -1,4 +1,5 @@
 import type { ExportQuality, MediaRef } from "./ipc.js";
+import { isRotated } from "./mediaGeometry.js";
 import {
   MAX_SERIAL_NODES,
   createColorNode,
@@ -17,10 +18,19 @@ export interface ProjectPlaybackState {
   splitPosition: number;
 }
 
+export type ExportSizeMode = "source" | "preset" | "custom";
+export type ExportPreset = "1080p" | "720p" | "480p" | "square-1:1" | "square-4:5" | "portrait-9:16" | "portrait-4:5" | "portrait-3:4";
+export type ExportResizePolicy = "fit" | "crop" | "pad";
+
 export interface ProjectExportSettings {
   codec: "h264";
   outputPath?: string;
   quality: ExportQuality;
+  sizeMode: ExportSizeMode;
+  preset?: ExportPreset;
+  customWidth?: number;
+  customHeight?: number;
+  resizePolicy: ExportResizePolicy;
 }
 
 export interface ChromaProject {
@@ -59,7 +69,9 @@ export function createDefaultProject(): ChromaProject {
     nodes: [createColorNode(1)],
     exportSettings: {
       codec: "h264",
-      quality: "standard"
+      quality: "standard",
+      sizeMode: "source",
+      resizePolicy: "fit"
     }
   };
 }
@@ -202,8 +214,62 @@ function readExportSettings(input: unknown, warnings: ProjectValidationIssue[]):
   return {
     codec: "h264",
     outputPath: typeof source.outputPath === "string" && source.outputPath.trim() ? source.outputPath : undefined,
-    quality: readExportQuality(source.quality, warnings)
+    quality: readExportQuality(source.quality, warnings),
+    sizeMode: readExportSizeMode(source.sizeMode, warnings),
+    preset: readExportPreset(source.preset, warnings),
+    customWidth: readExportCustomDimension(source.customWidth, "customWidth", warnings),
+    customHeight: readExportCustomDimension(source.customHeight, "customHeight", warnings),
+    resizePolicy: readExportResizePolicy(source.resizePolicy, warnings)
   };
+}
+
+function readExportSizeMode(input: unknown, warnings: ProjectValidationIssue[]): ExportSizeMode {
+  if (input === "source" || input === "preset" || input === "custom") {
+    return input;
+  }
+
+  if (input !== undefined) {
+    warnings.push(issue("exportSettings.sizeMode", "DEFAULTED", "Invalid export size mode; source size was used.", input));
+  }
+
+  return "source";
+}
+
+function readExportPreset(input: unknown, warnings: ProjectValidationIssue[]): ExportPreset | undefined {
+  const validPresets: ExportPreset[] = ["1080p", "720p", "480p", "square-1:1", "square-4:5", "portrait-9:16", "portrait-4:5", "portrait-3:4"];
+  if (typeof input === "string" && validPresets.includes(input as ExportPreset)) {
+    return input as ExportPreset;
+  }
+
+  if (input !== undefined) {
+    warnings.push(issue("exportSettings.preset", "DEFAULTED", "Invalid export preset; no preset was used.", input));
+  }
+
+  return undefined;
+}
+
+function readExportCustomDimension(input: unknown, path: string, warnings: ProjectValidationIssue[]): number | undefined {
+  if (typeof input === "number" && Number.isFinite(input) && input > 0 && input <= 7680) {
+    return Math.round(input);
+  }
+
+  if (input !== undefined) {
+    warnings.push(issue(`exportSettings.${path}`, "DEFAULTED", `Invalid ${path}; no value was used.`, input));
+  }
+
+  return undefined;
+}
+
+function readExportResizePolicy(input: unknown, warnings: ProjectValidationIssue[]): ExportResizePolicy {
+  if (input === "fit" || input === "crop" || input === "pad") {
+    return input;
+  }
+
+  if (input !== undefined) {
+    warnings.push(issue("exportSettings.resizePolicy", "DEFAULTED", "Invalid export resize policy; fit was used.", input));
+  }
+
+  return "fit";
 }
 
 function readExportQuality(input: unknown, warnings: ProjectValidationIssue[]): ExportQuality {
@@ -244,9 +310,8 @@ function readMedia(
   const rotation = clampInteger(readNumber(input.rotation, "media.rotation", 0, warnings), -360, 360);
 
   // Legacy project migration: compute display dimensions from rotation
-  const rotated = rotation === 90 || rotation === 270;
-  const displayWidth = rawDisplayWidth > 0 ? rawDisplayWidth : rotated ? rawHeight : rawWidth;
-  const displayHeight = rawDisplayHeight > 0 ? rawDisplayHeight : rotated ? rawWidth : rawHeight;
+  const displayWidth = rawDisplayWidth > 0 ? rawDisplayWidth : isRotated(rotation) ? rawHeight : rawWidth;
+  const displayHeight = rawDisplayHeight > 0 ? rawDisplayHeight : isRotated(rotation) ? rawWidth : rawHeight;
 
   return {
     id: readString(input.id, "media.id", sourcePath || "missing-media", warnings),

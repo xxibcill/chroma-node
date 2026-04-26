@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { MediaRef } from "../shared/ipc.js";
+import { getDisplaySize, MAX_DISPLAY_WIDTH, MAX_DISPLAY_HEIGHT, normalizeRotation } from "../shared/mediaGeometry.js";
 import { appError } from "./errors.js";
 import { requireFfprobe } from "./ffmpeg.js";
 import { runProcess } from "./process.js";
@@ -31,10 +32,6 @@ interface FfprobeJson {
 }
 
 const SUPPORTED_EXTENSIONS = [".mp4", ".mov"] as const;
-export const MAX_DISPLAY_WIDTH = 3840;
-export const MAX_DISPLAY_HEIGHT = 2160;
-const maxDisplayWidth = MAX_DISPLAY_WIDTH;
-const maxDisplayHeight = MAX_DISPLAY_HEIGHT;
 
 export async function probeMedia(sourcePath: string): Promise<MediaRef> {
   await assertSupportedPath(sourcePath);
@@ -97,12 +94,12 @@ export function mapProbeOutput(sourcePath: string, parsed: FfprobeJson): MediaRe
   }
 
   const rotation = readRotation(videoStream);
-  const displaySize = getDisplaySize(videoStream.width, videoStream.height, rotation);
-  if (displaySize.width > maxDisplayWidth || displaySize.height > maxDisplayHeight) {
+  const { displayWidth, displayHeight } = getDisplaySize(videoStream.width, videoStream.height, rotation);
+  if (displayWidth > MAX_DISPLAY_WIDTH || displayHeight > MAX_DISPLAY_HEIGHT) {
     throw appError(
       "UNSUPPORTED_MEDIA",
-      `Media exceeds the display raster limit of ${maxDisplayWidth} x ${maxDisplayHeight}.`,
-      `${displaySize.width} x ${displaySize.height}`
+      `Media exceeds the display raster limit of ${MAX_DISPLAY_WIDTH} x ${MAX_DISPLAY_HEIGHT}.`,
+      `${displayWidth} x ${displayHeight}`
     );
   }
 
@@ -120,8 +117,8 @@ export function mapProbeOutput(sourcePath: string, parsed: FfprobeJson): MediaRe
     codec: videoStream.codec_name,
     width: videoStream.width,
     height: videoStream.height,
-    displayWidth: displaySize.width,
-    displayHeight: displaySize.height,
+    displayWidth,
+    displayHeight,
     durationSeconds,
     frameRate,
     totalFrames,
@@ -172,13 +169,4 @@ function readRotation(stream: FfprobeStream): number {
   }
 
   return 0;
-}
-
-function normalizeRotation(rotation: number): number {
-  const normalized = rotation % 360;
-  return normalized < 0 ? normalized + 360 : normalized;
-}
-
-function getDisplaySize(width: number, height: number, rotation: number): { width: number; height: number } {
-  return rotation === 90 || rotation === 270 ? { width: height, height: width } : { width, height };
 }

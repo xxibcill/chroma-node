@@ -1,5 +1,4 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { Writable } from "node:stream";
@@ -8,29 +7,14 @@ import type {
   ExportJobResult,
   ExportProgress,
   ExportProjectRequest,
-  ExportQuality,
-  MediaRef
+  ExportQuality
 } from "../shared/ipc.js";
-import type { ChromaProject } from "../shared/project.js";
 import { evaluateNodeGraph, normalizeNodeGraph, resolveTrackedNode, type ColorNode } from "../shared/colorEngine.js";
 import { sanitizeProject } from "../shared/project.js";
+import { createExportJobSnapshot, type ExportJobSnapshot } from "./exportPlanning.js";
 import { appError, isAppError } from "./errors.js";
 import { requireFfmpeg, requireFfprobe } from "./ffmpeg.js";
 import { runProcess } from "./process.js";
-
-export interface ExportJobSnapshot {
-  id: string;
-  project: ChromaProject;
-  media: MediaRef;
-  outputPath: string;
-  tempOutputPath: string;
-  quality: ExportQuality;
-  width: number;
-  height: number;
-  fps: number;
-  totalFrames: number;
-  startedAt: number;
-}
 
 type ProgressListener = (progress: ExportProgress) => void;
 
@@ -69,48 +53,6 @@ const codecPresets: Record<ExportQuality, string[]> = {
   high: ["-preset", "slow", "-crf", "18"]
 };
 
-export function createExportJobSnapshot(request: ExportProjectRequest): ExportJobSnapshot {
-  const project = sanitizeProject(cloneJson(request.project));
-  const media = project.media;
-  if (!media) {
-    throw appError("EXPORT_FAILED", "Export cannot start without imported media.");
-  }
-
-  const outputPath = normalizeOutputPath(request.outputPath ?? project.exportSettings.outputPath);
-  if (!outputPath) {
-    throw appError("EXPORT_FAILED", "Export output path is required.");
-  }
-
-  if (path.extname(outputPath).toLowerCase() !== ".mp4") {
-    throw appError("EXPORT_FAILED", "H.264 export must use an .mp4 output path.", outputPath);
-  }
-
-  if (path.resolve(outputPath) === path.resolve(media.sourcePath)) {
-    throw appError("EXPORT_FAILED", "Export output cannot overwrite the source media.", outputPath);
-  }
-
-  const quality = request.quality ?? project.exportSettings.quality ?? "standard";
-  const width = clampInteger(media.displayWidth, 1, 7680);
-  const height = clampInteger(media.displayHeight, 1, 4320);
-  const fps = clampNumber(media.frameRate, 1, 240);
-  const totalFrames = Math.max(1, media.totalFrames ?? (Math.round(media.durationSeconds * fps) || 1));
-  const id = `export-${crypto.randomUUID()}`;
-
-  return {
-    id,
-    project,
-    media,
-    outputPath,
-    tempOutputPath: `${outputPath}.part-${id}.mp4`,
-    quality,
-    width,
-    height,
-    fps,
-    totalFrames,
-    startedAt: Date.now()
-  };
-}
-
 export async function outputPathExists(outputPath: string): Promise<boolean> {
   try {
     const stat = await fs.stat(outputPath);
@@ -126,7 +68,11 @@ export async function exportProject(
 ): Promise<ExportJobResult> {
   requireFfprobe();
   const ffmpegPath = requireFfmpeg();
-  const snapshot = createExportJobSnapshot(request);
+  const sanitizedRequest = {
+    ...request,
+    project: sanitizeProject(cloneJson(request.project))
+  };
+  const snapshot = createExportJobSnapshot(sanitizedRequest);
 
   if (await outputPathExists(snapshot.outputPath) && !request.overwriteConfirmed) {
     throw appError("EXPORT_OUTPUT_EXISTS", "Export output already exists and needs confirmation.", snapshot.outputPath);
@@ -534,25 +480,6 @@ function toExportError(error: unknown): AppError {
 
 function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
-}
-
-function normalizeOutputPath(outputPath: string | undefined): string | undefined {
-  const trimmed = outputPath?.trim();
-  return trimmed ? path.resolve(trimmed) : undefined;
-}
-
-function clampInteger(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) {
-    return min;
-  }
-  return Math.max(min, Math.min(max, Math.round(value)));
-}
-
-function clampNumber(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) {
-    return min;
-  }
-  return Math.max(min, Math.min(max, value));
 }
 
 function floatToByte(value: number): number {

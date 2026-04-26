@@ -2,7 +2,8 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { createColorNode } from "../shared/colorEngine";
 import { createDefaultProject, type ChromaProject } from "../shared/project";
-import { createExportJobSnapshot, renderRgbaFrame } from "./exportProject";
+import { createExportJobSnapshot } from "./exportPlanning";
+import { renderRgbaFrame } from "./exportProject";
 
 describe("export project job model", () => {
   it("creates an immutable export snapshot from project state", () => {
