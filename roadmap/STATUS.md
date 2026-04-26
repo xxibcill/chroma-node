@@ -2,8 +2,8 @@
 
 ## Current Phase
 
-- Phase: Phase 11 - Format and Delivery Expansion
-- Status: Implemented (2026-04-26)
+- Phase: Phase 08 - Media Geometry and Vertical Video
+- Status: In progress (2 partial tasks: P8-T3 viewer/overlay layout, P8-T4 tracking geometry parity)
 - Last updated: 2026-04-26
 
 ## Active Decisions
@@ -60,3 +60,5 @@
 | 2026-04-26 | Phase 11-T3 | Still frame and image sequence export IPC handlers. | Passed |
 | 2026-04-26 | Phase 11-T4 | Workflow presets (review/social/archive) wired to codec, quality, audio. | Passed |
 | 2026-04-26 | Phase 11-T5 | Delivery compatibility matrix documented in `docs/delivery-compatibility.md`. | Passed |
+| 2026-04-26 | Phase 10 | All 5 tasks COMPLETE. Proxy policy, frame cache, scope perf, profiling, docs. | Passed |
+| 2026-04-26 | Phase 09 | All 5 tasks COMPLETE. Export schema/presets, fit/crop/pad pipeline, UI, validation, tests. | Passed |

@@ -2,6 +2,36 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2026-04-26] - Phase 11: Format and Delivery Expansion Complete
+
+- P11-T1: Audio passthrough with stream copy and audio index detection from source media
+- P11-T2: Additional codec paths (HEVC/libx265, ProRes/prores_ks, VP9/libvpx-vp9) with encoder availability checks
+- P11-T3: Still frame export to PNG and image sequence export with `-seq-%04d.png` naming pattern
+- P11-T4: Workflow presets (review/social/archive) wired to codec, quality, and audio settings
+- P11-T5: Delivery compatibility matrix documented in docs/delivery-compatibility.md
+
+Expanded delivery surface: audio retention, multiple codecs/containers, still/sequence export, workflow presets.
+
+## [2026-04-26] - Phase 10: High-Resolution Preview and Performance Complete
+
+- P10-T1: Preview proxy policy with 1920px threshold, 1280px proxy max, user-facing PROXY indicator
+- P10-T2: Frame decode and cache tuning with bounded preview/tracking caches, TTL, and LRU eviction
+- P10-T3: Scope sampling adaptation by playback state and resolution (paused 1280px, playback 640px)
+- P10-T4: Export throughput profiling with size matrix (1080p–8K) and formatProfileReport()
+- P10-T5: Performance guardrails and large-media documentation in docs/performance.md
+
+Large-raster playback, scopes, and export remain responsive through proxy and performance work.
+
+## [2026-04-26] - Phase 09: Flexible Export Geometry Complete
+
+- P9-T1: Export settings schema with source/preset/custom size modes, 8 presets, and fit/crop/pad resize policies
+- P9-T2: Fit/crop/pad render pipeline with transformRgbaFrame() and applyResizePolicy()
+- P9-T3: Export UI with size mode selector, preset dropdown, custom inputs, resize policy selector, and live preview
+- P9-T4: Export validation and job metadata with output raster dimensions in progress/result
+- P9-T5: Export geometry verification tests for portrait preset from landscape source
+
+User can export to source resolution or preset/custom aspect ratios with explicit fit, crop, or pad behavior.
+
 ## [2026-04-25] - Phase 07: Hardening and Packaging Complete
 
 - P7-T1: Undo/Redo system with history state, 300ms coalescing, bounded memory

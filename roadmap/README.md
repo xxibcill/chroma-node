@@ -14,10 +14,10 @@ This roadmap breaks the DaVinci Resolve-inspired Color page learning app into im
 | [Phase 05 - Translation Tracking](phase-05-translation-tracking.md) | Done | Generate translation-only tracking keyframes for power windows. |
 | [Phase 06 - H.264 Export](phase-06-h264-export.md) | Done | Export the graded clip as a video-only H.264 MP4. |
 | [Phase 07 - Hardening and Packaging](phase-07-hardening-and-packaging.md) | Done | Add reliability, tests, packaging, and MVP release polish. |
-| [Phase 08 - Media Geometry and Vertical Video](phase-08-media-geometry-and-vertical-video.md) | Not started | Support portrait, square, rotated, and larger rasters with correct display geometry. |
-| [Phase 09 - Flexible Export Geometry](phase-09-flexible-export-geometry.md) | Not started | Export source-fit, cropped, padded, and preset social video sizes. |
-| [Phase 10 - High-Resolution Preview and Performance](phase-10-high-resolution-preview-and-performance.md) | Not started | Keep large-raster playback, scopes, and export responsive through proxy and performance work. |
-| [Phase 11 - Format and Delivery Expansion](phase-11-format-and-delivery-expansion.md) | Not started | Expand delivery options with audio, more outputs, and broader publishing workflows. |
+| [Phase 08 - Media Geometry and Vertical Video](phase-08-media-geometry-and-vertical-video.md) | In progress | Support portrait, square, rotated, and larger rasters with correct display geometry. |
+| [Phase 09 - Flexible Export Geometry](phase-09-flexible-export-geometry.md) | Done | Export source-fit, cropped, padded, and preset social video sizes. |
+| [Phase 10 - High-Resolution Preview and Performance](phase-10-high-resolution-preview-and-performance.md) | Done | Keep large-raster playback, scopes, and export responsive through proxy and performance work. |
+| [Phase 11 - Format and Delivery Expansion](phase-11-format-and-delivery-expansion.md) | Done | Expand delivery options with audio, more outputs, and broader publishing workflows. |
 
 ## Status Values
 
