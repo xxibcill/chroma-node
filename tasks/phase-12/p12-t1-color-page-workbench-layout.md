@@ -2,7 +2,7 @@
 
 ## Status
 
-Not started
+Done (implemented as part of Phase 12 color page foundation work - see commit e57b57b)
 
 ## Phase
 

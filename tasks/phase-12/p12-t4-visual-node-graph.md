@@ -2,7 +2,7 @@
 
 ## Status
 
-Not started
+Done (node-strip with Copy/Paste/Duplicate/Bypass/Delete actions wired - see commit e57b57b)
 
 ## Phase
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-Not started
+Done (colorEngine.parity.test.ts covers curves and LUT CPU/GPU parity - see commit e57b57b)
 
 ## Phase
 

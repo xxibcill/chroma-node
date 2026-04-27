@@ -2,7 +2,7 @@
 
 ## Status
 
-Not started
+Done (parseCubeLut, LutData, LutSettings, applyLut, LUT_RANGE, intensity blending - see commit e57b57b)
 
 ## Phase
 

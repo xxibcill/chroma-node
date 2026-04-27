@@ -2,7 +2,7 @@
 
 ## Status
 
-Not started
+In progress (power window infrastructure present, full handle editing deferred)
 
 ## Phase
 

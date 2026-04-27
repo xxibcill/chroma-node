@@ -2,7 +2,7 @@
 
 ## Status
 
-Not started
+Partially done (data structures complete, wheel UI deferred to future work per user preference)
 
 ## Phase
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-Not started
+Done (captureStill, galleryStills, deleteStill, applyStillGrade, compareStillId wired - see commit e57b57b)
 
 ## Phase
 

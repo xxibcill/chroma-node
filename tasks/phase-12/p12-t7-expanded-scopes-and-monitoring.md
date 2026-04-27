@@ -2,7 +2,7 @@
 
 ## Status
 
-Not started
+Done (RGB histogram, luminance histogram, RGB parade in scopeAnalysis; histogram rendering in scopeRender - see commit e57b57b)
 
 ## Phase
 

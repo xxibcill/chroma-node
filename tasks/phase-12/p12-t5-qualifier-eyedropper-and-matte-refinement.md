@@ -2,7 +2,7 @@
 
 ## Status
 
-Not started
+Done (eyedropper add/subtract/clear mode, canvas click sampling, gallery stills capture - see commit e57b57b)
 
 ## Phase
 

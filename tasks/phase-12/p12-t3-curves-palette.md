@@ -2,7 +2,7 @@
 
 ## Status
 
-Not started
+Done (CurvesPalette component with Master/RGB channels, point editing, enable/reset - see commit e57b57b)
 
 ## Phase
 
