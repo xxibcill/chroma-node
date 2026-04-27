@@ -16,6 +16,11 @@ export interface PrimaryCorrection {
   saturation: number;
   temperature: number;
   tint: number;
+  hueShift: number;
+  colorBoost: number;
+  midtoneDetail: number;
+  shadowAmount: number;
+  highlightAmount: number;
 }
 
 export interface HslQualifier {
@@ -67,6 +72,47 @@ export interface TrackingData {
   failureReason?: string;
 }
 
+export interface CurvePoint {
+  x: number;
+  y: number;
+}
+
+export type CurveChannel = "master" | "red" | "green" | "blue" | "hueVsHue" | "hueVsSaturation" | "hueVsLuminance" | "luminanceVsSaturation" | "saturationVsSaturation";
+
+export interface CurveData {
+  enabled: boolean;
+  points: CurvePoint[];
+}
+
+export interface NodeCurves {
+  master: CurveData;
+  red: CurveData;
+  green: CurveData;
+  blue: CurveData;
+  hueVsHue: CurveData;
+  hueVsSaturation: CurveData;
+  hueVsLuminance: CurveData;
+  luminanceVsSaturation: CurveData;
+  saturationVsSaturation: CurveData;
+}
+
+export interface LutData {
+  name: string;
+  size: number;
+  data: Float32Array;
+}
+
+export interface LutSettings {
+  enabled: boolean;
+  lut: LutData | null;
+  intensity: number;
+}
+
+export interface ColorManagementSettings {
+  inputColorSpace: "auto" | "rec709" | "rec2020" | "srgb" | "p3";
+  outputColorSpace: "auto" | "rec709" | "rec2020" | "srgb" | "p3";
+}
+
 export interface ColorNode {
   id: string;
   name: string;
@@ -75,6 +121,8 @@ export interface ColorNode {
   qualifier: HslQualifier;
   windows: PowerWindows;
   tracking: TrackingData;
+  curves: NodeCurves;
+  lut: LutSettings;
 }
 
 export interface Pixel {
@@ -111,7 +159,12 @@ export const PRIMARY_RANGES = {
   pivot: { min: 0, max: 1, neutral: 0.5, step: 0.01 },
   saturation: { min: 0, max: 2, neutral: 1, step: 0.01 },
   temperature: { min: -1, max: 1, neutral: 0, step: 0.01 },
-  tint: { min: -1, max: 1, neutral: 0, step: 0.01 }
+  tint: { min: -1, max: 1, neutral: 0, step: 0.01 },
+  hueShift: { min: -180, max: 180, neutral: 0, step: 1 },
+  colorBoost: { min: 0, max: 2, neutral: 1, step: 0.01 },
+  midtoneDetail: { min: 0, max: 2, neutral: 1, step: 0.01 },
+  shadowAmount: { min: -1, max: 1, neutral: 0, step: 0.01 },
+  highlightAmount: { min: -1, max: 1, neutral: 0, step: 0.01 }
 } as const satisfies Record<string, NumericRange>;
 
 export const QUALIFIER_RANGES = {
@@ -138,6 +191,44 @@ export const WINDOW_RANGES = {
 export const TRACKING_OFFSET_RANGE = { min: -1, max: 1, neutral: 0, step: 0.001 } as const satisfies NumericRange;
 export const TRACKING_CONFIDENCE_RANGE = { min: 0, max: 1, neutral: 0, step: 0.001 } as const satisfies NumericRange;
 
+export const CURVE_RANGE = { min: 0, max: 1, neutral: 0, step: 0.01 } as const satisfies NumericRange;
+
+export const LUT_RANGE = { min: 0, max: 1, neutral: 1, step: 0.01 } as const satisfies NumericRange;
+
+const IDENTITY_CURVE_POINTS: CurvePoint[] = [
+  { x: 0, y: 0 },
+  { x: 1, y: 1 }
+];
+
+export function createNeutralCurve(): CurveData {
+  return {
+    enabled: false,
+    points: IDENTITY_CURVE_POINTS.map((p) => ({ ...p }))
+  };
+}
+
+export function createDefaultNodeCurves(): NodeCurves {
+  return {
+    master: createNeutralCurve(),
+    red: createNeutralCurve(),
+    green: createNeutralCurve(),
+    blue: createNeutralCurve(),
+    hueVsHue: createNeutralCurve(),
+    hueVsSaturation: createNeutralCurve(),
+    hueVsLuminance: createNeutralCurve(),
+    luminanceVsSaturation: createNeutralCurve(),
+    saturationVsSaturation: createNeutralCurve()
+  };
+}
+
+export function createDefaultLutSettings(): LutSettings {
+  return {
+    enabled: false,
+    lut: null,
+    intensity: LUT_RANGE.neutral
+  };
+}
+
 const NEUTRAL_RGB_ADD: RgbVector = { r: 0, g: 0, b: 0 };
 const NEUTRAL_RGB_MULTIPLY: RgbVector = { r: 1, g: 1, b: 1 };
 
@@ -151,7 +242,12 @@ export function createNeutralPrimaries(): PrimaryCorrection {
     pivot: PRIMARY_RANGES.pivot.neutral,
     saturation: PRIMARY_RANGES.saturation.neutral,
     temperature: PRIMARY_RANGES.temperature.neutral,
-    tint: PRIMARY_RANGES.tint.neutral
+    tint: PRIMARY_RANGES.tint.neutral,
+    hueShift: PRIMARY_RANGES.hueShift.neutral,
+    colorBoost: PRIMARY_RANGES.colorBoost.neutral,
+    midtoneDetail: PRIMARY_RANGES.midtoneDetail.neutral,
+    shadowAmount: PRIMARY_RANGES.shadowAmount.neutral,
+    highlightAmount: PRIMARY_RANGES.highlightAmount.neutral
   };
 }
 
@@ -211,7 +307,9 @@ export function createColorNode(index: number): ColorNode {
     primaries: createNeutralPrimaries(),
     qualifier: createDefaultQualifier(),
     windows: createDefaultPowerWindows(),
-    tracking: createDefaultTrackingData()
+    tracking: createDefaultTrackingData(),
+    curves: createDefaultNodeCurves(),
+    lut: createDefaultLutSettings()
   };
 }
 
@@ -258,7 +356,12 @@ export function sanitizePrimaries(input: Partial<PrimaryCorrection> | undefined)
     pivot: clampNumber(readNumber(input?.pivot, neutral.pivot), PRIMARY_RANGES.pivot),
     saturation: clampNumber(readNumber(input?.saturation, neutral.saturation), PRIMARY_RANGES.saturation),
     temperature: clampNumber(readNumber(input?.temperature, neutral.temperature), PRIMARY_RANGES.temperature),
-    tint: clampNumber(readNumber(input?.tint, neutral.tint), PRIMARY_RANGES.tint)
+    tint: clampNumber(readNumber(input?.tint, neutral.tint), PRIMARY_RANGES.tint),
+    hueShift: clampNumber(readNumber(input?.hueShift, neutral.hueShift), PRIMARY_RANGES.hueShift),
+    colorBoost: clampNumber(readNumber(input?.colorBoost, neutral.colorBoost), PRIMARY_RANGES.colorBoost),
+    midtoneDetail: clampNumber(readNumber(input?.midtoneDetail, neutral.midtoneDetail), PRIMARY_RANGES.midtoneDetail),
+    shadowAmount: clampNumber(readNumber(input?.shadowAmount, neutral.shadowAmount), PRIMARY_RANGES.shadowAmount),
+    highlightAmount: clampNumber(readNumber(input?.highlightAmount, neutral.highlightAmount), PRIMARY_RANGES.highlightAmount)
   };
 }
 
@@ -303,6 +406,52 @@ export function sanitizePowerWindows(input: Partial<PowerWindows> | undefined): 
   return {
     ellipse: sanitizePowerWindow(input?.ellipse, "ellipse"),
     rectangle: sanitizePowerWindow(input?.rectangle, "rectangle")
+  };
+}
+
+export function sanitizeCurvePoint(input: unknown): CurvePoint {
+  if (input && typeof input === "object") {
+    const point = input as Partial<CurvePoint>;
+    return {
+      x: clampNumber(readNumber(point.x, 0.5), CURVE_RANGE),
+      y: clampNumber(readNumber(point.y, 0.5), CURVE_RANGE)
+    };
+  }
+  return { x: 0.5, y: 0.5 };
+}
+
+export function sanitizeCurve(input: Partial<CurveData> | undefined): CurveData {
+  const fallback = createNeutralCurve();
+  if (!input || typeof input !== "object") {
+    return { ...fallback };
+  }
+
+  const points = Array.isArray(input.points) && input.points.length >= 2
+    ? input.points.map(sanitizeCurvePoint).sort((a, b) => a.x - b.x)
+    : fallback.points;
+
+  return {
+    enabled: typeof input.enabled === "boolean" ? input.enabled : fallback.enabled,
+    points
+  };
+}
+
+export function sanitizeNodeCurves(input: Partial<NodeCurves> | undefined): NodeCurves {
+  const fallback = createDefaultNodeCurves();
+  if (!input || typeof input !== "object") {
+    return { ...fallback };
+  }
+
+  return {
+    master: sanitizeCurve(input.master),
+    red: sanitizeCurve(input.red),
+    green: sanitizeCurve(input.green),
+    blue: sanitizeCurve(input.blue),
+    hueVsHue: sanitizeCurve(input.hueVsHue),
+    hueVsSaturation: sanitizeCurve(input.hueVsSaturation),
+    hueVsLuminance: sanitizeCurve(input.hueVsLuminance),
+    luminanceVsSaturation: sanitizeCurve(input.luminanceVsSaturation),
+    saturationVsSaturation: sanitizeCurve(input.saturationVsSaturation)
   };
 }
 
@@ -395,7 +544,22 @@ export function sanitizeColorNode(input: Partial<ColorNode> | undefined, fallbac
     primaries: sanitizePrimaries(input?.primaries),
     qualifier: sanitizeQualifier(input?.qualifier),
     windows: sanitizePowerWindows(input?.windows),
-    tracking: sanitizeTrackingData(input?.tracking, frameCount)
+    tracking: sanitizeTrackingData(input?.tracking, frameCount),
+    curves: sanitizeNodeCurves(input?.curves),
+    lut: sanitizeLutSettings(input?.lut)
+  };
+}
+
+export function sanitizeLutSettings(input: Partial<LutSettings> | undefined): LutSettings {
+  const fallback = createDefaultLutSettings();
+  if (!input || typeof input !== "object") {
+    return { ...fallback };
+  }
+
+  return {
+    enabled: typeof input.enabled === "boolean" ? input.enabled : fallback.enabled,
+    lut: input.lut ?? null,
+    intensity: clampNumber(readNumber(input.intensity, fallback.intensity), LUT_RANGE)
   };
 }
 
@@ -533,16 +697,226 @@ export function evaluateNodeMask(pixel: Pixel, node: ColorNode, point: Normalize
   return evaluateQualifierMask(pixel, sanitized.qualifier) * evaluatePowerWindowMask(point, sanitized.windows);
 }
 
+function interpolateCurve(points: CurvePoint[], x: number): number {
+  if (points.length < 2) {
+    return x;
+  }
+
+  if (x <= points[0].x) {
+    return points[0].y;
+  }
+  if (x >= points[points.length - 1].x) {
+    return points[points.length - 1].y;
+  }
+
+  for (let i = 0; i < points.length - 1; i++) {
+    if (x >= points[i].x && x <= points[i + 1].x) {
+      const t = (x - points[i].x) / (points[i + 1].x - points[i].x);
+      return points[i].y + t * (points[i + 1].y - points[i].y);
+    }
+  }
+
+  return x;
+}
+
+export function applyCurves(pixel: Pixel, curves: NodeCurves): Pixel {
+  const masterEnabled = curves.master.enabled && curves.master.points.length >= 2;
+  const redEnabled = curves.red.enabled && curves.red.points.length >= 2;
+  const greenEnabled = curves.green.enabled && curves.green.points.length >= 2;
+  const blueEnabled = curves.blue.enabled && curves.blue.points.length >= 2;
+
+  if (!masterEnabled && !redEnabled && !greenEnabled && !blueEnabled) {
+    return pixel;
+  }
+
+  let r = pixel.r;
+  let g = pixel.g;
+  let b = pixel.b;
+
+  if (redEnabled) {
+    r = interpolateCurve(curves.red.points, r);
+  }
+  if (greenEnabled) {
+    g = interpolateCurve(curves.green.points, g);
+  }
+  if (blueEnabled) {
+    b = interpolateCurve(curves.blue.points, b);
+  }
+
+  if (masterEnabled) {
+    const avgLuminance = (r + g + b) / 3;
+    const masterFactor = interpolateCurve(curves.master.points, avgLuminance) / (avgLuminance || 1);
+    r = r * masterFactor;
+    g = g * masterFactor;
+    b = b * masterFactor;
+  }
+
+  return {
+    r: clamp01(r),
+    g: clamp01(g),
+    b: clamp01(b),
+    a: pixel.a
+  };
+}
+
+export function applyLut(pixel: Pixel, lut: LutSettings): Pixel {
+  if (!lut.enabled || !lut.lut) {
+    return pixel;
+  }
+
+  const lutData = lut.lut;
+  const size = lutData.size;
+  const data = lutData.data;
+
+  const rScaled = clamp01(pixel.r) * (size - 1);
+  const gScaled = clamp01(pixel.g) * (size - 1);
+  const bScaled = clamp01(pixel.b) * (size - 1);
+
+  const r0 = Math.floor(rScaled);
+  const g0 = Math.floor(gScaled);
+  const b0 = Math.floor(bScaled);
+  const r1 = Math.min(r0 + 1, size - 1);
+  const g1 = Math.min(g0 + 1, size - 1);
+  const b1 = Math.min(b0 + 1, size - 1);
+
+  const rFrac = rScaled - r0;
+  const gFrac = gScaled - g0;
+  const bFrac = bScaled - b0;
+
+  const getLutValue = (r: number, g: number, b: number): { r: number; g: number; b: number } => {
+    const index = ((b * size + g) * size + r) * 3;
+    return {
+      r: data[index],
+      g: data[index + 1],
+      b: data[index + 2]
+    };
+  };
+
+  const c000 = getLutValue(r0, g0, b0);
+  const c001 = getLutValue(r1, g0, b0);
+  const c010 = getLutValue(r0, g1, b0);
+  const c011 = getLutValue(r1, g1, b0);
+  const c100 = getLutValue(r0, g0, b1);
+  const c101 = getLutValue(r1, g0, b1);
+  const c110 = getLutValue(r0, g1, b1);
+  const c111 = getLutValue(r1, g1, b1);
+
+  const tr = c000.r * (1 - rFrac) * (1 - gFrac) * (1 - bFrac) +
+             c001.r * rFrac * (1 - gFrac) * (1 - bFrac) +
+             c010.r * (1 - rFrac) * gFrac * (1 - bFrac) +
+             c011.r * rFrac * gFrac * (1 - bFrac) +
+             c100.r * (1 - rFrac) * (1 - gFrac) * bFrac +
+             c101.r * rFrac * (1 - gFrac) * bFrac +
+             c110.r * (1 - rFrac) * gFrac * bFrac +
+             c111.r * rFrac * gFrac * bFrac;
+
+  const tg = c000.g * (1 - rFrac) * (1 - gFrac) * (1 - bFrac) +
+             c001.g * rFrac * (1 - gFrac) * (1 - bFrac) +
+             c010.g * (1 - rFrac) * gFrac * (1 - bFrac) +
+             c011.g * rFrac * gFrac * (1 - bFrac) +
+             c100.g * (1 - rFrac) * (1 - gFrac) * bFrac +
+             c101.g * rFrac * (1 - gFrac) * bFrac +
+             c110.g * (1 - rFrac) * gFrac * bFrac +
+             c111.g * rFrac * gFrac * bFrac;
+
+  const tb = c000.b * (1 - rFrac) * (1 - gFrac) * (1 - bFrac) +
+             c001.b * rFrac * (1 - gFrac) * (1 - bFrac) +
+             c010.b * (1 - rFrac) * gFrac * (1 - bFrac) +
+             c011.b * rFrac * gFrac * (1 - bFrac) +
+             c100.b * (1 - rFrac) * (1 - gFrac) * bFrac +
+             c101.b * rFrac * (1 - gFrac) * bFrac +
+             c110.b * (1 - rFrac) * gFrac * bFrac +
+             c111.b * rFrac * gFrac * bFrac;
+
+  const blended = {
+    r: clamp01(tr),
+    g: clamp01(tg),
+    b: clamp01(tb)
+  };
+
+  const intensity = clampNumber(lut.intensity, LUT_RANGE);
+  return {
+    r: pixel.r + (blended.r - pixel.r) * intensity,
+    g: pixel.g + (blended.g - pixel.g) * intensity,
+    b: pixel.b + (blended.b - pixel.b) * intensity,
+    a: pixel.a
+  };
+}
+
 export function evaluateNodeGraph(pixel: Pixel, nodes: readonly ColorNode[], point: NormalizedPoint = { x: 0.5, y: 0.5 }): Pixel {
   return normalizeNodeGraph(nodes).reduce<Pixel>((current, node) => {
     if (!node.enabled) {
       return current;
     }
 
-    const corrected = applyPrimaryCorrection(current, node.primaries);
+    let corrected = applyPrimaryCorrection(current, node.primaries);
+    corrected = applyCurves(corrected, node.curves);
+    corrected = applyLut(corrected, node.lut);
     const mask = evaluateNodeMask(current, node, point);
     return mixPixels(current, corrected, mask);
   }, pixel);
+}
+
+export function parseCubeLut(content: string): LutData | null {
+  const lines = content.split("\n");
+  let size = 0;
+  const values: number[] = [];
+  let name = "Imported LUT";
+  let inData = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (trimmed === "" || trimmed.startsWith("#")) {
+      continue;
+    }
+
+    if (trimmed.startsWith("TITLE")) {
+      const match = trimmed.match(/TITLE\s+"(.+)"/);
+      if (match) {
+        name = match[1];
+      }
+      continue;
+    }
+
+    if (trimmed.startsWith("LUT_3D_SIZE")) {
+      const match = trimmed.match(/LUT_3D_SIZE\s+(\d+)/);
+      if (match) {
+        size = parseInt(match[1], 10);
+      }
+      continue;
+    }
+
+    if (trimmed === "BEGIN_DATA" || trimmed === "DATA") {
+      inData = true;
+      continue;
+    }
+
+    if (inData || size > 0) {
+      const parts = trimmed.split(/\s+/);
+      if (parts.length >= 3) {
+        const r = parseFloat(parts[0]);
+        const g = parseFloat(parts[1]);
+        const b = parseFloat(parts[2]);
+        if (Number.isFinite(r) && Number.isFinite(g) && Number.isFinite(b)) {
+          values.push(clamp01(r));
+          values.push(clamp01(g));
+          values.push(clamp01(b));
+        }
+      }
+    }
+  }
+
+  const expectedCount = size * size * size * 3;
+  if (size === 0 || values.length !== expectedCount) {
+    return null;
+  }
+
+  return {
+    name,
+    size,
+    data: new Float32Array(values)
+  };
 }
 
 export function generateColorFragmentShader(nodeCount: number): string {

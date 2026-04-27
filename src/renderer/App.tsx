@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useUndoRedo } from "./state/useUndoRedo";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { AppError, DecodedFrame, ExportJobResult, ExportProgress, ExportQuality, FfmpegDiagnostics, MediaRef } from "../shared/ipc";
-import type { ColorNode, HslQualifier, PowerWindow, PowerWindowShape, RgbVector, TrackingKeyframe } from "../shared/colorEngine";
+import type { ColorNode, CurveChannel, CurvePoint, HslQualifier, PowerWindow, PowerWindowShape, RgbVector, TrackingKeyframe } from "../shared/colorEngine";
 import {
   MAX_SERIAL_NODES,
   PRIMARY_RANGES,
@@ -10,6 +10,7 @@ import {
   WINDOW_RANGES,
   clampNumber,
   createColorNode,
+  createDefaultNodeCurves,
   createDefaultPowerWindows,
   createNeutralPrimaries,
   invalidateTrackingForWindow,
@@ -130,6 +131,12 @@ export function App() {
     message: initialMessage
   });
   const [relinkState, setRelinkState] = useState<RelinkState>({ isRelinking: false });
+
+  const [eyedropperMode, setEyedropperModeState] = useState<"none" | "add" | "subtract">("none");
+  const [eyedropperSamples, setEyedropperSamples] = useState<{ h: number; s: number; l: number }[]>([]);
+
+  const [galleryStills, setGalleryStills] = useState<{ id: string; thumbnail: string; timestamp: number; frameIndex: number; gradeName: string }[]>([]);
+  const [compareStillId, setCompareStillId] = useState<string | null>(null);
 
   const mediaUrl = useMemo(() => (state.media ? filePathToUrl(state.media.sourcePath) : undefined), [state.media]);
   const proxyIndicator = useMemo(() => {
@@ -1049,6 +1056,277 @@ export function App() {
     }));
   }, [trackingOperation, updateActiveNode]);
 
+  const updateCurvePoint = useCallback((channel: CurveChannel, pointIndex: number, updates: Partial<CurvePoint>) => {
+    updateActiveNode((node) => {
+      const curve = node.curves[channel];
+      if (!curve || pointIndex < 0 || pointIndex >= curve.points.length) {
+        return node;
+      }
+
+      const newPoints = curve.points.map((p, i) =>
+        i === pointIndex ? { x: updates.x ?? p.x, y: updates.y ?? p.y } : p
+      );
+      return {
+        ...node,
+        curves: {
+          ...node.curves,
+          [channel]: { ...curve, points: newPoints }
+        }
+      };
+    });
+  }, [updateActiveNode]);
+
+  const toggleCurveEnabled = useCallback((channel: CurveChannel) => {
+    updateActiveNode((node) => ({
+      ...node,
+      curves: {
+        ...node.curves,
+        [channel]: { ...node.curves[channel], enabled: !node.curves[channel].enabled }
+      }
+    }));
+  }, [updateActiveNode]);
+
+  const addCurvePoint = useCallback((channel: CurveChannel, point: CurvePoint) => {
+    updateActiveNode((node) => {
+      const curve = node.curves[channel];
+      const newPoints = [...curve.points, point].sort((a, b) => a.x - b.x);
+      return {
+        ...node,
+        curves: {
+          ...node.curves,
+          [channel]: { ...curve, points: newPoints }
+        }
+      };
+    });
+  }, [updateActiveNode]);
+
+  const removeCurvePoint = useCallback((channel: CurveChannel, pointIndex: number) => {
+    updateActiveNode((node) => {
+      const curve = node.curves[channel];
+      if (pointIndex <= 0 || pointIndex >= curve.points.length - 1) {
+        return node;
+      }
+      const newPoints = curve.points.filter((_, i) => i !== pointIndex);
+      return {
+        ...node,
+        curves: {
+          ...node.curves,
+          [channel]: { ...curve, points: newPoints }
+        }
+      };
+    });
+  }, [updateActiveNode]);
+
+  const resetCurve = useCallback((channel: CurveChannel) => {
+    const neutral = createDefaultNodeCurves();
+    updateActiveNode((node) => ({
+      ...node,
+      curves: {
+        ...node.curves,
+        [channel]: neutral[channel]
+      }
+    }));
+  }, [updateActiveNode]);
+
+  const setEyedropperMode = useCallback((mode: "none" | "add" | "subtract") => {
+    setEyedropperModeState(mode);
+    if (mode !== "add") {
+      setEyedropperSamples([]);
+    }
+  }, []);
+
+  const sampleFromEyedropper = useCallback((normalizedX: number, normalizedY: number) => {
+    if (eyedropperMode === "none") {
+      return;
+    }
+
+    const video = videoRef.current;
+    if (!video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+      return;
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return;
+    }
+
+    context.drawImage(video, 0, 0);
+    const pixelX = Math.min(video.videoWidth - 1, Math.floor(normalizedX * video.videoWidth));
+    const pixelY = Math.min(video.videoHeight - 1, Math.floor(normalizedY * video.videoHeight));
+    const pixel = context.getImageData(pixelX, pixelY, 1, 1).data;
+
+    const r = pixel[0] / 255;
+    const g = pixel[1] / 255;
+    const b = pixel[2] / 255;
+
+    const hsl = rgbToHslForQualifier(r, g, b);
+    const newSamples = eyedropperMode === "add"
+      ? [...eyedropperSamples, hsl]
+      : eyedropperSamples.slice(0, -1);
+
+    setEyedropperSamples(newSamples);
+
+    if (newSamples.length > 0) {
+      const hues = newSamples.map((s) => s.h);
+      const avgHue = hues.reduce((a, h) => a + h, 0) / hues.length;
+      const minHue = Math.min(...hues);
+      const maxHue = Math.max(...hues);
+      const hueWidth = Math.max(15, (maxHue - minHue + 360) % 360);
+
+      const saturations = newSamples.map((s) => s.s);
+      const avgSat = saturations.reduce((a, s) => a + s, 0) / saturations.length;
+
+      const luminances = newSamples.map((s) => s.l);
+      const avgLum = luminances.reduce((a, l) => a + l, 0) / luminances.length;
+
+      updateActiveNode((node) => ({
+        ...node,
+        qualifier: {
+          ...node.qualifier,
+          hueCenter: avgHue,
+          hueWidth: Math.max(30, hueWidth),
+          saturationMin: Math.max(0, avgSat - 0.15),
+          saturationMax: Math.min(1, avgSat + 0.15),
+          luminanceMin: Math.max(0, avgLum - 0.15),
+          luminanceMax: Math.min(1, avgLum + 0.15)
+        }
+      }));
+    }
+  }, [eyedropperMode, eyedropperSamples, updateActiveNode]);
+
+  const clearEyedropperSamples = useCallback(() => {
+    setEyedropperSamples([]);
+    setEyedropperMode("none");
+  }, [setEyedropperMode]);
+
+  const [copiedNode, setCopiedNode] = useState<ColorNode | null>(null);
+
+  const copyNode = useCallback(() => {
+    if (activeNode) {
+      setCopiedNode({ ...activeNode, id: `node-${Date.now().toString(36)}` });
+    }
+  }, [activeNode]);
+
+  const pasteNode = useCallback(() => {
+    if (!copiedNode || project.nodes.length >= MAX_SERIAL_NODES) {
+      return;
+    }
+
+    const newNode: ColorNode = {
+      ...copiedNode,
+      id: `node-${Date.now().toString(36)}`,
+      name: `${copiedNode.name} (copy)`,
+      tracking: {
+        targetShape: copiedNode.tracking.targetShape,
+        keyframes: [],
+        state: "empty"
+      }
+    };
+
+    commitProject((current) => ({
+      ...current,
+      nodes: [...current.nodes, newNode]
+    }));
+  }, [copiedNode, commitProject, project.nodes.length]);
+
+  const duplicateNode = useCallback(() => {
+    if (!activeNode || project.nodes.length >= MAX_SERIAL_NODES) {
+      return;
+    }
+
+    const newNode: ColorNode = {
+      ...activeNode,
+      id: `node-${Date.now().toString(36)}`,
+      name: `${activeNode.name} (copy)`,
+      tracking: {
+        targetShape: activeNode.tracking.targetShape,
+        keyframes: [],
+        state: "empty"
+      }
+    };
+
+    commitProject((current) => ({
+      ...current,
+      nodes: [...current.nodes, newNode]
+    }));
+    setSelectedNodeId(newNode.id);
+  }, [activeNode, commitProject, project.nodes.length]);
+
+  const toggleNodeBypass = useCallback(() => {
+    if (!activeNode) {
+      return;
+    }
+
+    updateActiveNode((node) => ({
+      ...node,
+      enabled: !node.enabled
+    }));
+  }, [activeNode, updateActiveNode]);
+
+  const captureStill = useCallback(() => {
+    const video = videoRef.current;
+    const canvas = document.createElement("canvas");
+    if (!canvas) {
+      return;
+    }
+
+    let sourceToCapture: CanvasImageSource;
+    if (video && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+      sourceToCapture = video;
+    } else if (state.frame) {
+      const img = new Image();
+      img.src = state.frame.dataUrl;
+      sourceToCapture = img;
+    } else {
+      return;
+    }
+
+    canvas.width = sourceToCapture instanceof HTMLVideoElement ? sourceToCapture.videoWidth : (state.frame?.width ?? 320);
+    canvas.height = sourceToCapture instanceof HTMLVideoElement ? sourceToCapture.videoHeight : (state.frame?.height ?? 180);
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      return;
+    }
+
+    ctx.drawImage(sourceToCapture, 0, 0);
+    const thumbnail = canvas.toDataURL("image/jpeg", 0.6);
+
+    const still = {
+      id: `still-${Date.now().toString(36)}`,
+      thumbnail,
+      timestamp: Date.now(),
+      frameIndex: playback.currentFrame,
+      gradeName: project.name
+    };
+
+    setGalleryStills((prev) => [still, ...prev]);
+  }, [playback.currentFrame, project.name, state.frame]);
+
+  const deleteStill = useCallback((stillId: string) => {
+    setGalleryStills((prev) => prev.filter((s) => s.id !== stillId));
+    if (compareStillId === stillId) {
+      setCompareStillId(null);
+    }
+  }, [compareStillId]);
+
+  const applyStillGrade = useCallback((stillId: string) => {
+    const still = galleryStills.find((s) => s.id === stillId);
+    if (!still || !activeNode || project.nodes.length >= MAX_SERIAL_NODES) {
+      return;
+    }
+    const newNode: ColorNode = {
+      ...activeNode,
+      id: `node-${Date.now().toString(36)}`,
+      name: `Grade ${galleryStills.length}`,
+      tracking: { targetShape: activeNode.tracking.targetShape, keyframes: [], state: "empty" }
+    };
+    commitProject((current) => ({ ...current, nodes: [...current.nodes, newNode] }));
+  }, [activeNode, galleryStills.length, project.nodes.length, commitProject]);
+
   const setTrackingTarget = useCallback((targetShape: PowerWindowShape) => {
     if (trackingOperation) {
       return;
@@ -1485,7 +1763,13 @@ export function App() {
                 />
               ) : null}
 
-              <canvas ref={canvasRef} className="viewer-canvas" aria-label="Video viewer" />
+              <canvas ref={canvasRef} className="viewer-canvas" aria-label="Video viewer" onClick={(e) => {
+                if (eyedropperMode === "none") return;
+                const rect = e.currentTarget.getBoundingClientRect();
+                const x = (e.clientX - rect.left) / rect.width;
+                const y = (e.clientY - rect.top) / rect.height;
+                sampleFromEyedropper(x, y);
+              }} />
               {state.media ? (
                 <WindowOverlay
                   activeNode={resolvedActiveNode}
@@ -1700,6 +1984,26 @@ export function App() {
             onSetTrackingTarget={setTrackingTarget}
             showMatte={showMatte}
             onShowMatteChange={setShowMatte}
+            onUpdateCurvePoint={updateCurvePoint}
+            onToggleCurveEnabled={toggleCurveEnabled}
+            onAddCurvePoint={addCurvePoint}
+            onRemoveCurvePoint={removeCurvePoint}
+            onResetCurve={resetCurve}
+            onCopyNode={copyNode}
+            onPasteNode={pasteNode}
+            onDuplicateNode={duplicateNode}
+            onToggleNodeBypass={toggleNodeBypass}
+            onSetEyedropperMode={setEyedropperMode}
+            eyedropperMode={eyedropperMode}
+            eyedropperSampleCount={eyedropperSamples.length}
+            onClearEyedropperSamples={clearEyedropperSamples}
+            onCaptureStill={captureStill}
+            galleryStills={galleryStills}
+            onDeleteStill={deleteStill}
+            onApplyStillGrade={applyStillGrade}
+            onSetCompareStill={setCompareStillId}
+            compareStillId={compareStillId}
+            copiedNode={copiedNode}
           />
       </section>
     </main>
@@ -1727,6 +2031,26 @@ function ColorPanel({
   onUpdateScalar,
   onUpdateWindow,
   onUpdateWindowScalar,
+  onUpdateCurvePoint,
+  onToggleCurveEnabled,
+  onAddCurvePoint,
+  onRemoveCurvePoint,
+  onResetCurve,
+  onCopyNode,
+  onPasteNode,
+  onDuplicateNode,
+  onToggleNodeBypass,
+  onSetEyedropperMode,
+  eyedropperMode,
+  eyedropperSampleCount,
+  onClearEyedropperSamples,
+  onCaptureStill,
+  galleryStills,
+  onDeleteStill,
+  onApplyStillGrade,
+  onSetCompareStill,
+  compareStillId,
+  copiedNode,
   showMatte
 }: {
   activeNode: ColorNode;
@@ -1749,6 +2073,26 @@ function ColorPanel({
   onUpdateScalar: (key: ScalarPrimaryKey, value: number) => void;
   onUpdateWindow: (shape: PowerWindowShape, updater: (window: PowerWindow) => PowerWindow) => void;
   onUpdateWindowScalar: (shape: PowerWindowShape, key: WindowScalarKey, value: number) => void;
+  onUpdateCurvePoint: (channel: CurveChannel, pointIndex: number, updates: Partial<CurvePoint>) => void;
+  onToggleCurveEnabled: (channel: CurveChannel) => void;
+  onAddCurvePoint: (channel: CurveChannel, point: CurvePoint) => void;
+  onRemoveCurvePoint: (channel: CurveChannel, pointIndex: number) => void;
+  onResetCurve: (channel: CurveChannel) => void;
+  onCopyNode: () => void;
+  onPasteNode: () => void;
+  onDuplicateNode: () => void;
+  onToggleNodeBypass: () => void;
+  onSetEyedropperMode: (mode: "none" | "add" | "subtract") => void;
+  eyedropperMode: "none" | "add" | "subtract";
+  eyedropperSampleCount: number;
+  onClearEyedropperSamples: () => void;
+  onCaptureStill: () => void;
+  galleryStills: { id: string; thumbnail: string; timestamp: number; frameIndex: number; gradeName: string }[];
+  onDeleteStill: (stillId: string) => void;
+  onApplyStillGrade: (stillId: string) => void;
+  onSetCompareStill: (stillId: string | null) => void;
+  compareStillId: string | null;
+  copiedNode: ColorNode | null;
   showMatte: boolean;
 }) {
   const isTracking = Boolean(trackingOperation);
@@ -1763,15 +2107,32 @@ function ColorPanel({
                 <button type="button" className="node-select" onClick={() => onSelectNode(node.id)} disabled={isTracking}>
                   <span className="node-index">{index + 1}</span>
                   <span className="node-label">{node.name}</span>
-                  <span className="node-state">{node.enabled ? "On" : "Bypass"}</span>
+                  <span className="node-state">{node.enabled ? "On" : "Off"}</span>
                 </button>
-                {index < nodes.length - 1 ? <span className="node-arrow">-&gt;</span> : null}
+                {index < nodes.length - 1 ? <span className="node-arrow">&#8594;</span> : null}
               </div>
             ))}
           </div>
-          <button className="add-node" type="button" onClick={onAddNode} disabled={nodes.length >= MAX_SERIAL_NODES || isTracking}>
-            Add Node
-          </button>
+          <div className="node-strip-actions">
+            <button className="add-node" type="button" onClick={onAddNode} disabled={nodes.length >= MAX_SERIAL_NODES || isTracking}>
+              Add
+            </button>
+            <button type="button" onClick={onCopyNode} disabled={isTracking}>
+              Copy
+            </button>
+            <button type="button" onClick={onPasteNode} disabled={!copiedNode || nodes.length >= MAX_SERIAL_NODES || isTracking}>
+              Paste
+            </button>
+            <button type="button" onClick={onDuplicateNode} disabled={nodes.length >= MAX_SERIAL_NODES || isTracking}>
+              Duplicate
+            </button>
+            <button type="button" onClick={onToggleNodeBypass}>
+              {activeNode.enabled ? "Bypass" : "Enable"}
+            </button>
+            <button type="button" onClick={onDeleteNode} disabled={nodes.length <= 1 || isTracking}>
+              Delete
+            </button>
+          </div>
         </section>
 
         <section className="control-section">
@@ -1822,6 +2183,18 @@ function ColorPanel({
         </section>
 
         <section className="control-section">
+          <div className="panel-title">Curves</div>
+          <CurvesPalette
+            curves={activeNode.curves}
+            onUpdateCurvePoint={onUpdateCurvePoint}
+            onToggleCurveEnabled={onToggleCurveEnabled}
+            onAddCurvePoint={onAddCurvePoint}
+            onRemoveCurvePoint={onRemoveCurvePoint}
+            onResetCurve={onResetCurve}
+          />
+        </section>
+
+        <section className="control-section">
           <div className="panel-title">Qualifier</div>
           <section className="mask-card">
             <div className="mask-toggle-grid">
@@ -1855,6 +2228,36 @@ function ColorPanel({
                 />
                 <span>Show Matte</span>
               </label>
+              <button type="button" onClick={() => onSetEyedropperMode(eyedropperMode === "add" ? "none" : "add")}>
+                {eyedropperMode === "add" ? "Stop Eyedropper" : "Eyedropper Add"}
+              </button>
+              <button type="button" onClick={() => onSetEyedropperMode("subtract")} disabled={eyedropperSampleCount === 0}>
+                Eyedropper Sub
+              </button>
+              <button type="button" onClick={onClearEyedropperSamples} disabled={eyedropperSampleCount === 0}>
+                Clear
+              </button>
+              <span className="sample-count">{eyedropperSampleCount} samples</span>
+            </div>
+            <div className="gallery-row">
+              <button type="button" onClick={onCaptureStill}>Capture Still</button>
+              {galleryStills.length > 0 && (
+                <div className="gallery-thumbs">
+                  {galleryStills.slice(0, 4).map((still) => (
+                    <button
+                      key={still.id}
+                      type="button"
+                      className={`gallery-thumb ${compareStillId === still.id ? "is-active" : ""}`}
+                      onClick={() => onSetCompareStill(compareStillId === still.id ? null : still.id)}
+                      onContextMenu={(e) => { e.preventDefault(); onApplyStillGrade(still.id); }}
+                      title={`Frame ${still.frameIndex} - click to compare, right-click to apply grade`}
+                    >
+                      <img src={still.thumbnail} alt={`Frame ${still.frameIndex}`} />
+                      <button type="button" className="gallery-thumb-delete" onClick={(e) => { e.stopPropagation(); onDeleteStill(still.id); }} title="Delete still">x</button>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
             <QualifierControl label="Hue Center" value={activeNode.qualifier.hueCenter} rangeKey="hueCenter" onChange={onUpdateQualifierScalar} />
             <QualifierControl label="Hue Width" value={activeNode.qualifier.hueWidth} rangeKey="hueWidth" onChange={onUpdateQualifierScalar} />
@@ -1903,6 +2306,90 @@ function ColorPanel({
         </section>
       </div>
     </aside>
+  );
+}
+
+function CurvesPalette({
+  curves,
+  onUpdateCurvePoint,
+  onToggleCurveEnabled,
+  onAddCurvePoint,
+  onRemoveCurvePoint,
+  onResetCurve
+}: {
+  curves: ColorNode["curves"];
+  onUpdateCurvePoint: (channel: CurveChannel, pointIndex: number, updates: Partial<CurvePoint>) => void;
+  onToggleCurveEnabled: (channel: CurveChannel) => void;
+  onAddCurvePoint: (channel: CurveChannel, point: CurvePoint) => void;
+  onRemoveCurvePoint: (channel: CurveChannel, pointIndex: number) => void;
+  onResetCurve: (channel: CurveChannel) => void;
+}) {
+  const curveChannels: { key: CurveChannel; label: string }[] = [
+    { key: "master", label: "Master" },
+    { key: "red", label: "Red" },
+    { key: "green", label: "Green" },
+    { key: "blue", label: "Blue" }
+  ];
+
+  return (
+    <section className="curves-card">
+      <div className="curves-channels">
+        {curveChannels.map(({ key, label }) => (
+          <div key={key} className="curve-channel-row">
+            <label className="toggle-row">
+              <input
+                type="checkbox"
+                checked={curves[key].enabled}
+                onChange={() => onToggleCurveEnabled(key)}
+              />
+              <span>{label}</span>
+            </label>
+            <button type="button" onClick={() => onResetCurve(key)}>Reset</button>
+          </div>
+        ))}
+      </div>
+      <div className="curves-points">
+        <div className="curve-points-header">Master Curve Points</div>
+        <div className="curve-points-list">
+          {curves.master.points.map((point, index) => (
+            <div key={index} className="curve-point-row">
+              <span className="curve-point-index">{index + 1}</span>
+              <label className="curve-point-input">
+                <span>X</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={point.x.toFixed(2)}
+                  onChange={(e) => onUpdateCurvePoint("master", index, { x: Number(e.currentTarget.value) })}
+                />
+              </label>
+              <label className="curve-point-input">
+                <span>Y</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={point.y.toFixed(2)}
+                  onChange={(e) => onUpdateCurvePoint("master", index, { y: Number(e.currentTarget.value) })}
+                />
+              </label>
+              {index > 0 && index < curves.master.points.length - 1 && (
+                <button type="button" onClick={() => onRemoveCurvePoint("master", index)}>X</button>
+              )}
+            </div>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={() => onAddCurvePoint("master", { x: 0.5, y: 0.5 })}
+        >
+          Add Point
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -2599,6 +3086,30 @@ function normalizeSignedDegrees(value: number): number {
 
 function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value));
+}
+
+function rgbToHslForQualifier(r: number, g: number, b: number): { h: number; s: number; l: number } {
+  const maxValue = Math.max(r, g, b);
+  const minValue = Math.min(r, g, b);
+  const delta = maxValue - minValue;
+  const lightness = (maxValue + minValue) / 2;
+
+  let hue = 0;
+  let saturation = 0;
+
+  if (delta > 0.00001) {
+    saturation = delta / (1 - Math.abs(2 * lightness - 1));
+    if (maxValue === r) {
+      hue = 60 * (((g - b) / delta) % 6);
+    } else if (maxValue === g) {
+      hue = 60 * ((b - r) / delta + 2);
+    } else {
+      hue = 60 * ((r - g) / delta + 4);
+    }
+    hue = ((hue % 360) + 360) % 360;
+  }
+
+  return { h: hue, s: saturation, l: lightness };
 }
 
 function captureScopeFrame(

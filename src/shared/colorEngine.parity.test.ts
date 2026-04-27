@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyCurves,
+  applyLut,
   createColorNode,
-  createNeutralPrimaries,
+  createDefaultNodeCurves,
+  createDefaultLutSettings,
   evaluateNodeGraph,
   evaluateNodeMask,
-  createDefaultPowerWindows
+  parseCubeLut
 } from "./colorEngine";
 
 describe("color engine shader parity", () => {
@@ -166,8 +169,159 @@ describe("color engine mask evaluation", () => {
       pivot: 0.5,
       saturation: 99,
       temperature: 99,
-      tint: -99
+      tint: -99,
+      hueShift: 999,
+      colorBoost: 999,
+      midtoneDetail: 999,
+      shadowAmount: 999,
+      highlightAmount: 999
     };
     expect(evaluateNodeGraph({ r: 0.5, g: 0.5, b: 0.5, a: 1 }, [node]).r).toBeLessThanOrEqual(1);
+  });
+});
+
+describe("color engine curves evaluation", () => {
+  it("identity curve is neutral transform", () => {
+    const curves = createDefaultNodeCurves();
+    const pixel = { r: 0.5, g: 0.5, b: 0.5, a: 1 };
+    const result = applyCurves(pixel, curves);
+    expect(result.r).toBeCloseTo(0.5, 4);
+    expect(result.g).toBeCloseTo(0.5, 4);
+    expect(result.b).toBeCloseTo(0.5, 4);
+  });
+
+  it("disabled curve is neutral transform", () => {
+    const curves = createDefaultNodeCurves();
+    curves.master.enabled = false;
+    curves.red.enabled = false;
+    curves.green.enabled = false;
+    curves.blue.enabled = false;
+    const pixel = { r: 0.3, g: 0.6, b: 0.9, a: 1 };
+    const result = applyCurves(pixel, curves);
+    expect(result.r).toBeCloseTo(0.3, 4);
+    expect(result.g).toBeCloseTo(0.6, 4);
+    expect(result.b).toBeCloseTo(0.9, 4);
+  });
+
+  it("clamps curve output to valid range", () => {
+    const curves = createDefaultNodeCurves();
+    curves.master.enabled = true;
+    curves.master.points = [
+      { x: 0, y: -1 },
+      { x: 1, y: 2 }
+    ];
+    const pixel = { r: 0.5, g: 0.5, b: 0.5, a: 1 };
+    const result = applyCurves(pixel, curves);
+    expect(result.r).toBeGreaterThanOrEqual(0);
+    expect(result.r).toBeLessThanOrEqual(1);
+  });
+});
+
+describe("color engine LUT evaluation", () => {
+  it("disabled LUT is neutral transform", () => {
+    const lut = createDefaultLutSettings();
+    lut.enabled = false;
+    const pixel = { r: 0.5, g: 0.5, b: 0.5, a: 1 };
+    const result = applyLut(pixel, lut);
+    expect(result.r).toBeCloseTo(0.5, 4);
+    expect(result.g).toBeCloseTo(0.5, 4);
+    expect(result.b).toBeCloseTo(0.5, 4);
+  });
+
+  it("null LUT is neutral transform", () => {
+    const lut = createDefaultLutSettings();
+    lut.enabled = true;
+    lut.lut = null;
+    const pixel = { r: 0.5, g: 0.5, b: 0.5, a: 1 };
+    const result = applyLut(pixel, lut);
+    expect(result.r).toBeCloseTo(0.5, 4);
+    expect(result.g).toBeCloseTo(0.5, 4);
+    expect(result.b).toBeCloseTo(0.5, 4);
+  });
+
+  it("clamps LUT output to valid range", () => {
+    const lut = createDefaultLutSettings();
+    lut.enabled = true;
+    lut.lut = {
+      name: "Test LUT",
+      size: 2,
+      data: new Float32Array([
+        2, 0, 0,  // black to red corner
+        0, 2, 0,  // black to green corner
+        0, 0, 2,  // black to blue corner
+        2, 2, 0,  // yellow corner
+        2, 0, 2,  // magenta corner
+        0, 2, 2,  // cyan corner
+        2, 2, 2,  // white corner
+        0, 0, 0   // black corner (duplicate for indexing)
+      ])
+    };
+    lut.intensity = 1;
+    const pixel = { r: 0.5, g: 0.5, b: 0.5, a: 1 };
+    const result = applyLut(pixel, lut);
+    expect(result.r).toBeGreaterThanOrEqual(0);
+    expect(result.r).toBeLessThanOrEqual(1);
+  });
+
+  it("intensity blends between original and LUT result", () => {
+    const lut = createDefaultLutSettings();
+    lut.enabled = true;
+    lut.lut = {
+      name: "Test LUT",
+      size: 2,
+      data: new Float32Array([
+        0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0,
+        0, 0, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1
+      ])
+    };
+    lut.intensity = 0.5;
+    const pixel = { r: 0.5, g: 0.5, b: 0.5, a: 1 };
+    const result = applyLut(pixel, lut);
+    expect(result.r).toBeGreaterThanOrEqual(0);
+    expect(result.r).toBeLessThanOrEqual(1);
+  });
+});
+
+describe("color engine LUT parsing", () => {
+  it("parses valid cube file content", () => {
+    const content = `# Test LUT
+TITLE "Test LUT"
+LUT_3D_SIZE 2
+
+0.0 0.0 0.0
+1.0 0.0 0.0
+0.0 1.0 0.0
+1.0 1.0 0.0
+0.0 0.0 1.0
+1.0 0.0 1.0
+0.0 1.0 1.0
+1.0 1.0 1.0`;
+    const result = parseCubeLut(content);
+    expect(result).not.toBeNull();
+    expect(result!.size).toBe(2);
+    expect(result!.data.length).toBe(24);
+  });
+
+  it("returns null for invalid cube content", () => {
+    const content = "INVALID CONTENT";
+    const result = parseCubeLut(content);
+    expect(result).toBeNull();
+  });
+
+  it("extracts LUT name from title", () => {
+    const content = `TITLE "My Creative LUT"
+LUT_3D_SIZE 2
+
+0.0 0.0 0.0
+1.0 0.0 0.0
+0.0 1.0 0.0
+1.0 1.0 0.0
+0.0 0.0 1.0
+1.0 0.0 1.0
+0.0 1.0 1.0
+1.0 1.0 1.0`;
+    const result = parseCubeLut(content);
+    expect(result).not.toBeNull();
+    expect(result!.name).toBe("My Creative LUT");
   });
 });

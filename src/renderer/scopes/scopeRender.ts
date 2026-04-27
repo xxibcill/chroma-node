@@ -1,4 +1,4 @@
-import type { ScopeHistogram, VectorscopeGuide } from "./scopeAnalysis";
+import type { ScopeHistogram, VectorscopeGuide, RgbParadeHistogram, RgbHistogram } from "./scopeAnalysis";
 
 export function drawWaveformScope(canvas: HTMLCanvasElement, histogram: ScopeHistogram): void {
   const context = prepareCanvas(canvas);
@@ -13,6 +13,32 @@ export function drawWaveformScope(canvas: HTMLCanvasElement, histogram: ScopeHis
   });
   drawWaveformGrid(context, width, height);
   drawWaveformLabels(context, width, height);
+}
+
+export function drawRgbParadeScope(canvas: HTMLCanvasElement, histogram: RgbParadeHistogram): void {
+  const context = prepareCanvas(canvas);
+  const { width, height } = getCanvasSize(canvas);
+  const segmentWidth = Math.floor(width / 3);
+
+  drawScopeBase(context, width, height);
+
+  const redHistogram: ScopeHistogram = { width: histogram.width, height: histogram.height, bins: histogram.redBins, peak: histogram.peak, samples: histogram.samples };
+  const greenHistogram: ScopeHistogram = { width: histogram.width, height: histogram.height, bins: histogram.greenBins, peak: histogram.peak, samples: histogram.samples };
+  const blueHistogram: ScopeHistogram = { width: histogram.width, height: histogram.height, bins: histogram.blueBins, peak: histogram.peak, samples: histogram.samples };
+
+  drawParadeChannel(context, redHistogram, 0, segmentWidth, height);
+  drawParadeChannel(context, greenHistogram, segmentWidth, segmentWidth * 2, height);
+  drawParadeChannel(context, blueHistogram, segmentWidth * 2, width, height);
+
+  drawParadeLabels(context, width, height, segmentWidth);
+}
+
+export function drawRgbHistogram(canvas: HTMLCanvasElement, histogram: RgbHistogram): void {
+  const context = prepareCanvas(canvas);
+  const { width, height } = getCanvasSize(canvas);
+
+  drawScopeBase(context, width, height);
+  drawRgbHistogramBars(context, histogram, width, height);
 }
 
 export function drawVectorscope(
@@ -211,4 +237,83 @@ function drawHistogram(
   }
 
   context.putImageData(imageData, 0, 0);
+}
+
+function drawParadeChannel(
+  context: CanvasRenderingContext2D,
+  histogram: ScopeHistogram,
+  xStart: number,
+  xEnd: number,
+  height: number
+): void {
+  const channelWidth = xEnd - xStart;
+  const imageData = context.createImageData(channelWidth, height);
+  const xScale = histogram.width / channelWidth;
+  const yScale = histogram.height / height;
+
+  for (let y = 0; y < height; y += 1) {
+    const sourceY = Math.min(histogram.height - 1, Math.floor(y * yScale));
+    for (let x = 0; x < channelWidth; x += 1) {
+      const sourceX = Math.min(histogram.width - 1, Math.floor(x * xScale));
+      const density = histogram.bins[sourceY * histogram.width + sourceX];
+      if (density <= 0) {
+        continue;
+      }
+
+      const alpha = Math.min(255, Math.round(Math.sqrt(density / histogram.peak) * 255 * 0.85));
+      const imageIndex = (y * channelWidth + x) * 4;
+      imageData.data[imageIndex] = 255;
+      imageData.data[imageIndex + 1] = 255;
+      imageData.data[imageIndex + 2] = 255;
+      imageData.data[imageIndex + 3] = alpha;
+    }
+  }
+
+  context.putImageData(imageData, xStart, 0);
+}
+
+function drawParadeLabels(context: CanvasRenderingContext2D, width: number, height: number, segmentWidth: number): void {
+  context.save();
+  context.fillStyle = "rgba(236, 232, 220, 0.56)";
+  context.font = "700 10px system-ui, sans-serif";
+  context.textAlign = "center";
+  context.textBaseline = "top";
+  context.fillText("R", segmentWidth / 2, height - 14);
+  context.fillText("G", segmentWidth * 1.5, height - 14);
+  context.fillText("B", segmentWidth * 2.5, height - 14);
+  context.restore();
+}
+
+function drawRgbHistogramBars(
+  context: CanvasRenderingContext2D,
+  histogram: RgbHistogram,
+  width: number,
+  height: number
+): void {
+  if (histogram.peak <= 0) {
+    return;
+  }
+
+  const barWidth = Math.floor(width / 256);
+  const maxBarHeight = height - 20;
+
+  context.save();
+
+  const channels = [
+    { bins: histogram.redBins, color: "rgba(220, 80, 80, 0.7)" },
+    { bins: histogram.greenBins, color: "rgba(80, 200, 80, 0.7)" },
+    { bins: histogram.blueBins, color: "rgba(80, 120, 220, 0.7)" },
+    { bins: histogram.lumaBins, color: "rgba(200, 200, 200, 0.5)" }
+  ];
+
+  for (const channel of channels) {
+    context.fillStyle = channel.color;
+    for (let i = 0; i < 256; i += 1) {
+      const barHeight = (channel.bins[i] / histogram.peak) * maxBarHeight;
+      const x = i * barWidth;
+      context.fillRect(x, height - 10 - barHeight, barWidth - 1, barHeight);
+    }
+  }
+
+  context.restore();
 }
