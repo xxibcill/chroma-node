@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import path from "node:path";
 import type { ExportQuality, MediaRef } from "../shared/ipc.js";
 import type { ChromaProject, ExportPreset, ExportResizePolicy, ExportSizeMode, ProjectExportSettings } from "../shared/project.js";
-import { clampDisplayWidth, clampDisplayHeight } from "../shared/mediaGeometry.js";
+import { clampDisplaySize } from "../shared/mediaGeometry.js";
 import { sanitizeProject } from "../shared/project.js";
 import { appError } from "./errors.js";
 
@@ -97,9 +97,8 @@ export function validateExportGeometry(settings: ProjectExportSettings, media: M
 }
 
 export function planExportGeometry(media: MediaRef): { width: number; height: number } {
-  const width = clampDisplayWidth(media.displayWidth);
-  const height = clampDisplayHeight(media.displayHeight);
-  return { width, height };
+  const { displayWidth, displayHeight } = clampDisplaySize(media.displayWidth, media.displayHeight);
+  return { width: displayWidth, height: displayHeight };
 }
 
 export function computeExportGeometry(settings: ProjectExportSettings, media: MediaRef): { width: number; height: number } {
@@ -107,7 +106,8 @@ export function computeExportGeometry(settings: ProjectExportSettings, media: Me
   const sourceHeight = media.displayHeight;
 
   if (settings.sizeMode === "source") {
-    return { width: clampDisplayWidth(sourceWidth), height: clampDisplayHeight(sourceHeight) };
+    const { displayWidth, displayHeight } = clampDisplaySize(sourceWidth, sourceHeight);
+    return { width: displayWidth, height: displayHeight };
   }
 
   if (settings.sizeMode === "preset" && settings.preset) {
@@ -121,7 +121,8 @@ export function computeExportGeometry(settings: ProjectExportSettings, media: Me
     return applyResizePolicy(settings.resizePolicy, settings.customWidth, settings.customHeight, sourceWidth, sourceHeight);
   }
 
-  return { width: clampDisplayWidth(sourceWidth), height: clampDisplayHeight(sourceHeight) };
+  const { displayWidth, displayHeight } = clampDisplaySize(sourceWidth, sourceHeight);
+  return { width: displayWidth, height: displayHeight };
 }
 
 function applyResizePolicy(

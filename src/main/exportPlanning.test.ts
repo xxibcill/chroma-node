@@ -81,7 +81,7 @@ describe("exportPlanning", () => {
         project,
         outputPath: "/path/to/output.avi"
       });
-      expect(issues).toContain("H.264 export must use an .mp4 output path.");
+      expect(issues).toContain("H264 export must use an .mp4 output path.");
     });
 
     it("returns issue when output path equals source path", () => {
@@ -126,7 +126,14 @@ describe("exportPlanning", () => {
     it("clamps oversized display height", () => {
       const media = createMockMedia({ displayWidth: 1920, displayHeight: 4320 });
       const result = planExportGeometry(media);
-      expect(result.height).toBe(2160); // MAX_DISPLAY_HEIGHT
+      expect(result.height).toBe(3840);
+    });
+
+    it("preserves portrait 4K-equivalent source geometry", () => {
+      const media = createMockMedia({ displayWidth: 2160, displayHeight: 3840 });
+      const result = planExportGeometry(media);
+      expect(result.width).toBe(2160);
+      expect(result.height).toBe(3840);
     });
   });
 
@@ -186,6 +193,18 @@ describe("exportPlanning", () => {
       });
       expect(snapshot.width).toBe(1080);
       expect(snapshot.height).toBe(1920);
+    });
+
+    it("creates snapshot with correct dimensions for portrait 4K-equivalent media", () => {
+      const project = createMockProject({
+        media: createMockMedia({ displayWidth: 2160, displayHeight: 3840 })
+      });
+      const snapshot = createExportJobSnapshot({
+        project,
+        outputPath: "/path/to/output.mp4"
+      });
+      expect(snapshot.width).toBe(2160);
+      expect(snapshot.height).toBe(3840);
     });
 
     it("generates unique export ID", () => {
