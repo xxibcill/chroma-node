@@ -2,7 +2,13 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { MediaRef } from "../shared/ipc.js";
-import { getDisplaySize, MAX_DISPLAY_WIDTH, MAX_DISPLAY_HEIGHT, normalizeRotation } from "../shared/mediaGeometry.js";
+import {
+  getDisplaySize,
+  MAX_SUPPORTED_DISPLAY_EDGE,
+  MAX_SUPPORTED_DISPLAY_PIXELS,
+  isSupportedDisplayRaster,
+  normalizeRotation
+} from "../shared/mediaGeometry.js";
 import { appError } from "./errors.js";
 import { requireFfprobe } from "./ffmpeg.js";
 import { runProcess } from "./process.js";
@@ -95,10 +101,10 @@ export function mapProbeOutput(sourcePath: string, parsed: FfprobeJson): MediaRe
 
   const rotation = readRotation(videoStream);
   const { displayWidth, displayHeight } = getDisplaySize(videoStream.width, videoStream.height, rotation);
-  if (displayWidth > MAX_DISPLAY_WIDTH || displayHeight > MAX_DISPLAY_HEIGHT) {
+  if (!isSupportedDisplayRaster(displayWidth, displayHeight)) {
     throw appError(
       "UNSUPPORTED_MEDIA",
-      `Media exceeds the display raster limit of ${MAX_DISPLAY_WIDTH} x ${MAX_DISPLAY_HEIGHT}.`,
+      `Media exceeds the supported 4K-equivalent display raster (${MAX_SUPPORTED_DISPLAY_EDGE}px max edge, ${MAX_SUPPORTED_DISPLAY_PIXELS} pixels total).`,
       `${displayWidth} x ${displayHeight}`
     );
   }

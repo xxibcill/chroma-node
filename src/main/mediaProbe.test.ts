@@ -70,7 +70,7 @@ describe("mapProbeOutput", () => {
     ).toThrow("No supported video stream");
   });
 
-  it("rejects video streams exceeding display raster limit of 3840x2160", () => {
+  it("rejects video streams exceeding the supported 4K-equivalent display raster", () => {
     expect(() =>
       mapProbeOutput("/clips/uhd.mp4", {
         streams: [
@@ -86,7 +86,7 @@ describe("mapProbeOutput", () => {
         ],
         format: { format_name: "mp4", duration: "4.0" }
       })
-    ).toThrow("3840 x 2160");
+    ).toThrow("4K-equivalent display raster");
   });
 
   it("allows portrait media within display raster limit", () => {
@@ -148,5 +148,24 @@ describe("mapProbeOutput", () => {
     expect(media.displayWidth).toBe(1080);
     expect(media.displayHeight).toBe(1920);
     expect(media.rotation).toBe(90);
+  });
+
+  it("allows portrait 4K-equivalent media", () => {
+    const media = mapProbeOutput("/clips/portrait-4k.mp4", {
+      streams: [
+        {
+          index: 0,
+          codec_type: "video",
+          codec_name: "h264",
+          width: 2160,
+          height: 3840,
+          duration: "6.0",
+          avg_frame_rate: "24/1"
+        }
+      ],
+      format: { format_name: "mp4", duration: "6.0" }
+    });
+    expect(media.displayWidth).toBe(2160);
+    expect(media.displayHeight).toBe(3840);
   });
 });
