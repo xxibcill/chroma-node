@@ -1,10 +1,8 @@
 import { existsSync } from "node:fs";
+import { MAX_SUPPORTED_DISPLAY_EDGE, MAX_SUPPORTED_DISPLAY_PIXELS, isSupportedDisplayRaster } from "../shared/mediaGeometry.js";
+import type { MediaRef, RelinkMediaResult } from "../shared/ipc.js";
 import { appError } from "./errors.js";
 import { probeMedia } from "./mediaProbe.js";
-import type { MediaRef, RelinkMediaResult } from "../shared/ipc.js";
-
-const MAX_DISPLAY_WIDTH = 3840;
-const MAX_DISPLAY_HEIGHT = 2160;
 const SUPPORTED_CODECS = ["h264", "avc1", "mp4v", "mov"];
 const SUPPORTED_CONTAINERS = ["mp4", "mov"];
 
@@ -42,10 +40,10 @@ export async function relinkMedia(originalPath: string, replacementPath: string)
 }
 
 function validateMediaCompatibility(media: MediaRef, _originalPath: string): ReturnType<typeof appError> | undefined {
-  if (media.displayWidth > MAX_DISPLAY_WIDTH || media.displayHeight > MAX_DISPLAY_HEIGHT) {
+  if (!isSupportedDisplayRaster(media.displayWidth, media.displayHeight)) {
     return appError(
       "UNSUPPORTED_MEDIA",
-      `Replacement media exceeds display raster limit of ${MAX_DISPLAY_WIDTH}x${MAX_DISPLAY_HEIGHT}.`,
+      `Replacement media exceeds the supported 4K-equivalent display raster (${MAX_SUPPORTED_DISPLAY_EDGE}px max edge, ${MAX_SUPPORTED_DISPLAY_PIXELS} pixels total).`,
       `Got ${media.displayWidth}x${media.displayHeight}.`
     );
   }

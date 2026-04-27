@@ -57,7 +57,33 @@ describe("relinkMedia", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error.code).toBe("UNSUPPORTED_MEDIA");
-      expect(result.error.message).toContain("3840x2160");
+      expect(result.error.message).toContain("4K-equivalent display raster");
+    }
+  });
+
+  it("accepts portrait 4K-equivalent replacement media", async () => {
+    vi.mocked(existsSync).mockReturnValue(true);
+    const validMedia = {
+      id: "test",
+      sourcePath: "/replacement/path.mp4",
+      fileName: "path.mp4",
+      container: "mp4",
+      codec: "h264",
+      width: 2160,
+      height: 3840,
+      displayWidth: 2160,
+      displayHeight: 3840,
+      durationSeconds: 10,
+      frameRate: 24,
+      hasAudio: false,
+      rotation: 0,
+      videoStreamIndex: 0
+    };
+    vi.mocked(mediaProbeModule.probeMedia).mockResolvedValue(validMedia);
+    const result = await relinkMedia("/original/path.mp4", "/replacement/path.mp4");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.media).toEqual(validMedia);
     }
   });
 
