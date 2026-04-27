@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  clampDisplaySize,
   getAspectRatio,
   getDisplaySize,
   isRotated,
   MAX_DISPLAY_HEIGHT,
+  MAX_SUPPORTED_DISPLAY_EDGE,
+  MAX_SUPPORTED_DISPLAY_PIXELS,
   MAX_DISPLAY_WIDTH,
+  isSupportedDisplayRaster,
   normalizeRotation
 } from "./mediaGeometry";
 
@@ -132,6 +136,34 @@ describe("mediaGeometry", () => {
     });
   });
 
+  describe("isSupportedDisplayRaster", () => {
+    it("allows landscape 4K media", () => {
+      expect(isSupportedDisplayRaster(3840, 2160)).toBe(true);
+    });
+
+    it("allows portrait 4K-equivalent media", () => {
+      expect(isSupportedDisplayRaster(2160, 3840)).toBe(true);
+    });
+
+    it("rejects media that exceeds the max edge", () => {
+      expect(isSupportedDisplayRaster(2161, 3841)).toBe(false);
+    });
+
+    it("rejects media that exceeds the max pixel budget", () => {
+      expect(isSupportedDisplayRaster(3000, 3000)).toBe(false);
+    });
+  });
+
+  describe("clampDisplaySize", () => {
+    it("preserves portrait 4K-equivalent media", () => {
+      expect(clampDisplaySize(2160, 3840)).toEqual({ displayWidth: 2160, displayHeight: 3840 });
+    });
+
+    it("scales oversized media into the supported raster envelope", () => {
+      expect(clampDisplaySize(7680, 4320)).toEqual({ displayWidth: 3840, displayHeight: 2160 });
+    });
+  });
+
   describe("MAX_DISPLAY_WIDTH", () => {
     it("is 3840", () => {
       expect(MAX_DISPLAY_WIDTH).toBe(3840);
@@ -141,6 +173,18 @@ describe("mediaGeometry", () => {
   describe("MAX_DISPLAY_HEIGHT", () => {
     it("is 2160", () => {
       expect(MAX_DISPLAY_HEIGHT).toBe(2160);
+    });
+  });
+
+  describe("MAX_SUPPORTED_DISPLAY_EDGE", () => {
+    it("is 3840", () => {
+      expect(MAX_SUPPORTED_DISPLAY_EDGE).toBe(3840);
+    });
+  });
+
+  describe("MAX_SUPPORTED_DISPLAY_PIXELS", () => {
+    it("matches a 3840 x 2160 raster", () => {
+      expect(MAX_SUPPORTED_DISPLAY_PIXELS).toBe(3840 * 2160);
     });
   });
 });
