@@ -2701,7 +2701,7 @@ function RelinkPanel({
         <p>Select a replacement media file to continue. The replacement must be:</p>
         <ul>
           <li>An MP4 or MOV file with H.264 video codec</li>
-          <li>Has a display raster no larger than 3840 x 2160</li>
+          <li>A 4K-equivalent display raster, such as 3840 x 2160 or 2160 x 3840</li>
         </ul>
         <div className="relink-actions">
           <button type="button" className="primary-action" onClick={onRelink}>
