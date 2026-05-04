@@ -1,7 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import type { ChromaProject } from "../shared/project.js";
 import type { ExportJobResult, ExportSequenceRequest } from "../shared/ipc.js";
 import { appError } from "./errors.js";
 import { requireFfmpeg, requireFfprobe } from "./ffmpeg.js";

@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import path from "node:path";
 import type { ExportQuality, MediaRef } from "../shared/ipc.js";
-import type { ChromaProject, ExportPreset, ExportResizePolicy, ExportSizeMode, ProjectExportSettings } from "../shared/project.js";
+import type { ChromaProject, ExportPreset, ExportResizePolicy, ProjectExportSettings } from "../shared/project.js";
 import { clampDisplaySize } from "../shared/mediaGeometry.js";
 import { sanitizeProject } from "../shared/project.js";
 import { appError } from "./errors.js";

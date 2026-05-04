@@ -25,7 +25,7 @@ export async function relinkMedia(originalPath: string, replacementPath: string)
     };
   }
 
-  const validationError = validateMediaCompatibility(replacementMedia, originalPath);
+  const validationError = validateMediaCompatibility(replacementMedia);
   if (validationError) {
     return {
       ok: false,
@@ -39,7 +39,7 @@ export async function relinkMedia(originalPath: string, replacementPath: string)
   };
 }
 
-function validateMediaCompatibility(media: MediaRef, _originalPath: string): ReturnType<typeof appError> | undefined {
+function validateMediaCompatibility(media: MediaRef): ReturnType<typeof appError> | undefined {
   if (!isSupportedDisplayRaster(media.displayWidth, media.displayHeight)) {
     return appError(
       "UNSUPPORTED_MEDIA",
