@@ -93,7 +93,7 @@ const initialProject = createDefaultProject();
 const initialMessage = "Import an MP4 or MOV clip to start playback inspection.";
 const scopeDebounceMs = 50;
 const playbackScopeIntervalMs = 1000 / 15;
-const waveformHistogramSize = { width: 320, height: 160 };
+const waveformHistogramSize = { width: 640, height: 256 };
 const vectorscopeHistogramSize = 220;
 
 export function App() {
