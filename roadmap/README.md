@@ -19,6 +19,7 @@ This roadmap breaks the DaVinci Resolve-inspired Color page learning app into im
 | [Phase 10 - High-Resolution Preview and Performance](phase-10-high-resolution-preview-and-performance.md) | Done | Keep large-raster playback, scopes, and export responsive through proxy and performance work. |
 | [Phase 11 - Format and Delivery Expansion](phase-11-format-and-delivery-expansion.md) | Done | Expand delivery options with audio, more outputs, and broader publishing workflows. |
 | [Phase 12 - Resolve-Style Color Page Upgrade](phase-12-resolve-style-color-page-upgrade.md) | Not started | Upgrade the Color page with Resolve-inspired layout, controls, curves, secondary tools, scopes, gallery, LUTs, and parity hardening. |
+| [Phase 13 - Apple Log and Advanced Color Management](phase-13-apple-log-and-advanced-color-management.md) | Not started | Support Apple Log and broader profile-aware color management with parity-safe preview, export, metadata, and validation. |
 
 ## Status Values
 
