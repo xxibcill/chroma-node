@@ -1062,6 +1062,12 @@ out vec4 outColor;
 uniform sampler2D uFrame;
 uniform int uViewerMode;
 uniform float uSplitPosition;
+uniform int uSourceTransfer;
+uniform int uTargetTransfer;
+uniform int uToneMapping;
+uniform int uSourceIsHdr;
+uniform int uApplySourceToWorking;
+uniform vec3 uSourceToWorkingRows[3];
 uniform int uEnabled[${count}];
 uniform vec3 uLift[${count}];
 uniform vec3 uGamma[${count}];
@@ -1292,8 +1298,144 @@ float nodeMask(vec3 color, int index, vec2 coord) {
   return qualifierMask(color, index) * windowMask(coord, index);
 }
 
+vec3 decodeSrgb(vec3 color) {
+  vec3 low = color / 12.92;
+  vec3 high = pow(max((color + vec3(0.055)) / 1.055, vec3(0.0)), vec3(2.4));
+  return mix(high, low, lessThanEqual(color, vec3(0.04045)));
+}
+
+vec3 encodeSrgb(vec3 color) {
+  vec3 low = color * 12.92;
+  vec3 high = 1.055 * pow(max(color, vec3(0.0)), vec3(1.0 / 2.4)) - vec3(0.055);
+  return mix(high, low, lessThanEqual(color, vec3(0.0031308)));
+}
+
+vec3 decodeHlg(vec3 color) {
+  const float HLG_E = 1.2;
+  vec3 low = color * color * (1.0 / (3.0 * HLG_E));
+  float a = sqrt((3.0 * HLG_E - 0.5) / 3.0);
+  vec3 high = a * sqrt(max(color, vec3(0.0))) - vec3(a - 1.0 / (3.0 * HLG_E));
+  return mix(high, low, lessThanEqual(color, vec3(0.5)));
+}
+
+vec3 encodeHlg(vec3 color) {
+  const float HLG_E = 1.2;
+  vec3 low = sqrt(max(3.0 * HLG_E * color, vec3(0.0)));
+  vec3 high = vec3((3.0 * HLG_E - 0.5) / 3.0) + 2.0 * sqrt(max(color - vec3(1.0 / (3.0 * HLG_E)), vec3(0.0)));
+  return mix(high, low, lessThanEqual(color, vec3(1.0 / (3.0 * HLG_E))));
+}
+
+vec3 decodePq(vec3 color) {
+  const float c = 0.1593017578125;
+  const float m1 = 2610.0 / 16384.0;
+  const float m2 = 2523.0 / 4096.0 * 128.0;
+  const float y1 = 1.7;
+  const float y2 = 1.0 / 1.7;
+  vec3 xn = pow(max(color / 10000.0, vec3(0.0)), vec3(m1));
+  vec3 n = xn * xn * xn + pow(max(xn, vec3(0.0)), vec3(y2));
+  vec3 nM2 = pow(max(n, vec3(0.0)), vec3(m2 / m1));
+  return pow(nM2 + vec3(pow(c, m2 / m1)), vec3(y1));
+}
+
+vec3 encodePq(vec3 color) {
+  const float c = 0.1593017578125;
+  const float m1 = 16384.0 / 2610.0;
+  const float m2 = 4096.0 / 2523.0;
+  const float y1 = 1.7;
+  const float y2 = 1.0 / 1.7;
+  vec3 y = pow(max(color, vec3(0.0)), vec3(y2));
+  vec3 yY1 = pow(max(y, vec3(0.0)), vec3(1.0 / y1));
+  vec3 xM2 = pow(yY1 + vec3(pow(c, y1)), vec3(m2 * y2));
+  return 10000.0 * pow(xM2 / (xM2 + vec3(pow(c, y1))), vec3(1.0 / m1));
+}
+
+vec3 decodeAppleLog(vec3 color) {
+  const float a = 5.555556;
+  const float d = 0.385371;
+  const float e = 1.0;
+  const float f = 0.817092;
+  vec3 low = color / e;
+  vec3 high = e * pow(max((color + d - 1.0) / (1.0 + d - 1.0), vec3(0.0)), vec3(a)) * (1.0 - f) + vec3(f);
+  return mix(high, low, lessThan(color, vec3(0.247190 - 0.052272 * f)));
+}
+
+vec3 encodeAppleLog(vec3 color) {
+  const float a = 5.555556;
+  const float d = 0.385371;
+  const float e = 1.0;
+  const float f = 0.817092;
+  vec3 low = color / e;
+  vec3 high = pow(max((color - f * e) / ((1.0 - f) * e), vec3(0.0)), vec3(1.0 / a)) * (1.0 + d - 1.0) + vec3(d - 1.0);
+  return mix(high, low, lessThan(color, vec3((1.0 - f) * e)));
+}
+
+vec3 decodeTransfer(vec3 color, int transfer) {
+  if (transfer == 1) {
+    return decodeSrgb(color);
+  }
+  if (transfer == 3) {
+    return decodeHlg(color);
+  }
+  if (transfer == 4) {
+    return decodePq(color);
+  }
+  if (transfer == 5) {
+    return decodeAppleLog(color);
+  }
+  return color;
+}
+
+vec3 encodeTransfer(vec3 color, int transfer) {
+  if (transfer == 1) {
+    return encodeSrgb(color);
+  }
+  if (transfer == 3) {
+    return encodeHlg(color);
+  }
+  if (transfer == 4) {
+    return encodePq(color);
+  }
+  if (transfer == 5) {
+    return encodeAppleLog(color);
+  }
+  return color;
+}
+
+vec3 toneMapSdrShader(vec3 color) {
+  vec3 numerator = color - vec3(0.4);
+  vec3 denominator = vec3(1.0) + abs(numerator);
+  vec3 high = 0.5 * pow(max(color, vec3(0.0)), vec3(0.8)) + 0.5 * (numerator / denominator + vec3(1.0)) * color;
+  vec3 low = color * 2.0;
+  return clamp(mix(high, low, lessThanEqual(color, vec3(0.5))), vec3(0.0), vec3(1.0));
+}
+
+vec3 applySourceToWorkingGamut(vec3 color) {
+  if (uApplySourceToWorking == 0) {
+    return color;
+  }
+
+  vec3 mapped = vec3(
+    dot(uSourceToWorkingRows[0], color),
+    dot(uSourceToWorkingRows[1], color),
+    dot(uSourceToWorkingRows[2], color)
+  );
+  float maxComp = max(max(max(mapped.r, mapped.g), mapped.b), 0.0);
+  if (maxComp > 1.0) {
+    mapped /= maxComp;
+  }
+  return clamp(mapped, vec3(0.0), vec3(1.0));
+}
+
+vec3 applyOutputPipeline(vec3 color) {
+  vec3 result = applySourceToWorkingGamut(color);
+  if (uSourceIsHdr == 1 && uToneMapping == 1) {
+    result = toneMapSdrShader(result);
+  }
+  return encodeTransfer(result, uTargetTransfer);
+}
+
 vec4 applyColor(vec4 source) {
-  vec3 graded = source.rgb;
+  vec3 graded = decodeTransfer(source.rgb, uSourceTransfer);
   float activeMatte = 1.0;
 ${nodeLines}
 
@@ -1309,7 +1451,7 @@ ${nodeLines}
     return source;
   }
 
-  return vec4(graded, source.a);
+  return vec4(applyOutputPipeline(graded), source.a);
 }
 
 void main() {
@@ -1488,9 +1630,9 @@ export const COLORSPACES: Record<ColorSpace, { label: string; primaries: ColorPr
 
 export const PRIMARIES: Record<ColorPrimariesType, ColorPrimaries> = {
   rec709: { type: "rec709", redX: 0.64, redY: 0.33, greenX: 0.3, greenY: 0.6, blueX: 0.15, blueY: 0.06, whiteX: 0.3127, whiteY: 0.329 },
-  rec2020: { type: "rec2020", redX: 0.64, redY: 0.33, greenX: 0.3, greenY: 0.6, blueX: 0.15, blueY: 0.06, whiteX: 0.3127, whiteY: 0.329 },
-  p3: { type: "p3", redX: 0.64, redY: 0.33, greenX: 0.3, greenY: 0.6, blueX: 0.15, blueY: 0.06, whiteX: 0.3127, whiteY: 0.329 },
-  appleLog: { type: "appleLog", redX: 0.64, redY: 0.33, greenX: 0.3, greenY: 0.6, blueX: 0.15, blueY: 0.06, whiteX: 0.3127, whiteY: 0.329 },
+  rec2020: { type: "rec2020", redX: 0.708, redY: 0.292, greenX: 0.17, greenY: 0.797, blueX: 0.131, blueY: 0.046, whiteX: 0.3127, whiteY: 0.329 },
+  p3: { type: "p3", redX: 0.68, redY: 0.32, greenX: 0.265, greenY: 0.69, blueX: 0.15, blueY: 0.06, whiteX: 0.3127, whiteY: 0.329 },
+  appleLog: { type: "appleLog", redX: 0.708, redY: 0.292, greenX: 0.17, greenY: 0.797, blueX: 0.131, blueY: 0.046, whiteX: 0.3127, whiteY: 0.329 },
   unknown: { type: "unknown", redX: 0.64, redY: 0.33, greenX: 0.3, greenY: 0.6, blueX: 0.15, blueY: 0.06, whiteX: 0.3127, whiteY: 0.329 }
 };
 
@@ -1564,7 +1706,7 @@ function inferColorSpace(primaries: string, transfer: string, matrix: string, co
   }
 
   // Wide gamut
-  if (primariesLC === "bt2020nc" || primariesLC === "bt2020c" || primariesLC === "rec2020") {
+  if (primariesLC === "bt2020" || primariesLC === "bt2020nc" || primariesLC === "bt2020c" || primariesLC === "rec2020") {
     if (transferLC.includes("bt1886") || transferLC === "") {
       return "rec2020";
     }
@@ -1605,7 +1747,7 @@ function buildColorMetadata(primaries: string, transfer: string, matrix: string,
 function parsePrimariesType(value: string): ColorPrimariesType {
   const lc = value.toLowerCase();
   if (lc === "bt709" || lc === "rec709" || lc === "iec61966-2-1" || lc === "srgb" || lc === "") return "rec709";
-  if (lc === "bt2020nc" || lc === "bt2020c" || lc === "rec2020") return "rec2020";
+  if (lc === "bt2020" || lc === "bt2020nc" || lc === "bt2020c" || lc === "rec2020") return "rec2020";
   if (lc === "p3" || lc === "displayp3" || lc === "iec61966-2-4") return "p3";
   if (lc.includes("apple") || lc.includes("log")) return "appleLog";
   return "unknown";
@@ -1839,26 +1981,22 @@ export function primariesToXyz(primaries: ColorPrimaries): { xr: number; yr: num
 }
 
 export function buildRgbToXyzMatrix(primaries: ColorPrimaries): number[] {
-  const p = primariesToXyz(primaries);
-  const s = {
-    sr: (p.wx - p.xb) * (p.yg - p.yb) - (p.wy - p.yb) * (p.xg - p.xb),
-    sg: (p.xg - p.xr) * (p.wy - p.yb) - (p.wy - p.yr) * (p.xg - p.xb),
-    sb: (p.xr - p.xg) * (p.yg - p.wy) - (p.yr - p.yg) * (p.wx - p.xg)
-  };
-
-  const determinant = s.sr * p.yr * p.xb + s.sg * p.yb * p.xr + s.sb * p.wy * p.xg - s.sb * p.yr * p.xg - s.sg * p.wy * p.xb - s.sr * p.yb * p.xg;
-  const invDet = 1.0 / determinant;
+  const red = xyToXyz(primaries.redX, primaries.redY);
+  const green = xyToXyz(primaries.greenX, primaries.greenY);
+  const blue = xyToXyz(primaries.blueX, primaries.blueY);
+  const white = xyToXyz(primaries.whiteX, primaries.whiteY);
+  const primaryMatrix = [
+    red.x, green.x, blue.x,
+    red.y, green.y, blue.y,
+    red.z, green.z, blue.z
+  ];
+  const inverse = invert3x3(primaryMatrix);
+  const scale = multiplyMatrixVector(inverse, [white.x, white.y, white.z]);
 
   return [
-    (s.sr * p.wy * p.xb + s.sg * p.wy * p.xb + s.sb * p.wy * p.xg - s.sb * p.yr * p.xb - s.sg * p.yr * p.xg - s.sr * p.yb * p.xg) * invDet,
-    (s.sr * p.yr * p.xb + s.sg * p.yb * p.xr + s.sb * p.yr * p.xg - s.sb * p.yb * p.xr - s.sg * p.yr * p.xg - s.sr * p.wy * p.xg) * invDet,
-    (s.sr * p.yb * p.xg + s.sg * p.wy * p.xr + s.sb * p.yr * p.xg - s.sr * p.yr * p.xg - s.sg * p.yb * p.xr - s.sb * p.wy * p.xg) * invDet,
-    (s.sr * p.wy * p.xb + s.sg * p.wy * p.xb + s.sb * p.wy * p.xg - s.sb * p.yr * p.xb - s.sg * p.yr * p.xg - s.sr * p.yb * p.xg) * invDet,
-    (s.sr * p.yr * p.xb + s.sg * p.yb * p.xr + s.sb * p.yr * p.xg - s.sb * p.yb * p.xr - s.sg * p.yr * p.xg - s.sr * p.wy * p.xg) * invDet,
-    (s.sr * p.yb * p.xg + s.sg * p.wy * p.xr + s.sb * p.yr * p.xg - s.sr * p.yr * p.xg - s.sg * p.yb * p.xr - s.sb * p.wy * p.xg) * invDet,
-    (s.sr * p.wy * p.xb + s.sg * p.wy * p.xb + s.sb * p.wy * p.xg - s.sb * p.yr * p.xb - s.sg * p.yr * p.xg - s.sr * p.yb * p.xg) * invDet,
-    (s.sr * p.yr * p.xb + s.sg * p.yb * p.xr + s.sb * p.yr * p.xg - s.sb * p.yb * p.xr - s.sg * p.yr * p.xg - s.sr * p.wy * p.xg) * invDet,
-    (s.sr * p.yb * p.xg + s.sg * p.wy * p.xr + s.sb * p.yr * p.xg - s.sr * p.yr * p.xg - s.sg * p.yb * p.xr - s.sb * p.wy * p.xg) * invDet
+    red.x * scale[0], green.x * scale[1], blue.x * scale[2],
+    red.y * scale[0], green.y * scale[1], blue.y * scale[2],
+    red.z * scale[0], green.z * scale[1], blue.z * scale[2]
   ];
 }
 
@@ -1876,31 +2014,10 @@ export function xyzToRgb(xyzMatrix: number[], xyz: { x: number; y: number; z: nu
 export function compressGamut(color: Pixel, sourcePrimaries: ColorPrimaries, targetPrimaries: ColorPrimaries): Pixel {
   if (sourcePrimaries.type === targetPrimaries.type) return color;
 
-  const srcToXyz = buildRgbToXyzMatrix(sourcePrimaries);
-  const dstToXyz = buildRgbToXyzMatrix(targetPrimaries);
+  const conversion = buildPrimariesConversionMatrix(sourcePrimaries, targetPrimaries);
+  const mapped = multiplyMatrixVector(conversion, [color.r, color.g, color.b]);
 
-  const xyz = {
-    x: srcToXyz[0] * color.r + srcToXyz[1] * color.g + srcToXyz[2] * color.b,
-    y: srcToXyz[3] * color.r + srcToXyz[4] * color.g + srcToXyz[5] * color.b,
-    z: srcToXyz[6] * color.r + srcToXyz[7] * color.g + srcToXyz[8] * color.b
-  };
-
-  const invDet = dstToXyz[0] * dstToXyz[4] * dstToXyz[8] + dstToXyz[1] * dstToXyz[5] * dstToXyz[6] + dstToXyz[2] * dstToXyz[3] * dstToXyz[7] - dstToXyz[2] * dstToXyz[4] * dstToXyz[6] - dstToXyz[1] * dstToXyz[3] * dstToXyz[8] - dstToXyz[0] * dstToXyz[5] * dstToXyz[7];
-  const invXyz: number[] = [
-    (dstToXyz[4] * dstToXyz[8] - dstToXyz[5] * dstToXyz[7]) / invDet,
-    (dstToXyz[2] * dstToXyz[7] - dstToXyz[1] * dstToXyz[8]) / invDet,
-    (dstToXyz[1] * dstToXyz[5] - dstToXyz[2] * dstToXyz[4]) / invDet,
-    (dstToXyz[5] * dstToXyz[6] - dstToXyz[3] * dstToXyz[8]) / invDet,
-    (dstToXyz[0] * dstToXyz[8] - dstToXyz[2] * dstToXyz[6]) / invDet,
-    (dstToXyz[2] * dstToXyz[3] - dstToXyz[0] * dstToXyz[5]) / invDet,
-    (dstToXyz[3] * dstToXyz[7] - dstToXyz[4] * dstToXyz[6]) / invDet,
-    (dstToXyz[1] * dstToXyz[6] - dstToXyz[0] * dstToXyz[7]) / invDet,
-    (dstToXyz[0] * dstToXyz[4] - dstToXyz[1] * dstToXyz[3]) / invDet
-  ];
-
-  let r = invXyz[0] * xyz.x + invXyz[1] * xyz.y + invXyz[2] * xyz.z;
-  let g = invXyz[3] * xyz.x + invXyz[4] * xyz.y + invXyz[5] * xyz.z;
-  let b = invXyz[6] * xyz.x + invXyz[7] * xyz.y + invXyz[8] * xyz.z;
+  let [r, g, b] = mapped;
 
   const maxComp = Math.max(r, g, b, 0);
   if (maxComp > 1.0) {
@@ -1911,6 +2028,73 @@ export function compressGamut(color: Pixel, sourcePrimaries: ColorPrimaries, tar
   }
 
   return { r: clamp01(r), g: clamp01(g), b: clamp01(b), a: color.a };
+}
+
+export function buildPrimariesConversionMatrix(sourcePrimaries: ColorPrimaries, targetPrimaries: ColorPrimaries): number[] {
+  const sourceToXyz = buildRgbToXyzMatrix(sourcePrimaries);
+  const targetToXyz = buildRgbToXyzMatrix(targetPrimaries);
+  return multiplyMatrices(invert3x3(targetToXyz), sourceToXyz);
+}
+
+export function buildPrimariesConversionMatrixByType(sourceType: ColorPrimariesType, targetType: ColorPrimariesType): number[] {
+  const sourcePrimaries = PRIMARIES[sourceType] ?? PRIMARIES.rec709;
+  const targetPrimaries = PRIMARIES[targetType] ?? PRIMARIES.rec709;
+  return buildPrimariesConversionMatrix(sourcePrimaries, targetPrimaries);
+}
+
+function xyToXyz(x: number, y: number): { x: number; y: number; z: number } {
+  if (y === 0) {
+    return { x: 0, y: 0, z: 0 };
+  }
+
+  return {
+    x: x / y,
+    y: 1,
+    z: (1 - x - y) / y
+  };
+}
+
+function invert3x3(matrix: number[]): number[] {
+  const [a, b, c, d, e, f, g, h, i] = matrix;
+  const determinant = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+  if (!Number.isFinite(determinant) || Math.abs(determinant) < 1e-12) {
+    return [1, 0, 0, 0, 1, 0, 0, 0, 1];
+  }
+
+  const invDet = 1 / determinant;
+  return [
+    (e * i - f * h) * invDet,
+    (c * h - b * i) * invDet,
+    (b * f - c * e) * invDet,
+    (f * g - d * i) * invDet,
+    (a * i - c * g) * invDet,
+    (c * d - a * f) * invDet,
+    (d * h - e * g) * invDet,
+    (b * g - a * h) * invDet,
+    (a * e - b * d) * invDet
+  ];
+}
+
+function multiplyMatrixVector(matrix: number[], vector: [number, number, number] | number[]): [number, number, number] {
+  return [
+    matrix[0] * vector[0] + matrix[1] * vector[1] + matrix[2] * vector[2],
+    matrix[3] * vector[0] + matrix[4] * vector[1] + matrix[5] * vector[2],
+    matrix[6] * vector[0] + matrix[7] * vector[1] + matrix[8] * vector[2]
+  ];
+}
+
+function multiplyMatrices(left: number[], right: number[]): number[] {
+  return [
+    left[0] * right[0] + left[1] * right[3] + left[2] * right[6],
+    left[0] * right[1] + left[1] * right[4] + left[2] * right[7],
+    left[0] * right[2] + left[1] * right[5] + left[2] * right[8],
+    left[3] * right[0] + left[4] * right[3] + left[5] * right[6],
+    left[3] * right[1] + left[4] * right[4] + left[5] * right[7],
+    left[3] * right[2] + left[4] * right[5] + left[5] * right[8],
+    left[6] * right[0] + left[7] * right[3] + left[8] * right[6],
+    left[6] * right[1] + left[7] * right[4] + left[8] * right[7],
+    left[6] * right[2] + left[7] * right[5] + left[8] * right[8]
+  ];
 }
 
 // Apply full managed color pipeline to a pixel

@@ -1461,6 +1461,10 @@ export function App() {
   }, [project.nodes]);
 
   useEffect(() => {
+    rendererRef.current?.setColorPipeline(project.colorManagementSettings, state.media?.colorMetadata);
+  }, [project.colorManagementSettings, state.media?.colorMetadata]);
+
+  useEffect(() => {
     rendererRef.current?.setMatteNode(showMatte ? selectedNodeId : undefined);
   }, [project.nodes, selectedNodeId, showMatte]);
 

@@ -1,16 +1,29 @@
 import { describe, expect, it } from "vitest";
 import {
+  PRIMARIES,
   applyCurves,
   applyLut,
+  compressGamut,
   createColorNode,
   createDefaultNodeCurves,
   createDefaultLutSettings,
   evaluateNodeGraph,
   evaluateNodeMask,
+  generateColorFragmentShader,
   parseCubeLut
 } from "./colorEngine";
 
 describe("color engine shader parity", () => {
+  it("generates shader color-management uniforms and transfer pipeline", () => {
+    const shader = generateColorFragmentShader(1);
+
+    expect(shader).toContain("uniform int uSourceTransfer;");
+    expect(shader).toContain("uniform int uTargetTransfer;");
+    expect(shader).toContain("vec3 decodeTransfer");
+    expect(shader).toContain("vec3 applySourceToWorkingGamut");
+    expect(shader).toContain("vec3 applyOutputPipeline");
+  });
+
   it("evaluates neutral primaries as identity transform", () => {
     const node = createColorNode(1);
     const neutral = { r: 0.5, g: 0.5, b: 0.5, a: 1 };
@@ -279,6 +292,26 @@ describe("color engine LUT evaluation", () => {
     const result = applyLut(pixel, lut);
     expect(result.r).toBeGreaterThanOrEqual(0);
     expect(result.r).toBeLessThanOrEqual(1);
+  });
+});
+
+describe("color engine gamut conversion", () => {
+  it("converts wide-gamut colors without NaN output", () => {
+    const result = compressGamut(
+      { r: 0.2, g: 0.4, b: 0.6, a: 1 },
+      PRIMARIES.rec2020,
+      PRIMARIES.rec709
+    );
+
+    expect(Number.isFinite(result.r)).toBe(true);
+    expect(Number.isFinite(result.g)).toBe(true);
+    expect(Number.isFinite(result.b)).toBe(true);
+    expect(result.r).toBeGreaterThanOrEqual(0);
+    expect(result.g).toBeGreaterThanOrEqual(0);
+    expect(result.b).toBeGreaterThanOrEqual(0);
+    expect(result.r).toBeLessThanOrEqual(1);
+    expect(result.g).toBeLessThanOrEqual(1);
+    expect(result.b).toBeLessThanOrEqual(1);
   });
 });
 
