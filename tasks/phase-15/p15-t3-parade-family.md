@@ -35,10 +35,10 @@ Add parade scopes for comparing channels, luma/chroma components, and HDR output
 
 ## Progress
 
-- [ ] Not started
-- [ ] In progress
-- [ ] Implemented
-- [ ] Verified
+- [x] Not started
+- [x] In progress
+- [x] Implemented
+- [x] Verified
 
 ## Blockers
 

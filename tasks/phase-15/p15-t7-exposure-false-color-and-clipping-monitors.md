@@ -35,10 +35,10 @@ Add practical viewer overlays and monitors for exposure, clipping, gamut, legal 
 
 ## Progress
 
-- [ ] Not started
-- [ ] In progress
-- [ ] Implemented
-- [ ] Verified
+- [x] Not started
+- [x] In progress
+- [x] Implemented
+- [x] Verified
 
 ## Blockers
 

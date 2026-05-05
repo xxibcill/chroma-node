@@ -35,10 +35,10 @@ Add advanced vectorscope modes and chroma diagnostics for hue, saturation, skin 
 
 ## Progress
 
-- [ ] Not started
-- [ ] In progress
-- [ ] Implemented
-- [ ] Verified
+- [x] Not started
+- [x] In progress
+- [x] Implemented
+- [x] Verified
 
 ## Blockers
 

@@ -35,10 +35,10 @@ Add a complete waveform family for exposure, channel balance, range, and HDR ins
 
 ## Progress
 
-- [ ] Not started
-- [ ] In progress
-- [ ] Implemented
-- [ ] Verified
+- [x] Not started
+- [x] In progress
+- [x] Implemented
+- [x] Verified
 
 ## Blockers
 
