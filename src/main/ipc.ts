@@ -21,7 +21,8 @@ import type {
 import { IpcChannel } from "../shared/ipc.js";
 import { appError, fail, isAppError, ok } from "./errors.js";
 import { cancelExport, exportProject, outputPathExists } from "./exportProject.js";
-import { exportSequence, toSequenceOutputPattern } from "./exportSequence.js";
+import { exportSequence, findExistingSequenceOutput } from "./exportSequence.js";
+import { computeExportFps } from "./exportPlanning.js";
 import { exportStill } from "./exportStill.js";
 import { exportSynthetic } from "./exportSynthetic.js";
 import { extractFrame } from "./frame.js";
@@ -259,21 +260,23 @@ async function prepareSequenceRequest(request: ExportSequenceRequest): Promise<E
 
   let overwriteConfirmed = request.overwriteConfirmed ?? false;
   if (!overwriteConfirmed) {
-    const samplePath = toSequenceOutputPattern(outputPath).replace("%04d", String(request.startFrame ?? 0).padStart(4, "0"));
-    const sampleExists = await outputPathExists(samplePath);
-    if (sampleExists) {
+    const { totalFrames } = computeExportFps(media);
+    const startFrame = Math.max(0, Math.floor(request.startFrame ?? 0));
+    const endFrame = Math.floor(request.endFrame ?? totalFrames - 1);
+    const existingPath = await findExistingSequenceOutput(outputPath, startFrame, endFrame, outputPathExists);
+    if (existingPath) {
       const confirmation = await dialog.showMessageBox({
         type: "warning",
         title: "Replace existing sequence?",
         message: "Some files in this sequence already exist.",
-        detail: outputPath,
+        detail: existingPath,
         buttons: ["Replace", "Cancel"],
         defaultId: 1,
         cancelId: 1
       });
       overwriteConfirmed = confirmation.response === 0;
     }
-    if (sampleExists && !overwriteConfirmed) {
+    if (existingPath && !overwriteConfirmed) {
       throw appError("EXPORT_OUTPUT_EXISTS", "Export sequence output already exists and needs confirmation.", outputPath);
     }
   }

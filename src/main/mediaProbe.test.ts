@@ -168,4 +168,30 @@ describe("mapProbeOutput", () => {
     expect(media.displayWidth).toBe(2160);
     expect(media.displayHeight).toBe(3840);
   });
+
+  it("reads color metadata from ffprobe stream fields", () => {
+    const media = mapProbeOutput("/clips/hdr.mp4", {
+      streams: [
+        {
+          index: 0,
+          codec_type: "video",
+          codec_name: "hevc",
+          width: 1920,
+          height: 1080,
+          duration: "5.0",
+          avg_frame_rate: "24/1",
+          color_primaries: "bt2020",
+          transfer_characteristics: "arib-std-b67",
+          matrix_coefficients: "bt2020nc",
+          bits_per_raw_sample: "10"
+        }
+      ],
+      format: { format_name: "mov,mp4,m4a,3gp,3g2,mj2", duration: "5.0" }
+    });
+
+    expect(media.colorMetadata?.transfer.type).toBe("hlg");
+    expect(media.colorMetadata?.primaries.type).toBe("rec2020");
+    expect(media.colorMetadata?.matrix.type).toBe("bt2020nc");
+    expect(media.colorMetadata?.bitDepth).toBe(10);
+  });
 });

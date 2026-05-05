@@ -126,9 +126,13 @@ export function mapProbeOutput(sourcePath: string, parsed: FfprobeJson): MediaRe
 
   const audioStream = streams.find((stream) => stream.codec_type === "audio");
 
-  // Read color metadata from stream tags
   const tags = videoStream.tags ?? {};
-  const colorInfo = detectColorSpaceFromFfprobe(tags, videoStream.codec_name);
+  const colorInfo = detectColorSpaceFromFfprobe({
+    ...tags,
+    color_primaries: videoStream.color_primaries ?? tags.color_primaries ?? tags.color_space ?? "",
+    transfer_characteristics: videoStream.transfer_characteristics ?? tags.transfer_characteristics ?? tags.gamma ?? "",
+    matrix_coefficients: videoStream.matrix_coefficients ?? tags.matrix_coefficients ?? ""
+  }, videoStream.codec_name);
 
   // Build color metadata from stream properties if available
   const colorMetadata: ColorMetadata | undefined = colorInfo.metadata ? {

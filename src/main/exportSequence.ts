@@ -218,3 +218,29 @@ export function toSequenceOutputPattern(outputPath: string): string {
   const pngPath = outputPath.toLowerCase().endsWith(".png") ? outputPath : `${outputPath}.png`;
   return pngPath.replace(/\.png$/i, "-%04d.png");
 }
+
+export function sequenceFrameOutputPath(outputPath: string, frameIndex: number): string {
+  return toSequenceOutputPattern(outputPath).replace("%04d", String(frameIndex).padStart(4, "0"));
+}
+
+export async function findExistingSequenceOutput(
+  outputPath: string,
+  startFrame: number,
+  endFrame: number,
+  exists: (framePath: string) => Promise<boolean>
+): Promise<string | undefined> {
+  const start = Math.max(0, Math.floor(startFrame));
+  const end = Math.floor(endFrame);
+  if (end < start) {
+    return undefined;
+  }
+
+  for (let frameIndex = start; frameIndex <= end; frameIndex += 1) {
+    const framePath = sequenceFrameOutputPath(outputPath, frameIndex);
+    if (await exists(framePath)) {
+      return framePath;
+    }
+  }
+
+  return undefined;
+}
