@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { createColorNode } from "../shared/colorEngine";
 import { createDefaultProject, type ChromaProject } from "../shared/project";
 import { createExportJobSnapshot } from "./exportPlanning";
-import { renderRgbaFrame } from "./exportProject";
+import { renderRgbaFrame, transformRgbaFrame } from "./exportProject";
 
 describe("export project job model", () => {
   it("creates an immutable export snapshot from project state", () => {
@@ -93,6 +93,22 @@ describe("renderRgbaFrame", () => {
   });
 });
 
+describe("transformRgbaFrame", () => {
+  it("letterboxes pad exports without stretching the source", () => {
+    const source = Buffer.alloc(4 * 2 * 4);
+    for (let offset = 0; offset < source.length; offset += 4) {
+      source[offset] = 255;
+      source[offset + 3] = 255;
+    }
+
+    const output = transformRgbaFrame(source, 4, 2, 4, 4, "pad");
+
+    expect([...output.subarray(0, 4)]).toEqual([0, 0, 0, 255]);
+    expect([...output.subarray((1 * 4 + 0) * 4, (1 * 4 + 1) * 4)]).toEqual([255, 0, 0, 255]);
+    expect([...output.subarray((3 * 4 + 0) * 4, (3 * 4 + 1) * 4)]).toEqual([0, 0, 0, 255]);
+  });
+});
+
 function createProjectFixture(): ChromaProject {
   return {
     ...createDefaultProject(),
@@ -104,6 +120,8 @@ function createProjectFixture(): ChromaProject {
       codec: "h264",
       width: 4,
       height: 4,
+      displayWidth: 4,
+      displayHeight: 4,
       durationSeconds: 1,
       frameRate: 24,
       totalFrames: 24,

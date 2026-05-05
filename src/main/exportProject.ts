@@ -287,6 +287,10 @@ export function transformRgbaFrame(
   }
   // For "pad", use full source, output has padding (handled separately)
 
+  const paddedContent = policy === "pad"
+    ? getPaddedContentRect(sourceWidth, sourceHeight, targetWidth, targetHeight)
+    : undefined;
+
   const sx = srcVisibleWidth / targetWidth;
   const sy = srcVisibleHeight / targetHeight;
 
@@ -294,24 +298,23 @@ export function transformRgbaFrame(
     for (let tx = 0; tx < targetWidth; tx += 1) {
       let r: number, g: number, b: number, a: number;
 
-      if (policy === "pad") {
-        const normX = (tx + 0.5) / targetWidth;
-        const normY = (ty + 0.5) / targetHeight;
-        const aspectOk = sourceAspect <= targetAspect
-          ? normX >= (1 - targetAspect / sourceAspect) / 2 && normX <= (1 + targetAspect / sourceAspect) / 2
-          : normY >= (1 - sourceAspect / targetAspect) / 2 && normY <= (1 + sourceAspect / targetAspect) / 2;
-        if (aspectOk) {
-          const srcX = Math.round((normX - 0.5) * sourceWidth + sourceWidth / 2);
-          const srcY = Math.round((normY - 0.5) * sourceHeight + sourceHeight / 2);
+      if (paddedContent) {
+        const insideContent = tx >= paddedContent.x &&
+          tx < paddedContent.x + paddedContent.width &&
+          ty >= paddedContent.y &&
+          ty < paddedContent.y + paddedContent.height;
+        if (insideContent) {
+          const srcX = Math.floor(((tx - paddedContent.x) + 0.5) * sourceWidth / paddedContent.width);
+          const srcY = Math.floor(((ty - paddedContent.y) + 0.5) * sourceHeight / paddedContent.height);
           const idx = (Math.max(0, Math.min(sourceHeight - 1, srcY)) * sourceWidth + Math.max(0, Math.min(sourceWidth - 1, srcX))) * 4;
           r = source[idx];
           g = source[idx + 1];
           b = source[idx + 2];
           a = source[idx + 3];
         } else {
-          r = 16;
-          g = 128;
-          b = 128;
+          r = 0;
+          g = 0;
+          b = 0;
           a = 255;
         }
       } else {
@@ -333,6 +336,24 @@ export function transformRgbaFrame(
   }
 
   return output;
+}
+
+function getPaddedContentRect(
+  sourceWidth: number,
+  sourceHeight: number,
+  targetWidth: number,
+  targetHeight: number
+): { x: number; y: number; width: number; height: number } {
+  const scale = Math.min(targetWidth / sourceWidth, targetHeight / sourceHeight);
+  const width = Math.max(1, Math.round(sourceWidth * scale));
+  const height = Math.max(1, Math.round(sourceHeight * scale));
+
+  return {
+    x: Math.floor((targetWidth - width) / 2),
+    y: Math.floor((targetHeight - height) / 2),
+    width,
+    height
+  };
 }
 
 async function processFrames(
