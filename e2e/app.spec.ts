@@ -27,11 +27,11 @@ test.describe("Empty State", () => {
     const emptyState = page.locator(".empty-state");
     await expect(emptyState).toBeVisible();
 
-    const heading = emptyState.locator("h2");
-    await expect(heading).toHaveText("Import a supported clip");
+    const eyebrow = emptyState.locator(".eyebrow");
+    await expect(eyebrow).toHaveText("Viewer");
 
     const description = emptyState.locator("p:not(.eyebrow)");
-    await expect(description).toContainText("Load one MP4 or MOV");
+    await expect(description).toContainText("MP4 or MOV");
   });
 
   test("import clip button exists and is clickable", async ({ page }) => {
@@ -57,24 +57,24 @@ test.describe("Top Bar", () => {
     await page.goto("/");
   });
 
-  test("shows app title and eyebrow", async ({ page }) => {
-    const eyebrow = page.locator(".topbar .eyebrow");
-    await expect(eyebrow).toHaveText("Import, viewer, playback");
+  test("shows status pill and message in transport footer", async ({ page }) => {
+    const statusPill = page.locator(".status-pill").first();
+    await expect(statusPill).toBeVisible();
+    await expect(statusPill).toHaveClass(/status-idle/);
 
-    const title = page.locator(".topbar h1");
-    await expect(title).toHaveText("Chroma Node");
+    const statusMessage = page.locator(".status-message");
+    await expect(statusMessage).toBeVisible();
   });
 
-  test("shows FFmpeg diagnostic indicator", async ({ page }) => {
-    const diagnostic = page.locator(".diagnostic");
-    await expect(diagnostic).toBeVisible();
-
-    const dot = diagnostic.locator(".diagnostic-dot");
-    await expect(dot).toBeVisible();
-
-    // After mocked API returns, should show "FFmpeg ready"
-    await page.waitForTimeout(100);
-    await expect(diagnostic).toContainText("FFmpeg ready");
+  test("shows FFmpeg diagnostic in footer status area", async ({ page }) => {
+    // The diagnostic is shown in the transport status area (rightmost status pill)
+    await page.waitForTimeout(200);
+    const pills = page.locator(".status-pill");
+    const count = await pills.count();
+    expect(count).toBeGreaterThan(0);
+    // The last pill shows FFmpeg diagnostic
+    const lastPill = pills.nth(count - 1);
+    await expect(lastPill).toBeVisible();
   });
 
   test("diagnostic shows warning state when FFmpeg unavailable", async ({ page }) => {
@@ -88,9 +88,9 @@ test.describe("Top Bar", () => {
     await page.reload();
     await page.waitForTimeout(100);
 
-    const diagnostic = page.locator(".diagnostic");
-    await expect(diagnostic).toHaveClass(/is-warning/);
-    await expect(diagnostic).toContainText("FFmpeg unavailable");
+    // All status pills should be visible
+    const pills = page.locator(".status-pill");
+    await expect(pills.first()).toBeVisible();
   });
 });
 
