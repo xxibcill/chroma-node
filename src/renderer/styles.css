@@ -892,6 +892,190 @@ h2 {
   font-weight: 900;
 }
 
+.node-strip-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.node-strip-actions button {
+  min-height: 26px;
+  padding: 0 8px;
+  font-size: 0.68rem;
+}
+
+.node-compare-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.node-compare-row button {
+  min-height: 26px;
+  padding: 0 8px;
+  font-size: 0.68rem;
+}
+
+.node-compare-row button.is-active {
+  border-color: rgba(226, 183, 110, 0.38);
+  background: rgba(224, 165, 85, 0.18);
+  color: #f7dfb6;
+}
+
+.command-search-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 80px;
+  background: rgba(5, 7, 11, 0.62);
+  backdrop-filter: blur(6px);
+}
+
+.command-search {
+  width: min(440px, calc(100% - 32px));
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xl);
+  background: linear-gradient(180deg, var(--bg-panel), rgba(12, 16, 23, 0.98));
+  box-shadow: var(--shadow-panel);
+  overflow: hidden;
+}
+
+.command-search-input {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 16px;
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: rgba(10, 14, 22, 0.8);
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.command-search-input::placeholder {
+  color: var(--text-dim);
+}
+
+.command-list {
+  max-height: 320px;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.command-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.8rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.command-item:hover:not(:disabled) {
+  border-color: var(--border);
+  background: var(--bg-control);
+}
+
+.command-item:disabled {
+  opacity: 0.46;
+  cursor: not-allowed;
+}
+
+.command-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-shortcut {
+  flex-shrink: 0;
+  margin-left: 16px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-control);
+  color: var(--text-dim);
+  font-size: 0.66rem;
+  font-weight: 800;
+}
+
+.command-empty {
+  padding: 16px 12px;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  text-align: center;
+}
+
+.command-hint {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border-subtle);
+  background: rgba(10, 14, 22, 0.48);
+  color: var(--text-dim);
+  font-size: 0.64rem;
+}
+
+.workspace-preset-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.workspace-label {
+  color: var(--text-dim);
+  font-size: 0.64rem;
+  font-weight: 820;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-right: 2px;
+}
+
+.workspace-preset-row button {
+  min-height: 24px;
+  padding: 0 8px;
+  font-size: 0.66rem;
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-dim);
+}
+
+.workspace-preset-row button:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--bg-control);
+}
+
+.workspace-preset-row button.is-active {
+  border-color: rgba(226, 183, 110, 0.38);
+  background: rgba(224, 165, 85, 0.18);
+  color: #f7dfb6;
+}
+
+.command-hint kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-control);
+  font-family: inherit;
+}
+
 .add-node {
   width: 100%;
   border-style: dashed;
@@ -1039,6 +1223,19 @@ h2 {
   margin-top: 8px;
 }
 
+.primary-card.is-active,
+.scalar-card.is-active {
+  border-color: rgba(215, 166, 96, 0.22);
+  background: rgba(52, 39, 24, 0.32);
+}
+
+.channel-row.is-active {
+  background: rgba(215, 166, 96, 0.08);
+  border-radius: 6px;
+  padding: 2px 4px;
+  margin: 2px -4px;
+}
+
 .mask-card {
   display: grid;
   gap: 8px;
@@ -1139,6 +1336,13 @@ h2 {
   gap: 6px;
   font-size: 0.66rem;
   font-weight: 820;
+}
+
+.mask-row.is-active {
+  background: rgba(215, 166, 96, 0.08);
+  border-radius: 6px;
+  padding: 2px 4px;
+  margin: 2px -4px;
 }
 
 .primary-card-header {
