@@ -20,7 +20,22 @@ import type {
   PackImportRequest,
   ProbeMediaRequest,
   RelinkMediaRequest,
-  SaveProjectRequest
+  SaveProjectRequest,
+  VersionCreateRequest,
+  VersionUpdateRequest,
+  VersionDeleteRequest,
+  VersionSwitchRequest,
+  AnnotationCreateRequest,
+  AnnotationUpdateRequest,
+  AnnotationDeleteRequest,
+  AnnotationListRequest,
+  ReviewPackageExportRequest,
+  ReviewPackageImportRequest,
+  FeedbackImportRequest,
+  FeedbackResolveRequest,
+  HandoffPackageExportRequest,
+  HandoffPackageImportRequest,
+  HandoffPackageValidateRequest
 } from "../shared/ipc.js";
 import type { PackImportResult } from "../shared/pack.js";
 
@@ -52,7 +67,23 @@ const IpcChannel = {
   PackExport: "pack:export",
   PackImport: "pack:import",
   PackList: "pack:list",
-  PackUninstall: "pack:uninstall"
+  PackUninstall: "pack:uninstall",
+  VersionCreate: "review:version-create",
+  VersionList: "review:version-list",
+  VersionSwitch: "review:version-switch",
+  VersionDelete: "review:version-delete",
+  VersionUpdate: "review:version-update",
+  AnnotationCreate: "review:annotation-create",
+  AnnotationUpdate: "review:annotation-update",
+  AnnotationDelete: "review:annotation-delete",
+  AnnotationList: "review:annotation-list",
+  ReviewPackageExport: "review:package-export",
+  ReviewPackageImport: "review:package-import",
+  FeedbackImport: "review:feedback-import",
+  FeedbackResolve: "review:feedback-resolve",
+  HandoffExport: "review:handoff-export",
+  HandoffImport: "review:handoff-import",
+  HandoffValidate: "review:handoff-validate"
 } as const;
 
 const api: ChromaNodeApi = {
@@ -86,7 +117,23 @@ const api: ChromaNodeApi = {
   exportPack: (request: PackExportRequest) => ipcRenderer.invoke(IpcChannel.PackExport, request),
   importPack: (request?: PackImportRequest) => ipcRenderer.invoke(IpcChannel.PackImport, request),
   getInstalledPacks: () => ipcRenderer.invoke(IpcChannel.PackList),
-  uninstallPack: (request: { path: string }) => ipcRenderer.invoke(IpcChannel.PackUninstall, request)
+  uninstallPack: (request: { path: string }) => ipcRenderer.invoke(IpcChannel.PackUninstall, request),
+  createVersion: (request: VersionCreateRequest) => ipcRenderer.invoke(IpcChannel.VersionCreate, request),
+  listVersions: () => ipcRenderer.invoke(IpcChannel.VersionList),
+  switchVersion: (request: VersionSwitchRequest) => ipcRenderer.invoke(IpcChannel.VersionSwitch, request),
+  deleteVersion: (request: VersionDeleteRequest) => ipcRenderer.invoke(IpcChannel.VersionDelete, request),
+  updateVersion: (request: VersionUpdateRequest) => ipcRenderer.invoke(IpcChannel.VersionUpdate, request),
+  createAnnotation: (request: AnnotationCreateRequest) => ipcRenderer.invoke(IpcChannel.AnnotationCreate, request),
+  updateAnnotation: (request: AnnotationUpdateRequest) => ipcRenderer.invoke(IpcChannel.AnnotationUpdate, request),
+  deleteAnnotation: (request: AnnotationDeleteRequest) => ipcRenderer.invoke(IpcChannel.AnnotationDelete, request),
+  listAnnotations: (request: AnnotationListRequest) => ipcRenderer.invoke(IpcChannel.AnnotationList, request),
+  exportReviewPackage: (request: ReviewPackageExportRequest) => ipcRenderer.invoke(IpcChannel.ReviewPackageExport, request),
+  importReviewPackage: (request: ReviewPackageImportRequest) => ipcRenderer.invoke(IpcChannel.ReviewPackageImport, request),
+  importFeedback: (request: FeedbackImportRequest) => ipcRenderer.invoke(IpcChannel.FeedbackImport, request),
+  resolveFeedback: (request: FeedbackResolveRequest) => ipcRenderer.invoke(IpcChannel.FeedbackResolve, request),
+  exportHandoffPackage: (request: HandoffPackageExportRequest) => ipcRenderer.invoke(IpcChannel.HandoffExport, request),
+  importHandoffPackage: (request: HandoffPackageImportRequest) => ipcRenderer.invoke(IpcChannel.HandoffImport, request),
+  validateHandoffPackage: (request: HandoffPackageValidateRequest) => ipcRenderer.invoke(IpcChannel.HandoffValidate, request)
 };
 
 contextBridge.exposeInMainWorld("chromaNode", api);

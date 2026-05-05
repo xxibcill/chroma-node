@@ -34,7 +34,24 @@ export const IpcChannel = {
   PackExport: "pack:export",
   PackImport: "pack:import",
   PackList: "pack:list",
-  PackUninstall: "pack:uninstall"
+  PackUninstall: "pack:uninstall",
+  // Phase 21: Review and Collaboration
+  VersionCreate: "review:version-create",
+  VersionList: "review:version-list",
+  VersionSwitch: "review:version-switch",
+  VersionDelete: "review:version-delete",
+  VersionUpdate: "review:version-update",
+  AnnotationCreate: "review:annotation-create",
+  AnnotationUpdate: "review:annotation-update",
+  AnnotationDelete: "review:annotation-delete",
+  AnnotationList: "review:annotation-list",
+  ReviewPackageExport: "review:package-export",
+  ReviewPackageImport: "review:package-import",
+  FeedbackImport: "review:feedback-import",
+  FeedbackResolve: "review:feedback-resolve",
+  HandoffExport: "review:handoff-export",
+  HandoffImport: "review:handoff-import",
+  HandoffValidate: "review:handoff-validate"
 } as const;
 
 export type IpcChannelName = (typeof IpcChannel)[keyof typeof IpcChannel];
@@ -358,6 +375,110 @@ export interface InstalledPack {
   };
 }
 
+// Phase 21: Review and Collaboration IPC types
+import type { Annotation, AnnotationStatus, ApprovalEntry, FeedbackFile, FeedbackNote, GradeVersion, HandoffPackageManifest, ReviewPackageManifest, ReviewPackageType, ReviewStatus } from "./project.js";
+
+export type { Annotation, AnnotationStatus, ApprovalEntry, FeedbackFile, FeedbackNote, GradeVersion, HandoffPackageManifest, ReviewPackageManifest, ReviewPackageType, ReviewStatus };
+
+export interface VersionCreateRequest {
+  name: string;
+  authorLabel?: string;
+  notes?: string;
+  duplicateFromCurrent?: boolean;
+}
+
+export interface VersionUpdateRequest {
+  versionId: string;
+  updates: Partial<Pick<GradeVersion, "name" | "status" | "notes" | "authorLabel" | "exportPath">>;
+  approvalEntry?: ApprovalEntry;
+}
+
+export interface VersionDeleteRequest {
+  versionId: string;
+}
+
+export interface VersionSwitchRequest {
+  versionId: string;
+}
+
+export interface VersionListResult {
+  versions: GradeVersion[];
+  activeVersionId?: string;
+}
+
+export interface AnnotationCreateRequest {
+  frameIndex: number;
+  timecode: string;
+  text: string;
+  geometry?: Annotation["geometry"];
+  versionId?: string;
+  authorLabel?: string;
+}
+
+export interface AnnotationUpdateRequest {
+  annotationId: string;
+  updates: Partial<Pick<Annotation, "text" | "status" | "geometry">>;
+}
+
+export interface AnnotationDeleteRequest {
+  annotationId: string;
+}
+
+export interface AnnotationListRequest {
+  versionId?: string;
+  frameStart?: number;
+  frameEnd?: number;
+  status?: AnnotationStatus;
+}
+
+export interface ReviewPackageExportRequest {
+  versionIds: string[];
+  stillIds: string[];
+  scopeSnapshotIds: string[];
+  packageType: ReviewPackageType;
+  packageName: string;
+  includeMedia: boolean;
+  redactPaths: boolean;
+}
+
+export interface ReviewPackageImportRequest {
+  packagePath: string;
+  duplicateStrategy?: "skip" | "replace";
+}
+
+export interface ReviewPackageValidateRequest {
+  packagePath: string;
+}
+
+export interface FeedbackImportRequest {
+  feedbackPath: string;
+  duplicateStrategy?: "skip" | "replace" | "rename";
+}
+
+export interface FeedbackResolveRequest {
+  feedbackNoteId: string;
+  resolved: boolean;
+  resolvedBy?: string;
+}
+
+export interface HandoffPackageExportRequest {
+  packageMode: import("./project.js").HandoffPackageMode;
+  packageName: string;
+  includeMedia: boolean;
+  includeCache: boolean;
+  includeExports: boolean;
+  includeLogs: boolean;
+  redactPaths: boolean;
+}
+
+export interface HandoffPackageImportRequest {
+  packagePath: string;
+}
+
+export interface HandoffPackageValidateRequest {
+  packagePath: string;
+}
+
 export interface ChromaNodeApi {
   selectMedia(): Promise<VersionedResponse<SelectMediaResponse>>;
   saveProject(request: SaveProjectRequest): Promise<VersionedResponse<SaveProjectResult>>;
@@ -386,6 +507,27 @@ export interface ChromaNodeApi {
   importPack(request?: PackImportRequest): Promise<VersionedResponse<import("./pack.js").PackImportResult>>;
   getInstalledPacks(): Promise<VersionedResponse<InstalledPack[]>>;
   uninstallPack(request: { path: string }): Promise<VersionedResponse<void>>;
+  // Phase 21: Grade Versions
+  createVersion(request: VersionCreateRequest): Promise<VersionedResponse<GradeVersion>>;
+  listVersions(): Promise<VersionedResponse<VersionListResult>>;
+  switchVersion(request: VersionSwitchRequest): Promise<VersionedResponse<GradeVersion>>;
+  deleteVersion(request: VersionDeleteRequest): Promise<VersionedResponse<void>>;
+  updateVersion(request: VersionUpdateRequest): Promise<VersionedResponse<GradeVersion>>;
+  // Phase 21: Annotations
+  createAnnotation(request: AnnotationCreateRequest): Promise<VersionedResponse<Annotation>>;
+  updateAnnotation(request: AnnotationUpdateRequest): Promise<VersionedResponse<Annotation>>;
+  deleteAnnotation(request: AnnotationDeleteRequest): Promise<VersionedResponse<void>>;
+  listAnnotations(request: AnnotationListRequest): Promise<VersionedResponse<Annotation[]>>;
+  // Phase 21: Review Package
+  exportReviewPackage(request: ReviewPackageExportRequest): Promise<VersionedResponse<{ path: string; manifest: ReviewPackageManifest }>>;
+  importReviewPackage(request: ReviewPackageImportRequest): Promise<VersionedResponse<ReviewPackageManifest>>;
+  // Phase 21: Feedback
+  importFeedback(request: FeedbackImportRequest): Promise<VersionedResponse<FeedbackFile>>;
+  resolveFeedback(request: FeedbackResolveRequest): Promise<VersionedResponse<void>>;
+  // Phase 21: Handoff
+  exportHandoffPackage(request: HandoffPackageExportRequest): Promise<VersionedResponse<{ path: string; manifest: HandoffPackageManifest }>>;
+  importHandoffPackage(request: HandoffPackageImportRequest): Promise<VersionedResponse<void>>;
+  validateHandoffPackage(request: HandoffPackageValidateRequest): Promise<VersionedResponse<HandoffPackageManifest>>;
 }
 
 declare global {

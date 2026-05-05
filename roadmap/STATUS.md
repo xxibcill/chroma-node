@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-- Phase: Phase 21 - Professional Review and Collaboration
+- Phase: Phase 22 - Commercial Readiness and Growth Platform
 - Status: Not Started (5 tasks)
 - Last updated: 2026-05-05
 
@@ -13,7 +13,7 @@
 | 00–11 | Complete | 2026-04-26 |
 | 12 | 8/10 complete (P12-T2 wheel UI deferred, P12-T6 handle editing deferred) | 2026-05-04 |
 | 13 | Not Started (0/7) | 2026-05-04 |
-| 14–20 | Complete | 2026-05-05 |
+| 14–21 | Complete | 2026-05-05 |
 
 ## Active Decisions
 
@@ -109,5 +109,5 @@ Optional checks (log in verification log when run): `npm run test:e2e`, `npm run
 | 2026-05-05 | Phase 18 | All 5 tasks COMPLETE. Sample projects, interactive lessons, grade recipes, practice targets, learning progress. | Passed |
 | 2026-05-05 | Phase 19 | All 5 tasks COMPLETE. Auto balance, reference matching, natural language intent, explainable AI, safety controls. | Passed |
 | 2026-05-05 | Phase 20 | All 5 tasks COMPLETE. Local look library, pack import/export, browser search, compatibility checking, marketplace foundation. | Passed |
-| 2026-05-05 | Phase 21 | All 5 tasks NOT_FOUND. Grade versions, annotations, review package, feedback import, project handoff not implemented. | Not Started |
+| 2026-05-05 | Phase 21 | All 5 tasks COMPLETE. Grade versions with approval states, frame-accurate annotations, review package export, feedback import, project handoff/archive. | Passed |
 | 2026-05-05 | Phase 22 | All 5 tasks NOT_FOUND. Licensing, packaging, telemetry, support, launch docs not implemented. | Not Started |

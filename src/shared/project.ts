@@ -18,6 +18,168 @@ import {
 
 export const PROJECT_SCHEMA_VERSION = "1.0.0";
 
+// Phase 21: Review and Collaboration
+
+export type ReviewStatus = "draft" | "in-review" | "approved" | "rejected" | "archived";
+
+export interface GradeVersion {
+  id: string;
+  name: string;
+  status: ReviewStatus;
+  createdAt: number;
+  updatedAt: number;
+  authorLabel?: string;
+  notes?: string;
+  sourceRecipe: boolean;
+  nodes: ColorNode[];
+  stillRefs: string[];
+  approvalChain: ApprovalEntry[];
+  exportPath?: string;
+}
+
+export interface ApprovalEntry {
+  status: ReviewStatus;
+  reviewerLabel?: string;
+  timestamp: number;
+  comment?: string;
+}
+
+export type AnnotationStatus = "open" | "resolved" | "deferred" | "rejected";
+export type AnnotationGeometry = "point" | "rectangle" | "ellipse" | "freehand";
+
+export interface Annotation {
+  id: string;
+  frameIndex: number;
+  timecode: string;
+  text: string;
+  status: AnnotationStatus;
+  geometry?: {
+    type: AnnotationGeometry;
+    x: number;
+    y: number;
+    x2?: number;
+    y2?: number;
+    width?: number;
+    height?: number;
+    points?: Array<{ x: number; y: number }>;
+    color: string;
+  };
+  versionId?: string;
+  createdAt: number;
+  updatedAt: number;
+  authorLabel?: string;
+}
+
+export interface ReviewPackageManifest {
+  schemaVersion: typeof REVIEW_PACKAGE_SCHEMA_VERSION;
+  packageId: string;
+  name: string;
+  createdAt: number;
+  packageType: ReviewPackageType;
+  projectName: string;
+  projectId: string;
+  versions: ReviewVersionRef[];
+  annotations: Annotation[];
+  stills: ReviewStillRef[];
+  scopeSnapshots: ScopeSnapshotRef[];
+  approvalSummary: ReviewApprovalSummary;
+  includesMedia: boolean;
+  redacted: boolean;
+  manifestChecksum: string;
+}
+
+export type ReviewPackageType = "client-review" | "internal-review" | "technical-qc";
+
+export interface ReviewVersionRef {
+  versionId: string;
+  versionName: string;
+  status: ReviewStatus;
+  nodes: ColorNode[];
+}
+
+export interface ReviewStillRef {
+  stillId: string;
+  frameIndex: number;
+  gradeVersionId?: string;
+  gradeVersionName?: string;
+  dataUrl: string;
+  width: number;
+  height: number;
+}
+
+export interface ScopeSnapshotRef {
+  id: string;
+  frameIndex: number;
+  measurementSpace: string;
+  profile: string;
+  scale: string;
+  waveformBins?: number[];
+  vectorscopeBins?: number[];
+  paradeBins?: { red: number[]; green: number[]; blue: number[] };
+}
+
+export interface ReviewApprovalSummary {
+  totalVersions: number;
+  byStatus: Record<ReviewStatus, number>;
+  latestApproval?: ApprovalEntry;
+}
+
+export const REVIEW_PACKAGE_SCHEMA_VERSION = "1.0.0";
+
+export interface FeedbackFile {
+  schemaVersion: typeof FEEDBACK_FILE_SCHEMA_VERSION;
+  projectId?: string;
+  versionId?: string;
+  reviewerLabel?: string;
+  createdAt: number;
+  notes: FeedbackNote[];
+}
+
+export type FeedbackNoteStatus = "open" | "resolved" | "deferred";
+
+export interface FeedbackNote {
+  id: string;
+  frameIndex?: number;
+  timecode?: string;
+  text: string;
+  status: FeedbackNoteStatus;
+  resolvedAt?: number;
+  resolvedBy?: string;
+}
+
+export const FEEDBACK_FILE_SCHEMA_VERSION = "1.0.0";
+
+export interface HandoffPackageManifest {
+  schemaVersion: typeof HANDOFF_PACKAGE_SCHEMA_VERSION;
+  packageId: string;
+  name: string;
+  packageMode: HandoffPackageMode;
+  createdAt: number;
+  projectName: string;
+  projectId: string;
+  includesMedia: boolean;
+  includesCache: boolean;
+  includesExports: boolean;
+  includesLogs: boolean;
+  redacted: boolean;
+  mediaRefs: HandoffMediaRef[];
+  libraryDeps: string[];
+  missingMedia: string[];
+  missingDeps: string[];
+  manifestChecksum: string;
+}
+
+export type HandoffPackageMode = "archive-with-media" | "handoff-no-cache" | "diagnostics" | "support-bundle";
+
+export interface HandoffMediaRef {
+  originalPath: string;
+  included: boolean;
+  size?: number;
+  checksum?: string;
+}
+
+export const HANDOFF_PACKAGE_SCHEMA_VERSION = "1.0.0";
+
 export type ViewerMode = "original" | "graded" | "split";
 
 export interface ProjectPlaybackState {
@@ -55,6 +217,11 @@ export interface ChromaProject {
   nodes: ColorNode[];
   exportSettings: ProjectExportSettings;
   colorManagementSettings?: ColorManagementSettings;
+  gradeVersions?: GradeVersion[];
+  activeVersionId?: string;
+  annotations?: Annotation[];
+  updatedAt?: number;
+  createdAt?: number;
 }
 
 export interface ProjectValidationIssue {
@@ -117,6 +284,9 @@ export function validateProject(input: unknown): ProjectValidationResult {
   const media = readMedia(source.media, errors, warnings);
   const nodes = readNodes(source.nodes, warnings, media?.totalFrames);
   const colorManagementSettings = readColorManagementSettings(source.colorManagementSettings, warnings);
+  const gradeVersions = readGradeVersions(source.gradeVersions, warnings);
+  const activeVersionId = typeof source.activeVersionId === "string" ? source.activeVersionId : undefined;
+  const annotations = readAnnotations(source.annotations, warnings);
 
   if (errors.length > 0) {
     return { ok: false, errors };
@@ -133,7 +303,10 @@ export function validateProject(input: unknown): ProjectValidationResult {
       playback,
       nodes,
       exportSettings,
-      colorManagementSettings
+      colorManagementSettings,
+      gradeVersions,
+      activeVersionId,
+      annotations
     }
   };
 }
@@ -627,6 +800,103 @@ function clampInteger(value: number, min: number, max: number): number {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readGradeVersions(input: unknown, warnings: ProjectValidationIssue[]): GradeVersion[] | undefined {
+  if (input === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(input)) {
+    warnings.push(issue("gradeVersions", "DEFAULTED", "Grade versions were invalid; none were loaded.", input));
+    return undefined;
+  }
+
+  return input.map((v, index) => readGradeVersion(v, index, warnings)).filter((v): v is GradeVersion => v !== undefined);
+}
+
+function readGradeVersion(input: unknown, index: number, warnings: ProjectValidationIssue[]): GradeVersion | undefined {
+  if (!isRecord(input)) {
+    warnings.push(issue(`gradeVersions.${index}`, "DEFAULTED", "Invalid grade version was skipped.", input));
+    return undefined;
+  }
+
+  const validStatuses: ReviewStatus[] = ["draft", "in-review", "approved", "rejected", "archived"];
+  const status = validStatuses.includes(input.status as ReviewStatus) ? input.status as ReviewStatus : "draft";
+
+  const nodes = Array.isArray(input.nodes) ? input.nodes : [];
+
+  const approvalChain: ApprovalEntry[] = Array.isArray(input.approvalChain)
+    ? input.approvalChain.filter((e): e is ApprovalEntry => isRecord(e))
+    : [];
+
+  return {
+    id: typeof input.id === "string" ? input.id : `version-${Date.now().toString(36)}-${index}`,
+    name: typeof input.name === "string" ? input.name.slice(0, 80) : `Version ${index + 1}`,
+    status,
+    createdAt: typeof input.createdAt === "number" ? input.createdAt : Date.now(),
+    updatedAt: typeof input.updatedAt === "number" ? input.updatedAt : Date.now(),
+    authorLabel: typeof input.authorLabel === "string" ? input.authorLabel : undefined,
+    notes: typeof input.notes === "string" ? input.notes : undefined,
+    sourceRecipe: typeof input.sourceRecipe === "boolean" ? input.sourceRecipe : false,
+    nodes,
+    stillRefs: Array.isArray(input.stillRefs) ? input.stillRefs.filter((s): s is string => typeof s === "string") : [],
+    approvalChain,
+    exportPath: typeof input.exportPath === "string" ? input.exportPath : undefined
+  };
+}
+
+function readAnnotations(input: unknown, warnings: ProjectValidationIssue[]): Annotation[] | undefined {
+  if (input === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(input)) {
+    warnings.push(issue("annotations", "DEFAULTED", "Annotations were invalid; none were loaded.", input));
+    return undefined;
+  }
+
+  return input.map((a, index) => readAnnotation(a, index, warnings)).filter((a): a is Annotation => a !== undefined);
+}
+
+function readAnnotation(input: unknown, index: number, warnings: ProjectValidationIssue[]): Annotation | undefined {
+  if (!isRecord(input)) {
+    warnings.push(issue(`annotations.${index}`, "DEFAULTED", "Invalid annotation was skipped.", input));
+    return undefined;
+  }
+
+  const validStatuses: AnnotationStatus[] = ["open", "resolved", "deferred", "rejected"];
+  const status = validStatuses.includes(input.status as AnnotationStatus) ? input.status as AnnotationStatus : "open";
+
+  let geometry: Annotation["geometry"] | undefined;
+  if (isRecord(input.geometry)) {
+    const validGeomTypes: AnnotationGeometry[] = ["point", "rectangle", "ellipse", "freehand"];
+    const geomType = validGeomTypes.includes(input.geometry.type as AnnotationGeometry) ? input.geometry.type as AnnotationGeometry : "point";
+    geometry = {
+      type: geomType,
+      x: typeof input.geometry.x === "number" ? input.geometry.x : 0,
+      y: typeof input.geometry.y === "number" ? input.geometry.y : 0,
+      x2: typeof input.geometry.x2 === "number" ? input.geometry.x2 : undefined,
+      y2: typeof input.geometry.y2 === "number" ? input.geometry.y2 : undefined,
+      width: typeof input.geometry.width === "number" ? input.geometry.width : undefined,
+      height: typeof input.geometry.height === "number" ? input.geometry.height : undefined,
+      points: Array.isArray(input.geometry.points) ? input.geometry.points.filter((p): p is { x: number; y: number } => isRecord(p) && typeof p.x === "number" && typeof p.y === "number") : undefined,
+      color: typeof input.geometry.color === "string" ? input.geometry.color : "#ffffff"
+    };
+  }
+
+  return {
+    id: typeof input.id === "string" ? input.id : `annotation-${Date.now().toString(36)}-${index}`,
+    frameIndex: typeof input.frameIndex === "number" ? input.frameIndex : 0,
+    timecode: typeof input.timecode === "string" ? input.timecode : "",
+    text: typeof input.text === "string" ? input.text : "",
+    status,
+    geometry,
+    versionId: typeof input.versionId === "string" ? input.versionId : undefined,
+    createdAt: typeof input.createdAt === "number" ? input.createdAt : Date.now(),
+    updatedAt: typeof input.updatedAt === "number" ? input.updatedAt : Date.now(),
+    authorLabel: typeof input.authorLabel === "string" ? input.authorLabel : undefined
+  };
 }
 
 function issue(

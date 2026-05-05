@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2026-05-05] - Phase 21: Professional Review and Collaboration Complete
+
+- P21-T1: Grade versions and approval states with GradeVersion schema (draft/in-review/approved/rejected/archived status), approvalChain tracking, version CRUD IPC and store
+- P21-T2: Annotations and review notes with Annotation schema (frame-accurate, timecode, geometry types: point/rectangle/ellipse/freehand), annotation status (open/resolved/deferred/rejected), annotation store with filtering
+- P21-T3: Review package export with ReviewPackageManifest schema, package types (client-review/internal-review/technical-qc), manifest checksum validation, redaction support
+- P21-T4: Feedback import and resolution with FeedbackFile schema, feedback validation, importFeedback/resolveFeedback IPC, feedback to annotation conversion
+- P21-T5: Project handoff and archive with HandoffPackageManifest schema, package modes (archive-with-media/handoff-no-cache/diagnostics/support-bundle), size estimation, restore/validate IPC
+
+Professional review workflows with grade versions, annotations, review packages, feedback import, and project handoff/archive.
+
 ## [2026-05-05] - Phase 20: Look Library and Marketplace Foundation Complete
 
 - P20-T1: Local look library with LibraryItem schema (look/lut/recipe/still/sample-project/lesson-pack types), LibraryBrowser component

@@ -270,3 +270,140 @@ describe("project schema", () => {
     expect(staleNode.tracking.state).toBe("stale");
   });
 });
+
+describe("grade versions", () => {
+  it("round-trips grade versions in project JSON", () => {
+    const project = createDefaultProject();
+    project.gradeVersions = [
+      {
+        id: "version-1",
+        name: "First Look",
+        status: "draft",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        sourceRecipe: false,
+        nodes: [createColorNode(1)],
+        stillRefs: [],
+        approvalChain: []
+      },
+      {
+        id: "version-2",
+        name: "Client Review",
+        status: "approved",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        authorLabel: "Colorist",
+        notes: "Ready for delivery",
+        sourceRecipe: true,
+        nodes: [createColorNode(1)],
+        stillRefs: [],
+        approvalChain: [
+          { status: "approved", reviewerLabel: "Director", timestamp: Date.now(), comment: "Looks great" }
+        ]
+      }
+    ];
+    project.activeVersionId = "version-2";
+
+    const parsed = validateProject(JSON.parse(serializeProject(project)));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.project.gradeVersions).toHaveLength(2);
+      expect(parsed.project.activeVersionId).toBe("version-2");
+      expect(parsed.project.gradeVersions?.[1].status).toBe("approved");
+      expect(parsed.project.gradeVersions?.[1].authorLabel).toBe("Colorist");
+      expect(parsed.project.gradeVersions?.[1].approvalChain).toHaveLength(1);
+    }
+  });
+
+  it("defaults invalid grade versions and skips them", () => {
+    const project = createDefaultProject();
+    const result = validateProject({
+      ...project,
+      gradeVersions: [
+        { id: "valid-version", name: "Valid", status: "approved", createdAt: Date.now(), updatedAt: Date.now(), sourceRecipe: false, nodes: [], stillRefs: [], approvalChain: [] },
+        "not an object",
+        null
+      ]
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.project.gradeVersions).toHaveLength(1);
+      expect(result.project.gradeVersions?.[0].id).toBe("valid-version");
+    }
+  });
+});
+
+describe("annotations", () => {
+  it("round-trips frame-accurate annotations in project JSON", () => {
+    const project = createDefaultProject();
+    project.annotations = [
+      {
+        id: "ann-1",
+        frameIndex: 24,
+        timecode: "00:00:01:00",
+        text: "Boost the saturation here",
+        status: "open",
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      },
+      {
+        id: "ann-2",
+        frameIndex: 48,
+        timecode: "00:00:02:00",
+        text: "This is resolved",
+        status: "resolved",
+        geometry: { type: "rectangle", x: 0.3, y: 0.3, width: 0.4, height: 0.4, color: "#ff0000" },
+        versionId: "version-1",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        authorLabel: "Director"
+      }
+    ];
+
+    const parsed = validateProject(JSON.parse(serializeProject(project)));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.project.annotations).toHaveLength(2);
+      expect(parsed.project.annotations?.[0].frameIndex).toBe(24);
+      expect(parsed.project.annotations?.[0].status).toBe("open");
+      expect(parsed.project.annotations?.[1].geometry?.type).toBe("rectangle");
+      expect(parsed.project.annotations?.[1].geometry?.color).toBe("#ff0000");
+    }
+  });
+
+  it("defaults invalid annotation entries and skips them", () => {
+    const project = createDefaultProject();
+    const result = validateProject({
+      ...project,
+      annotations: [
+        { id: "valid", frameIndex: 10, timecode: "00:00:00:10", text: "Valid note", status: "open", createdAt: Date.now(), updatedAt: Date.now() },
+        "not an object",
+        null
+      ]
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.project.annotations).toHaveLength(1);
+      expect(result.project.annotations?.[0].id).toBe("valid");
+    }
+  });
+
+  it("validates annotation status enum", () => {
+    const project = createDefaultProject();
+    const result = validateProject({
+      ...project,
+      annotations: [
+        { id: "ann-1", frameIndex: 0, timecode: "", text: "Test", status: "invalid-status", createdAt: Date.now(), updatedAt: Date.now() },
+        { id: "ann-2", frameIndex: 0, timecode: "", text: "Test 2", status: "resolved", createdAt: Date.now(), updatedAt: Date.now() }
+      ]
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.project.annotations?.[0].status).toBe("open");
+      expect(result.project.annotations?.[1].status).toBe("resolved");
+    }
+  });
+});

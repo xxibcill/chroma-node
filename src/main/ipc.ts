@@ -29,6 +29,24 @@ import type {
   SelectMediaResponse,
   VersionedResponse
 } from "../shared/ipc.js";
+import type {
+  AnnotationCreateRequest,
+  AnnotationDeleteRequest,
+  AnnotationListRequest,
+  AnnotationUpdateRequest,
+  FeedbackImportRequest,
+  FeedbackResolveRequest,
+  HandoffPackageExportRequest,
+  HandoffPackageImportRequest,
+  HandoffPackageValidateRequest,
+  ReviewPackageExportRequest,
+  ReviewPackageImportRequest,
+  VersionCreateRequest,
+  VersionDeleteRequest,
+  VersionListResult,
+  VersionSwitchRequest,
+  VersionUpdateRequest
+} from "../shared/ipc.js";
 import { IpcChannel } from "../shared/ipc.js";
 import { appError, fail, isAppError, ok } from "./errors.js";
 import { cancelExport, exportProject, outputPathExists } from "./exportProject.js";
@@ -55,6 +73,32 @@ import {
   importPack,
   uninstallPack
 } from "./packStore.js";
+import {
+  createVersion,
+  deleteVersion,
+  listVersions,
+  switchVersion,
+  updateVersion
+} from "./reviewVersionStore.js";
+import {
+  createAnnotation,
+  deleteAnnotation,
+  listAnnotations,
+  updateAnnotation
+} from "./annotationStore.js";
+import {
+  exportReviewPackage,
+  importReviewPackage
+} from "./reviewPackageStore.js";
+import {
+  importFeedback,
+  resolveFeedback
+} from "./feedbackStore.js";
+import {
+  exportHandoffPackage,
+  importHandoffPackage,
+  validateHandoffPackage
+} from "./handoffStore.js";
 import { loadProgress, resetProgress, saveProgress } from "./progressStore.js";
 import { openProjectFile, saveProjectFile } from "./projectFile.js";
 
@@ -365,6 +409,191 @@ export function registerIpcHandlers(): void {
           return fail(appError("UNKNOWN", "Pack was not found or is outside the installed pack directory."));
         }
         return ok(undefined);
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  // Phase 21: Grade Versions
+  ipcMain.handle(
+    IpcChannel.VersionCreate,
+    async (_event, request: VersionCreateRequest): Promise<VersionedResponse<import("../shared/project.js").GradeVersion>> => {
+      try {
+        return ok(await createVersion(request));
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.VersionList,
+    async (): Promise<VersionedResponse<VersionListResult>> => {
+      try {
+        return ok(await listVersions());
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.VersionSwitch,
+    async (_event, request: VersionSwitchRequest): Promise<VersionedResponse<import("../shared/project.js").GradeVersion>> => {
+      try {
+        return ok(await switchVersion(request.versionId));
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.VersionDelete,
+    async (_event, request: VersionDeleteRequest): Promise<VersionedResponse<void>> => {
+      try {
+        await deleteVersion(request.versionId);
+        return ok(undefined);
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.VersionUpdate,
+    async (_event, request: VersionUpdateRequest): Promise<VersionedResponse<import("../shared/project.js").GradeVersion>> => {
+      try {
+        return ok(await updateVersion(request));
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  // Phase 21: Annotations
+  ipcMain.handle(
+    IpcChannel.AnnotationCreate,
+    async (_event, request: AnnotationCreateRequest): Promise<VersionedResponse<import("../shared/project.js").Annotation>> => {
+      try {
+        return ok(await createAnnotation(request));
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.AnnotationUpdate,
+    async (_event, request: AnnotationUpdateRequest): Promise<VersionedResponse<import("../shared/project.js").Annotation>> => {
+      try {
+        return ok(await updateAnnotation(request));
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.AnnotationDelete,
+    async (_event, request: AnnotationDeleteRequest): Promise<VersionedResponse<void>> => {
+      try {
+        await deleteAnnotation(request.annotationId);
+        return ok(undefined);
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.AnnotationList,
+    async (_event, request: AnnotationListRequest): Promise<VersionedResponse<import("../shared/project.js").Annotation[]>> => {
+      try {
+        return ok(await listAnnotations(request));
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  // Phase 21: Review Package
+  ipcMain.handle(
+    IpcChannel.ReviewPackageExport,
+    async (_event, request: ReviewPackageExportRequest): Promise<VersionedResponse<{ path: string; manifest: import("../shared/project.js").ReviewPackageManifest }>> => {
+      try {
+        return ok(await exportReviewPackage(request));
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.ReviewPackageImport,
+    async (_event, request: ReviewPackageImportRequest): Promise<VersionedResponse<import("../shared/project.js").ReviewPackageManifest>> => {
+      try {
+        return ok(await importReviewPackage(request));
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  // Phase 21: Feedback
+  ipcMain.handle(
+    IpcChannel.FeedbackImport,
+    async (_event, request: FeedbackImportRequest): Promise<VersionedResponse<import("../shared/project.js").FeedbackFile>> => {
+      try {
+        return ok(await importFeedback(request));
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.FeedbackResolve,
+    async (_event, request: FeedbackResolveRequest): Promise<VersionedResponse<void>> => {
+      try {
+        await resolveFeedback(request);
+        return ok(undefined);
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  // Phase 21: Handoff
+  ipcMain.handle(
+    IpcChannel.HandoffExport,
+    async (_event, request: HandoffPackageExportRequest): Promise<VersionedResponse<{ path: string; manifest: import("../shared/project.js").HandoffPackageManifest }>> => {
+      try {
+        return ok(await exportHandoffPackage(request));
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.HandoffImport,
+    async (_event, request: HandoffPackageImportRequest): Promise<VersionedResponse<void>> => {
+      try {
+        await importHandoffPackage(request);
+        return ok(undefined);
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.HandoffValidate,
+    async (_event, request: HandoffPackageValidateRequest): Promise<VersionedResponse<import("../shared/project.js").HandoffPackageManifest>> => {
+      try {
+        return ok(await validateHandoffPackage(request));
       } catch (error) {
         return fail(toAppError(error));
       }
