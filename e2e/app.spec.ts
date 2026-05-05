@@ -130,7 +130,7 @@ test.describe("Transport Footer", () => {
   });
 
   test("shows status pill and message", async ({ page }) => {
-    const statusPill = page.locator(".status-pill");
+    const statusPill = page.locator(".status-pill").first();
     await expect(statusPill).toBeVisible();
     await expect(statusPill).toHaveClass(/status-idle/);
 
@@ -218,7 +218,7 @@ test.describe("Inspector Panel (Left)", () => {
     const exportCard = page.locator(".export-card");
     await expect(exportCard).toBeVisible();
 
-    const qualitySelect = exportCard.locator("select");
+    const qualitySelect = exportCard.getByLabel("Quality");
     await expect(qualitySelect).toBeVisible();
     await expect(qualitySelect).toHaveValue("standard");
 
@@ -229,7 +229,7 @@ test.describe("Inspector Panel (Left)", () => {
   });
 
   test("can change export quality", async ({ page }) => {
-    const qualitySelect = page.locator(".export-card select");
+    const qualitySelect = page.locator(".export-card").getByLabel("Quality");
 
     await qualitySelect.selectOption("high");
     await expect(qualitySelect).toHaveValue("high");
@@ -398,7 +398,7 @@ test.describe("Color Panel - Node Strip", () => {
   test("Add Node button exists", async ({ page }) => {
     const addButton = page.locator(".add-node");
     await expect(addButton).toBeVisible();
-    await expect(addButton).toHaveText("Add Node");
+    await expect(addButton).toHaveText("Add");
   });
 
   test("Add Node button is enabled when under max nodes", async ({ page }) => {
@@ -851,7 +851,7 @@ test.describe("Interactive Flows", () => {
   });
 
   test("changing export quality via dropdown works", async ({ page }) => {
-    const qualitySelect = page.locator(".export-card select");
+    const qualitySelect = page.locator(".export-card").getByLabel("Quality");
 
     await qualitySelect.selectOption("high");
     await expect(qualitySelect).toHaveValue("high");
