@@ -360,7 +360,10 @@ export function registerIpcHandlers(): void {
     IpcChannel.PackUninstall,
     async (_event, request: { path: string }): Promise<VersionedResponse<void>> => {
       try {
-        await uninstallPack(request.path);
+        const removed = await uninstallPack(request.path);
+        if (!removed) {
+          return fail(appError("UNKNOWN", "Pack was not found or is outside the installed pack directory."));
+        }
         return ok(undefined);
       } catch (error) {
         return fail(toAppError(error));
