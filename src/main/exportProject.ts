@@ -9,7 +9,21 @@ import type {
   ExportProjectRequest,
   ExportQuality
 } from "../shared/ipc.js";
-import { evaluateNodeGraph, normalizeNodeGraph, resolveTrackedNode, type ColorNode } from "../shared/colorEngine.js";
+import {
+  evaluateNodeGraph,
+  normalizeNodeGraph,
+  resolveTrackedNode,
+  decodeTransfer,
+  encodeTransfer,
+  toneMapSdr,
+  compressGamut,
+  PRIMARIES,
+  COLORSPACES,
+  type ColorNode,
+  type ColorManagementSettings,
+  type TransferFunctionType,
+  type ColorPrimariesType
+} from "../shared/colorEngine.js";
 import { sanitizeProject } from "../shared/project.js";
 import { createExportJobSnapshot, type ExportJobSnapshot } from "./exportPlanning.js";
 import { appError, isAppError } from "./errors.js";
@@ -158,28 +172,79 @@ export function cancelExport(jobId: string): ExportProgress {
   return job.cancel();
 }
 
-export function renderRgbaFrame(source: Buffer, sourceWidth: number, sourceHeight: number, nodes: readonly ColorNode[], frameIndex: number): Buffer {
-  const output = Buffer.allocUnsafe(source.length);
+export interface RenderRgbaFrameOptions {
+  colorManagement?: ColorManagementSettings;
+  sourceTransfer?: TransferFunctionType;
+  sourcePrimaries?: ColorPrimariesType;
+  isHdr?: boolean;
+}
+
+export function renderRgbaFrame(
+  source: Buffer,
+  sourceWidth: number,
+  sourceHeight: number,
+  nodes: readonly ColorNode[],
+  frameIndex: number,
+  options?: RenderRgbaFrameOptions
+): Buffer {
   const resolvedNodes = normalizeNodeGraph(nodes).map((node) => resolveTrackedNode(node, frameIndex));
+  const colorManagement = options?.colorManagement;
+  const sourceTransfer = options?.sourceTransfer ?? "bt1886";
+  const sourcePrimaries = options?.sourcePrimaries ?? "rec709";
+  const isHdr = options?.isHdr ?? false;
+
+  const output = Buffer.allocUnsafe(source.length);
+
+  // Determine target output transfer from color management settings
+  const targetTransfer: TransferFunctionType = colorManagement?.outputTransform && colorManagement.outputTransform !== "none"
+    ? (COLORSPACES[colorManagement.outputTransform as keyof typeof COLORSPACES]?.transfer ?? "bt1886")
+    : "bt1886";
+
+  const workingPrimaries: ColorPrimariesType = colorManagement?.workingColorSpace
+    ? (COLORSPACES[colorManagement.workingColorSpace as keyof typeof COLORSPACES]?.primaries ?? "rec709")
+    : "rec709";
 
   for (let y = 0; y < sourceHeight; y += 1) {
     for (let x = 0; x < sourceWidth; x += 1) {
       const offset = (y * sourceWidth + x) * 4;
-      const pixel = {
+      let pixel: { r: number; g: number; b: number; a: number } = {
         r: source[offset] / 255,
         g: source[offset + 1] / 255,
         b: source[offset + 2] / 255,
         a: source[offset + 3] / 255
       };
+
+      // Apply input transfer decode if not linear
+      if (sourceTransfer !== "linear") {
+        pixel = { ...decodeTransfer(pixel, sourceTransfer), a: pixel.a };
+      }
+
+      // Apply creative grade
       const graded = evaluateNodeGraph(pixel, resolvedNodes, {
         x: (x + 0.5) / sourceWidth,
         y: (y + 0.5) / sourceHeight
       });
 
-      output[offset] = floatToByte(graded.r);
-      output[offset + 1] = floatToByte(graded.g);
-      output[offset + 2] = floatToByte(graded.b);
-      output[offset + 3] = floatToByte(graded.a ?? pixel.a);
+      // Apply gamut compression and tone mapping
+      if (sourcePrimaries !== workingPrimaries) {
+        const srcP = PRIMARIES[sourcePrimaries] ?? PRIMARIES.rec709;
+        const wkP = PRIMARIES[workingPrimaries] ?? PRIMARIES.rec709;
+        pixel = { ...compressGamut(graded, srcP, wkP), a: graded.a ?? pixel.a };
+      } else {
+        pixel = { ...graded, a: graded.a ?? pixel.a };
+      }
+
+      if (isHdr && colorManagement?.toneMapping === "sdr") {
+        pixel = { ...toneMapSdr(pixel, true), a: pixel.a };
+      }
+
+      // Encode output transfer
+      pixel = { ...encodeTransfer(pixel, targetTransfer), a: pixel.a };
+
+      output[offset] = floatToByte(pixel.r);
+      output[offset + 1] = floatToByte(pixel.g);
+      output[offset + 2] = floatToByte(pixel.b);
+      output[offset + 3] = floatToByte(pixel.a);
     }
   }
 
@@ -313,7 +378,14 @@ async function processFrames(
           profiling.renderStart = performance.now();
         }
 
-        const graded = renderRgbaFrame(sourceFrame, sourceWidth, sourceHeight, snapshot.project.nodes, frameIndex);
+        const graded = renderRgbaFrame(sourceFrame, sourceWidth, sourceHeight, snapshot.project.nodes, frameIndex, {
+          colorManagement: snapshot.project.colorManagementSettings,
+          sourceTransfer: snapshot.media.colorMetadata?.transfer.type ?? "bt1886",
+          sourcePrimaries: snapshot.media.colorMetadata?.primaries.type ?? "rec709",
+          isHdr: !!(snapshot.media.colorMetadata?.transfer.type === "hlg" ||
+                 snapshot.media.colorMetadata?.transfer.type === "pq" ||
+                 snapshot.media.colorMetadata?.transfer.type === "appleLog")
+        });
         const resized = transformRgbaFrame(graded, sourceWidth, sourceHeight, snapshot.width, snapshot.height, snapshot.project.exportSettings.resizePolicy);
 
         if (profiling) {

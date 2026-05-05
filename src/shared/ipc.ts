@@ -95,6 +95,8 @@ export interface MediaRef {
   audioStreamIndex?: number;
   rotation: number;
   videoStreamIndex: number;
+  colorMetadata?: import("./colorEngine.js").ColorMetadata;
+  detectedColorProfile?: string;
 }
 
 export { normalizeRotation } from "./mediaGeometry.js";
@@ -136,6 +138,10 @@ export interface ExportStillRequest {
   nodes: import("./colorEngine.js").ColorNode[];
   width: number;
   height: number;
+  colorManagement?: import("./colorEngine.js").ColorManagementSettings;
+  sourceTransfer?: import("./colorEngine.js").TransferFunctionType;
+  sourcePrimaries?: import("./colorEngine.js").ColorPrimariesType;
+  isHdr?: boolean;
 }
 
 export interface ExportSequenceRequest {

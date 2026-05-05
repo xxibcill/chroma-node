@@ -83,7 +83,15 @@ export async function exportSequence(request: ExportSequenceRequest): Promise<Ex
             sourceWidth,
             sourceHeight,
             sanitizedProject.nodes,
-            frameIndex
+            frameIndex,
+            {
+              colorManagement: sanitizedProject.colorManagementSettings,
+              sourceTransfer: media.colorMetadata?.transfer.type ?? "bt1886",
+              sourcePrimaries: media.colorMetadata?.primaries.type ?? "rec709",
+              isHdr: !!(media.colorMetadata?.transfer.type === "hlg" ||
+                     media.colorMetadata?.transfer.type === "pq" ||
+                     media.colorMetadata?.transfer.type === "appleLog")
+            }
           );
 
           // Write this frame to PNG file

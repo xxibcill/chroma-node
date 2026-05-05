@@ -12,6 +12,10 @@ import {
 import { appError } from "./errors.js";
 import { requireFfprobe } from "./ffmpeg.js";
 import { runProcess } from "./process.js";
+import {
+  type ColorMetadata,
+  detectColorSpaceFromFfprobe
+} from "../shared/colorEngine.js";
 
 interface FfprobeStream {
   index?: number;
@@ -25,6 +29,11 @@ interface FfprobeStream {
   nb_frames?: string;
   tags?: Record<string, string>;
   side_data_list?: Array<{ rotation?: number; displaymatrix?: string }>;
+  color_primaries?: string;
+  transfer_characteristics?: string;
+  matrix_coefficients?: string;
+  pix_fmt?: string;
+  bits_per_raw_sample?: string;
 }
 
 interface FfprobeFormat {
@@ -116,6 +125,19 @@ export function mapProbeOutput(sourcePath: string, parsed: FfprobeJson): MediaRe
   const totalFrames = nbFrames ?? (durationSeconds > 0 && frameRate > 0 ? Math.round(durationSeconds * frameRate) : undefined);
 
   const audioStream = streams.find((stream) => stream.codec_type === "audio");
+
+  // Read color metadata from stream tags
+  const tags = videoStream.tags ?? {};
+  const colorInfo = detectColorSpaceFromFfprobe(tags, videoStream.codec_name);
+
+  // Build color metadata from stream properties if available
+  const colorMetadata: ColorMetadata | undefined = colorInfo.metadata ? {
+    ...colorInfo.metadata,
+    bitDepth: readBitDepth(videoStream.bits_per_raw_sample),
+    profileLabel: colorInfo.metadata.profileLabel ||
+      (colorInfo.detectedProfile !== "auto" ? colorInfo.detectedProfile : tags.color_description ?? tags.color_space ?? "Unknown")
+  } : undefined;
+
   return {
     id: crypto.createHash("sha1").update(sourcePath).digest("hex"),
     sourcePath,
@@ -132,7 +154,9 @@ export function mapProbeOutput(sourcePath: string, parsed: FfprobeJson): MediaRe
     hasAudio: audioStream !== undefined,
     audioStreamIndex: audioStream?.index,
     rotation,
-    videoStreamIndex: videoStream.index ?? 0
+    videoStreamIndex: videoStream.index ?? 0,
+    colorMetadata,
+    detectedColorProfile: colorInfo.detectedProfile
   };
 }
 
@@ -177,4 +201,11 @@ function readRotation(stream: FfprobeStream): number {
   }
 
   return 0;
+}
+
+function readBitDepth(bitsPerRawSample?: string): 8 | 10 | 12 | 16 {
+  if (!bitsPerRawSample) return 8;
+  const depth = parseInt(bitsPerRawSample, 10);
+  if (depth === 10 || depth === 12 || depth === 16) return depth as 10 | 12 | 16;
+  return 8;
 }

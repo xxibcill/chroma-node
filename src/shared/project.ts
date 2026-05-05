@@ -5,7 +5,9 @@ import {
   createColorNode,
   normalizeNodeGraph,
   sanitizeColorNode,
-  type ColorNode
+  createDefaultColorManagementSettings,
+  type ColorNode,
+  type ColorManagementSettings
 } from "./colorEngine.js";
 
 export const PROJECT_SCHEMA_VERSION = "1.0.0";
@@ -46,6 +48,7 @@ export interface ChromaProject {
   playback: ProjectPlaybackState;
   nodes: ColorNode[];
   exportSettings: ProjectExportSettings;
+  colorManagementSettings?: ColorManagementSettings;
 }
 
 export interface ProjectValidationIssue {
@@ -79,7 +82,8 @@ export function createDefaultProject(): ChromaProject {
       resizePolicy: "fit",
       audioBehavior: "strip",
       workflowPreset: undefined
-    }
+    },
+    colorManagementSettings: createDefaultColorManagementSettings()
   };
 }
 
@@ -106,6 +110,7 @@ export function validateProject(input: unknown): ProjectValidationResult {
   const exportSettings = readExportSettings(source.exportSettings, warnings);
   const media = readMedia(source.media, errors, warnings);
   const nodes = readNodes(source.nodes, warnings, media?.totalFrames);
+  const colorManagementSettings = readColorManagementSettings(source.colorManagementSettings, warnings);
 
   if (errors.length > 0) {
     return { ok: false, errors };
@@ -121,7 +126,8 @@ export function validateProject(input: unknown): ProjectValidationResult {
       media,
       playback,
       nodes,
-      exportSettings
+      exportSettings,
+      colorManagementSettings
     }
   };
 }
@@ -327,6 +333,53 @@ function readWorkflowPreset(input: unknown, warnings: ProjectValidationIssue[]):
   }
 
   return undefined;
+}
+
+function readColorManagementSettings(input: unknown, warnings: ProjectValidationIssue[]): ColorManagementSettings | undefined {
+  if (input === undefined) {
+    return undefined;
+  }
+
+  if (!isRecord(input)) {
+    warnings.push(issue("colorManagementSettings", "DEFAULTED", "Color management settings were missing or invalid; defaults were used.", input));
+    return undefined;
+  }
+
+  const validColorSpaces = ["auto", "rec709", "rec2020", "srgb", "p3", "appleLog", "hlg", "pq", "linear"] as const;
+  const validInputTransforms = ["auto", "none", "rec709", "rec2020", "srgb", "p3", "appleLog", "hlg", "pq"] as const;
+  const validOutputTransforms = ["none", "rec709", "rec2020", "srgb", "p3"] as const;
+  const validToneMapping = ["none", "sdr", "hlg", "pq"] as const;
+  const validGamutMapping = ["none", "clip", "compress"] as const;
+
+  const readColorSpace = (field: string, fallback: string): string => {
+    if (validColorSpaces.includes(input[field] as typeof validColorSpaces[number])) {
+      return input[field] as string;
+    }
+    if (input[field] !== undefined) {
+      warnings.push(issue(`colorManagementSettings.${field}`, "DEFAULTED", `Invalid ${field}; default was used.`, input[field]));
+    }
+    return fallback;
+  };
+
+  const readTransform = (field: string, fallback: string, valid: readonly string[]): string => {
+    if (valid.includes(input[field] as string)) {
+      return input[field] as string;
+    }
+    if (input[field] !== undefined) {
+      warnings.push(issue(`colorManagementSettings.${field}`, "DEFAULTED", `Invalid ${field}; default was used.`, input[field]));
+    }
+    return fallback;
+  };
+
+  return {
+    inputColorSpace: readColorSpace("inputColorSpace", "auto") as ColorManagementSettings["inputColorSpace"],
+    outputColorSpace: readColorSpace("outputColorSpace", "rec709") as ColorManagementSettings["outputColorSpace"],
+    workingColorSpace: readColorSpace("workingColorSpace", "rec709") as ColorManagementSettings["workingColorSpace"],
+    inputTransform: readTransform("inputTransform", "auto", validInputTransforms) as ColorManagementSettings["inputTransform"],
+    outputTransform: readTransform("outputTransform", "none", validOutputTransforms) as ColorManagementSettings["outputTransform"],
+    toneMapping: readTransform("toneMapping", "sdr", validToneMapping) as ColorManagementSettings["toneMapping"],
+    gamutMapping: readTransform("gamutMapping", "clip", validGamutMapping) as ColorManagementSettings["gamutMapping"]
+  };
 }
 
 function readMedia(

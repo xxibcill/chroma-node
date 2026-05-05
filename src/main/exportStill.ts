@@ -15,8 +15,12 @@ export async function exportStill(request: ExportStillRequest): Promise<ExportJo
     timeSeconds,
     nodes,
     width,
-    height
-  } = request;
+    height,
+    colorManagement,
+    sourceTransfer,
+    sourcePrimaries,
+    isHdr
+  } = request as ExportStillRequest & { colorManagement?: import("../shared/colorEngine.js").ColorManagementSettings; sourceTransfer?: import("../shared/colorEngine.js").TransferFunctionType; sourcePrimaries?: import("../shared/colorEngine.js").ColorPrimariesType; isHdr?: boolean };
 
   const defaultOutput = sourcePath.replace(/\.[^.\\/]+$/, `-still.png`);
   const output = outputPath ?? defaultOutput;
@@ -33,7 +37,8 @@ export async function exportStill(request: ExportStillRequest): Promise<ExportJo
     width,
     height,
     nodes,
-    frameIndex
+    frameIndex,
+    { colorManagement, sourceTransfer, sourcePrimaries, isHdr }
   );
 
   // Write to PNG

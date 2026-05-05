@@ -109,8 +109,126 @@ export interface LutSettings {
 }
 
 export interface ColorManagementSettings {
-  inputColorSpace: "auto" | "rec709" | "rec2020" | "srgb" | "p3";
-  outputColorSpace: "auto" | "rec709" | "rec2020" | "srgb" | "p3";
+  inputColorSpace: ColorSpace;
+  outputColorSpace: ColorSpace;
+  workingColorSpace: ColorSpace;
+  inputTransform: InputTransform;
+  outputTransform: OutputTransform;
+  toneMapping: ToneMappingMode;
+  gamutMapping: GamutMappingMode;
+}
+
+export type ColorSpace =
+  | "auto"
+  | "rec709"
+  | "rec2020"
+  | "srgb"
+  | "p3"
+  | "appleLog"
+  | "hlg"
+  | "pq"
+  | "linear";
+
+export type InputTransform =
+  | "auto"
+  | "none"
+  | "rec709"
+  | "rec2020"
+  | "srgb"
+  | "p3"
+  | "appleLog"
+  | "hlg"
+  | "pq";
+
+export type OutputTransform =
+  | "none"
+  | "rec709"
+  | "rec2020"
+  | "srgb"
+  | "p3";
+
+export type ToneMappingMode =
+  | "none"
+  | "sdr"
+  | "hlg"
+  | "pq";
+
+export type GamutMappingMode =
+  | "none"
+  | "clip"
+  | "compress";
+
+export interface ColorPrimaries {
+  type: ColorPrimariesType;
+  redX: number;
+  redY: number;
+  greenX: number;
+  greenY: number;
+  blueX: number;
+  blueY: number;
+  whiteX: number;
+  whiteY: number;
+}
+
+export type ColorPrimariesType =
+  | "rec709"
+  | "rec2020"
+  | "p3"
+  | "appleLog"
+  | "unknown";
+
+export interface TransferFunction {
+  type: TransferFunctionType;
+  power?: number;
+  epsilon?: number;
+  alpha?: number;
+  beta?: number;
+}
+
+export type TransferFunctionType =
+  | "bt1886"
+  | "srgb"
+  | "linear"
+  | "hlg"
+  | "pq"
+  | "appleLog"
+  | "log25"
+  | "unknown";
+
+export interface ColorMatrix {
+  type: ColorMatrixType;
+}
+
+export type ColorMatrixType =
+  | "bt601"
+  | "bt709"
+  | "bt2020nc"
+  | "bt2020c"
+  | "identity"
+  | "unknown";
+
+export interface ColorRange {
+  type: ColorRangeType;
+}
+
+export type ColorRangeType =
+  | "full"
+  | "limited";
+
+export interface ColorMetadata {
+  primaries: ColorPrimaries;
+  transfer: TransferFunction;
+  matrix: ColorMatrix;
+  range: ColorRange;
+  bitDepth: 8 | 10 | 12 | 16;
+  profileLabel: string;
+}
+
+export interface SourceColorInfo {
+  metadata: ColorMetadata | null;
+  detectedProfile: ColorSpace;
+  isHDR: boolean;
+  isWideGamut: boolean;
 }
 
 export interface ColorNode {
@@ -1273,4 +1391,514 @@ function normalizeDegrees(value: number): number {
 function normalizeSignedDegrees(value: number): number {
   const degrees = normalizeDegrees(value + 180) - 180;
   return degrees === -180 ? 180 : degrees;
+}
+
+// Color space constants
+
+export const COLORSPACES: Record<ColorSpace, { label: string; primaries: ColorPrimariesType; transfer: TransferFunctionType }> = {
+  auto: { label: "Auto", primaries: "rec709", transfer: "bt1886" },
+  rec709: { label: "Rec.709 SDR", primaries: "rec709", transfer: "bt1886" },
+  rec2020: { label: "Rec.2020", primaries: "rec2020", transfer: "pq" },
+  srgb: { label: "sRGB", primaries: "rec709", transfer: "srgb" },
+  p3: { label: "Display P3", primaries: "p3", transfer: "srgb" },
+  appleLog: { label: "Apple Log", primaries: "rec2020", transfer: "appleLog" },
+  hlg: { label: "Rec.2020 HLG", primaries: "rec2020", transfer: "hlg" },
+  pq: { label: "Rec.2020 PQ", primaries: "rec2020", transfer: "pq" },
+  linear: { label: "Linear", primaries: "rec709", transfer: "linear" }
+};
+
+export const PRIMARIES: Record<ColorPrimariesType, ColorPrimaries> = {
+  rec709: { type: "rec709", redX: 0.64, redY: 0.33, greenX: 0.3, greenY: 0.6, blueX: 0.15, blueY: 0.06, whiteX: 0.3127, whiteY: 0.329 },
+  rec2020: { type: "rec2020", redX: 0.64, redY: 0.33, greenX: 0.3, greenY: 0.6, blueX: 0.15, blueY: 0.06, whiteX: 0.3127, whiteY: 0.329 },
+  p3: { type: "p3", redX: 0.64, redY: 0.33, greenX: 0.3, greenY: 0.6, blueX: 0.15, blueY: 0.06, whiteX: 0.3127, whiteY: 0.329 },
+  appleLog: { type: "appleLog", redX: 0.64, redY: 0.33, greenX: 0.3, greenY: 0.6, blueX: 0.15, blueY: 0.06, whiteX: 0.3127, whiteY: 0.329 },
+  unknown: { type: "unknown", redX: 0.64, redY: 0.33, greenX: 0.3, greenY: 0.6, blueX: 0.15, blueY: 0.06, whiteX: 0.3127, whiteY: 0.329 }
+};
+
+export const TRANSFER_FUNCTIONS: Record<TransferFunctionType, TransferFunction> = {
+  bt1886: { type: "bt1886", power: 2.4, epsilon: 0.0, alpha: 1.0, beta: 0.0 },
+  srgb: { type: "srgb", power: 2.4, epsilon: 0.055, alpha: 1.055, beta: 0.04045 },
+  linear: { type: "linear", power: 1.0, epsilon: 0.0, alpha: 1.0, beta: 0.0 },
+  hlg: { type: "hlg", power: 1.2, epsilon: 0.0, alpha: 1.0, beta: 0.0 },
+  pq: { type: "pq", power: 1.0, epsilon: 0.0, alpha: 1.0, beta: 0.0 },
+  appleLog: { type: "appleLog", power: 1.0, epsilon: 0.0, alpha: 1.0, beta: 0.0 },
+  log25: { type: "log25", power: 1.0, epsilon: 0.0, alpha: 1.0, beta: 0.0 },
+  unknown: { type: "unknown", power: 2.4, epsilon: 0.0, alpha: 1.0, beta: 0.0 }
+};
+
+// Transform helpers
+
+export function createDefaultColorManagementSettings(): ColorManagementSettings {
+  return {
+    inputColorSpace: "auto",
+    outputColorSpace: "rec709",
+    workingColorSpace: "rec709",
+    inputTransform: "auto",
+    outputTransform: "none",
+    toneMapping: "sdr",
+    gamutMapping: "clip"
+  };
+}
+
+export function createDefaultColorMetadata(): ColorMetadata {
+  return {
+    primaries: PRIMARIES.rec709,
+    transfer: TRANSFER_FUNCTIONS.bt1886,
+    matrix: { type: "bt709" },
+    range: { type: "limited" },
+    bitDepth: 8,
+    profileLabel: "Rec.709 SDR"
+  };
+}
+
+export function detectColorSpaceFromFfprobe(tags: Record<string, string>, codecName: string): SourceColorInfo {
+  const primariesStr = tags.color_primaries || tags.color_space || "";
+  const transferStr = tags.transfer_characteristics || tags.gamma || "";
+  const matrixStr = tags.matrix_coefficients || "";
+
+  const detectedProfile = inferColorSpace(primariesStr, transferStr, matrixStr, codecName);
+  const metadata = buildColorMetadata(primariesStr, transferStr, matrixStr, codecName);
+
+  return {
+    metadata,
+    detectedProfile,
+    isHDR: isHdrProfile(detectedProfile),
+    isWideGamut: isWideGamutProfile(detectedProfile)
+  };
+}
+
+function inferColorSpace(primaries: string, transfer: string, matrix: string, codec: string): ColorSpace {
+  const primariesLC = primaries.toLowerCase();
+  const transferLC = transfer.toLowerCase();
+
+  // Apple Log detection
+  if (codec === "dvi" || codec === "ap4n" || transferLC.includes("log") || transferLC.includes("apple")) {
+    return "appleLog";
+  }
+
+  // HDR profiles
+  if (transferLC.includes("hlg") || transferLC === "bt2020hlg") {
+    return "hlg";
+  }
+  if (transferLC.includes("pq") || transferLC === "bt2020pq" || transferLC === "smpte2084") {
+    return "pq";
+  }
+
+  // Wide gamut
+  if (primariesLC === "bt2020nc" || primariesLC === "bt2020c" || primariesLC === "rec2020") {
+    if (transferLC.includes("bt1886") || transferLC === "") {
+      return "rec2020";
+    }
+  }
+
+  // P3
+  if (primariesLC === "p3") {
+    return "p3";
+  }
+
+  // Rec.709 / sRGB defaults
+  if (primariesLC === "bt709" || primariesLC === "rec709" || primariesLC === "" || primariesLC === "unspecified") {
+    if (transferLC === "srgb" || transferLC === "ieee61966-2-1" || transferLC === "bt709") {
+      return "srgb";
+    }
+    return "rec709";
+  }
+
+  return "rec709";
+}
+
+function buildColorMetadata(primaries: string, transfer: string, matrix: string, codec: string): ColorMetadata {
+  const primariesType = parsePrimariesType(primaries);
+  const transferType = parseTransferType(transfer);
+  const matrixType = parseMatrixType(matrix);
+  const profileLabel = COLORSPACES[inferColorSpace(primaries, transfer, matrix, codec)]?.label ?? "Unknown";
+
+  return {
+    primaries: PRIMARIES[primariesType] ?? PRIMARIES.rec709,
+    transfer: TRANSFER_FUNCTIONS[transferType] ?? TRANSFER_FUNCTIONS.bt1886,
+    matrix: { type: matrixType },
+    range: { type: "limited" },
+    bitDepth: 8,
+    profileLabel
+  };
+}
+
+function parsePrimariesType(value: string): ColorPrimariesType {
+  const lc = value.toLowerCase();
+  if (lc === "bt709" || lc === "rec709" || lc === "iec61966-2-1" || lc === "srgb" || lc === "") return "rec709";
+  if (lc === "bt2020nc" || lc === "bt2020c" || lc === "rec2020") return "rec2020";
+  if (lc === "p3" || lc === "displayp3" || lc === "iec61966-2-4") return "p3";
+  if (lc.includes("apple") || lc.includes("log")) return "appleLog";
+  return "unknown";
+}
+
+function parseTransferType(value: string): TransferFunctionType {
+  const lc = value.toLowerCase();
+  if (lc === "bt1886" || lc === "rec709") return "bt1886";
+  if (lc === "srgb" || lc === "ieee61966-2-1" || lc === "iec61966-2-4") return "srgb";
+  if (lc === "linear" || lc === "linearrec709") return "linear";
+  if (lc === "hlg" || lc === "bt2020hlg" || lc === "arib-std-b67") return "hlg";
+  if (lc === "pq" || lc === "bt2020pq" || lc === "smpte2084") return "pq";
+  if (lc.includes("log") || lc === "log25" || lc === "apple") return "appleLog";
+  return "unknown";
+}
+
+function parseMatrixType(value: string): ColorMatrixType {
+  const lc = value.toLowerCase();
+  if (lc === "bt601" || lc === "rec601") return "bt601";
+  if (lc === "bt709" || lc === "rec709" || lc === "") return "bt709";
+  if (lc === "bt2020nc" || lc === "bt2020c" || lc === "rec2020") return "bt2020nc";
+  return "unknown";
+}
+
+function isHdrProfile(profile: ColorSpace): boolean {
+  return profile === "hlg" || profile === "pq" || profile === "appleLog";
+}
+
+function isWideGamutProfile(profile: ColorSpace): boolean {
+  return profile === "rec2020" || profile === "p3" || profile === "appleLog";
+}
+
+// Transfer function decode/encode
+
+export function decodeTransfer(color: Pixel, transfer: TransferFunctionType): Pixel {
+  switch (transfer) {
+    case "srgb":
+      return decodeSrgb(color);
+    case "bt1886":
+    case "linear":
+      return color;
+    case "hlg":
+      return decodeHlg(color);
+    case "pq":
+      return decodePq(color);
+    case "appleLog":
+      return decodeAppleLog(color);
+    default:
+      return color;
+  }
+}
+
+export function encodeTransfer(color: Pixel, transfer: TransferFunctionType): Pixel {
+  switch (transfer) {
+    case "srgb":
+      return encodeSrgb(color);
+    case "bt1886":
+    case "linear":
+      return color;
+    case "hlg":
+      return encodeHlg(color);
+    case "pq":
+      return encodePq(color);
+    case "appleLog":
+      return encodeAppleLog(color);
+    default:
+      return color;
+  }
+}
+
+function decodeSrgb(color: Pixel): Pixel {
+  const linearize = (c: number) => {
+    if (c <= 0.04045) return c / 12.92;
+    return Math.pow((c + 0.055) / 1.055, 2.4);
+  };
+  return { r: linearize(color.r), g: linearize(color.g), b: linearize(color.b), a: color.a };
+}
+
+function encodeSrgb(color: Pixel): Pixel {
+  const encode = (c: number) => {
+    if (c <= 0.0031308) return c * 12.92;
+    return 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
+  };
+  return { r: encode(color.r), g: encode(color.g), b: encode(color.b), a: color.a };
+}
+
+function decodeHlg(color: Pixel): Pixel {
+  const HLG_E = 1.2;
+  const linearize = (c: number) => {
+    if (c <= 0.0) return 0.0;
+    if (c <= 0.5) return c * c * (1.0 / (3.0 * HLG_E));
+    const a = Math.sqrt((3.0 * HLG_E - 0.5) / 3.0);
+    return a * Math.sqrt(c) - (a - 1.0 / (3.0 * HLG_E));
+  };
+  return { r: linearize(color.r), g: linearize(color.g), b: linearize(color.b), a: color.a };
+}
+
+function encodeHlg(color: Pixel): Pixel {
+  const HLG_E = 1.2;
+  const encode = (c: number) => {
+    if (c <= 0.0) return 0.0;
+    if (c <= 1.0 / (3.0 * HLG_E)) return Math.sqrt(3.0 * HLG_E * c);
+    return ((3.0 * HLG_E - 0.5) / 3.0) + (2.0 * Math.sqrt(c - (1.0 / (3.0 * HLG_E))));
+  };
+  return { r: encode(color.r), g: encode(color.g), b: encode(color.b), a: color.a };
+}
+
+function decodePq(color: Pixel): Pixel {
+  const c = 0.1593017578125;
+  const m1 = 2610.0 / 16384.0;
+  const m2 = 2523.0 / 4096.0 * 128.0;
+  const y1 = 1.7;
+  const y2 = 1.0 / 1.7;
+
+  const pqToLinear = (x: number) => {
+    const xn = Math.pow(x / 10000.0, m1);
+    const xn2 = xn * xn;
+    const xn3 = xn2 * xn;
+    const xn_y2 = Math.pow(xn, y2);
+    const n = xn3 + xn_y2;
+    const n_m2 = Math.pow(n, m2 / m1);
+    const y = Math.pow(n_m2 + Math.pow(c, m2 / m1), y1);
+    return y;
+  };
+
+  return { r: pqToLinear(color.r), g: pqToLinear(color.g), b: pqToLinear(color.b), a: color.a };
+}
+
+function encodePq(color: Pixel): Pixel {
+  const c = 0.1593017578125;
+  const m1 = 16384.0 / 2610.0;
+  const m2 = 4096.0 / 2523.0;
+  const y1 = 1.7;
+  const y2 = 1.0 / 1.7;
+
+  const linearToPq = (x: number) => {
+    const y = Math.pow(x, y2);
+    const y_y1 = Math.pow(y, 1.0 / y1);
+    const x_m2 = Math.pow(y_y1 + Math.pow(c, y1), m2 * y2);
+    return 10000.0 * Math.pow(x_m2 / (x_m2 + Math.pow(c, y1)), 1.0 / m1);
+  };
+
+  return { r: linearToPq(color.r), g: linearToPq(color.g), b: linearToPq(color.b), a: color.a };
+}
+
+// Apple Log decoding - based on ARRI Alexa Log C curve family with Apple-style parameters
+// Reference: Apple ProRes White Paper / AFImaging
+function decodeAppleLog(color: Pixel): Pixel {
+  const appleLogToLinear = (x: number): number => {
+    if (x <= 0.0) return 0.0;
+    if (x >= 1.0) return 1.0;
+    // Apple Log parameters (empirical curve fit for native Apple Log handling)
+    const a = 5.555556;
+    const d = 0.385371;
+    const e = 1.0;
+    const f = 0.817092;
+    // Linear region
+    if (x < 0.247190 - 0.052272 * f) {
+      return x / e;
+    }
+    // Log region
+    return e * Math.pow((x + d - 1.0) / (1.0 + d - 1.0), a) * (1.0 - f) + f;
+  };
+
+  return {
+    r: appleLogToLinear(color.r),
+    g: appleLogToLinear(color.g),
+    b: appleLogToLinear(color.b),
+    a: color.a
+  };
+}
+
+function encodeAppleLog(color: Pixel): Pixel {
+  const linearToAppleLog = (x: number): number => {
+    if (x <= 0.0) return 0.0;
+    if (x >= 1.0) return 1.0;
+    const a = 5.555556;
+    const d = 0.385371;
+    const e = 1.0;
+    const f = 0.817092;
+    // Linear region
+    if (x < (1.0 - f) * e) {
+      return x / e;
+    }
+    // Log region
+    return Math.pow((x - f * e) / ((1.0 - f) * e), 1.0 / a) * (1.0 + d - 1.0) + d - 1.0;
+  };
+
+  return {
+    r: linearToAppleLog(color.r),
+    g: linearToAppleLog(color.g),
+    b: linearToAppleLog(color.b),
+    a: color.a
+  };
+}
+
+// Tone mapping for HDR to SDR
+
+export function toneMapSdr(color: Pixel, sourceIsHdr: boolean): Pixel {
+  if (!sourceIsHdr) return color;
+
+  // Simple filmic tone map to compress HDR into SDR range
+  const compress = (v: number) => {
+    if (v <= 0.5) return v * 2.0;
+    const numerator = v - 0.4;
+    const denominator = 1.0 + Math.abs(numerator);
+    return 0.5 * Math.pow(v, 0.8) + 0.5 * (numerator / denominator + 1.0) * v;
+  };
+
+  return {
+    r: clamp01(compress(color.r)),
+    g: clamp01(compress(color.g)),
+    b: clamp01(compress(color.b)),
+    a: color.a
+  };
+}
+
+// Primary conversion matrix helpers
+
+export function primariesToXyz(primaries: ColorPrimaries): { xr: number; yr: number; xg: number; yg: number; xb: number; yb: number; wx: number; wy: number } {
+  return {
+    xr: primaries.redX / primaries.redY,
+    yr: 1.0,
+    xg: primaries.greenX / primaries.greenY,
+    yg: 1.0,
+    xb: primaries.blueX / primaries.blueY,
+    yb: 1.0,
+    wx: primaries.whiteX / primaries.whiteY,
+    wy: 1.0
+  };
+}
+
+export function buildRgbToXyzMatrix(primaries: ColorPrimaries): number[] {
+  const p = primariesToXyz(primaries);
+  const s = {
+    sr: (p.wx - p.xb) * (p.yg - p.yb) - (p.wy - p.yb) * (p.xg - p.xb),
+    sg: (p.xg - p.xr) * (p.wy - p.yb) - (p.wy - p.yr) * (p.xg - p.xb),
+    sb: (p.xr - p.xg) * (p.yg - p.wy) - (p.yr - p.yg) * (p.wx - p.xg)
+  };
+
+  const determinant = s.sr * p.yr * p.xb + s.sg * p.yb * p.xr + s.sb * p.wy * p.xg - s.sb * p.yr * p.xg - s.sg * p.wy * p.xb - s.sr * p.yb * p.xg;
+  const invDet = 1.0 / determinant;
+
+  return [
+    (s.sr * p.wy * p.xb + s.sg * p.wy * p.xb + s.sb * p.wy * p.xg - s.sb * p.yr * p.xb - s.sg * p.yr * p.xg - s.sr * p.yb * p.xg) * invDet,
+    (s.sr * p.yr * p.xb + s.sg * p.yb * p.xr + s.sb * p.yr * p.xg - s.sb * p.yb * p.xr - s.sg * p.yr * p.xg - s.sr * p.wy * p.xg) * invDet,
+    (s.sr * p.yb * p.xg + s.sg * p.wy * p.xr + s.sb * p.yr * p.xg - s.sr * p.yr * p.xg - s.sg * p.yb * p.xr - s.sb * p.wy * p.xg) * invDet,
+    (s.sr * p.wy * p.xb + s.sg * p.wy * p.xb + s.sb * p.wy * p.xg - s.sb * p.yr * p.xb - s.sg * p.yr * p.xg - s.sr * p.yb * p.xg) * invDet,
+    (s.sr * p.yr * p.xb + s.sg * p.yb * p.xr + s.sb * p.yr * p.xg - s.sb * p.yb * p.xr - s.sg * p.yr * p.xg - s.sr * p.wy * p.xg) * invDet,
+    (s.sr * p.yb * p.xg + s.sg * p.wy * p.xr + s.sb * p.yr * p.xg - s.sr * p.yr * p.xg - s.sg * p.yb * p.xr - s.sb * p.wy * p.xg) * invDet,
+    (s.sr * p.wy * p.xb + s.sg * p.wy * p.xb + s.sb * p.wy * p.xg - s.sb * p.yr * p.xb - s.sg * p.yr * p.xg - s.sr * p.yb * p.xg) * invDet,
+    (s.sr * p.yr * p.xb + s.sg * p.yb * p.xr + s.sb * p.yr * p.xg - s.sb * p.yb * p.xr - s.sg * p.yr * p.xg - s.sr * p.wy * p.xg) * invDet,
+    (s.sr * p.yb * p.xg + s.sg * p.wy * p.xr + s.sb * p.yr * p.xg - s.sr * p.yr * p.xg - s.sg * p.yb * p.xr - s.sb * p.wy * p.xg) * invDet
+  ];
+}
+
+export function xyzToRgb(xyzMatrix: number[], xyz: { x: number; y: number; z: number }): Pixel {
+  return {
+    r: xyzMatrix[0] * xyz.x + xyzMatrix[1] * xyz.y + xyzMatrix[2] * xyz.z,
+    g: xyzMatrix[3] * xyz.x + xyzMatrix[4] * xyz.y + xyzMatrix[5] * xyz.z,
+    b: xyzMatrix[6] * xyz.x + xyzMatrix[7] * xyz.y + xyzMatrix[8] * xyz.z,
+    a: 1
+  };
+}
+
+// Gamut compression to prevent clipping
+
+export function compressGamut(color: Pixel, sourcePrimaries: ColorPrimaries, targetPrimaries: ColorPrimaries): Pixel {
+  if (sourcePrimaries.type === targetPrimaries.type) return color;
+
+  const srcToXyz = buildRgbToXyzMatrix(sourcePrimaries);
+  const dstToXyz = buildRgbToXyzMatrix(targetPrimaries);
+
+  const xyz = {
+    x: srcToXyz[0] * color.r + srcToXyz[1] * color.g + srcToXyz[2] * color.b,
+    y: srcToXyz[3] * color.r + srcToXyz[4] * color.g + srcToXyz[5] * color.b,
+    z: srcToXyz[6] * color.r + srcToXyz[7] * color.g + srcToXyz[8] * color.b
+  };
+
+  const invDet = dstToXyz[0] * dstToXyz[4] * dstToXyz[8] + dstToXyz[1] * dstToXyz[5] * dstToXyz[6] + dstToXyz[2] * dstToXyz[3] * dstToXyz[7] - dstToXyz[2] * dstToXyz[4] * dstToXyz[6] - dstToXyz[1] * dstToXyz[3] * dstToXyz[8] - dstToXyz[0] * dstToXyz[5] * dstToXyz[7];
+  const invXyz: number[] = [
+    (dstToXyz[4] * dstToXyz[8] - dstToXyz[5] * dstToXyz[7]) / invDet,
+    (dstToXyz[2] * dstToXyz[7] - dstToXyz[1] * dstToXyz[8]) / invDet,
+    (dstToXyz[1] * dstToXyz[5] - dstToXyz[2] * dstToXyz[4]) / invDet,
+    (dstToXyz[5] * dstToXyz[6] - dstToXyz[3] * dstToXyz[8]) / invDet,
+    (dstToXyz[0] * dstToXyz[8] - dstToXyz[2] * dstToXyz[6]) / invDet,
+    (dstToXyz[2] * dstToXyz[3] - dstToXyz[0] * dstToXyz[5]) / invDet,
+    (dstToXyz[3] * dstToXyz[7] - dstToXyz[4] * dstToXyz[6]) / invDet,
+    (dstToXyz[1] * dstToXyz[6] - dstToXyz[0] * dstToXyz[7]) / invDet,
+    (dstToXyz[0] * dstToXyz[4] - dstToXyz[1] * dstToXyz[3]) / invDet
+  ];
+
+  let r = invXyz[0] * xyz.x + invXyz[1] * xyz.y + invXyz[2] * xyz.z;
+  let g = invXyz[3] * xyz.x + invXyz[4] * xyz.y + invXyz[5] * xyz.z;
+  let b = invXyz[6] * xyz.x + invXyz[7] * xyz.y + invXyz[8] * xyz.z;
+
+  const maxComp = Math.max(r, g, b, 0);
+  if (maxComp > 1.0) {
+    const scale = 1.0 / maxComp;
+    r *= scale;
+    g *= scale;
+    b *= scale;
+  }
+
+  return { r: clamp01(r), g: clamp01(g), b: clamp01(b), a: color.a };
+}
+
+// Apply full managed color pipeline to a pixel
+
+export interface ManagedPipelineOptions {
+  sourceTransfer: TransferFunctionType;
+  sourcePrimaries: ColorPrimariesType;
+  targetTransfer: TransferFunctionType;
+  targetPrimaries: ColorPrimariesType;
+  workingPrimaries: ColorPrimariesType;
+  toneMapping: ToneMappingMode;
+  gamutMapping: GamutMappingMode;
+  isHdr: boolean;
+}
+
+export function applyManagedPipeline(pixel: Pixel, options: ManagedPipelineOptions): Pixel {
+  let result = pixel;
+
+  // 1. Decode input transfer to linear
+  result = decodeTransfer(result, options.sourceTransfer);
+
+  // 2. Convert source primaries to working primaries (if different)
+  if (options.sourcePrimaries !== options.workingPrimaries) {
+    const srcP = PRIMARIES[options.sourcePrimaries] ?? PRIMARIES.rec709;
+    const wkP = PRIMARIES[options.workingPrimaries] ?? PRIMARIES.rec709;
+    result = compressGamut(result, srcP, wkP);
+  }
+
+  // 3. Apply creative grade (done by caller via evaluateNodeGraph)
+
+  // 4. Convert working primaries to target primaries
+  if (options.workingPrimaries !== options.targetPrimaries) {
+    const wkP = PRIMARIES[options.workingPrimaries] ?? PRIMARIES.rec709;
+    const tgtP = PRIMARIES[options.targetPrimaries] ?? PRIMARIES.rec709;
+    result = compressGamut(result, wkP, tgtP);
+  }
+
+  // 5. Apply tone mapping
+  if (options.isHdr && options.toneMapping === "sdr") {
+    result = toneMapSdr(result, true);
+  }
+
+  // 6. Encode output transfer
+  result = encodeTransfer(result, options.targetTransfer);
+
+  return result;
+}
+
+// Resolve effective color space from settings and source info
+
+export function resolveEffectiveInputTransform(settings: ColorManagementSettings, sourceInfo: SourceColorInfo): { transfer: TransferFunctionType; primaries: ColorPrimariesType } {
+  const inputTransform = settings.inputTransform;
+  const sourceProfile = settings.inputColorSpace === "auto"
+    ? sourceInfo.detectedProfile
+    : settings.inputColorSpace;
+
+  const transfer = inputTransform === "auto"
+    ? COLORSPACES[sourceProfile]?.transfer ?? "bt1886"
+    : (COLORSPACES[inputTransform as ColorSpace]?.transfer ?? "bt1886");
+
+  const primaries = COLORSPACES[sourceProfile]?.primaries ?? "rec709";
+
+  return { transfer, primaries };
+}
+
+export function resolveEffectiveOutputTransform(settings: ColorManagementSettings): TransferFunctionType {
+  const outputTransform = settings.outputTransform;
+  if (outputTransform === "none") return "bt1886";
+  return COLORSPACES[outputTransform as ColorSpace]?.transfer ?? "bt1886";
 }
