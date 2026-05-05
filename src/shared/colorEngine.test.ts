@@ -58,6 +58,9 @@ describe("color engine", () => {
     expect(generateColorFragmentShader(99)).toContain("uniform int uEnabled[3]");
     expect(generateColorFragmentShader(1)).toContain("uniform int uQualifierEnabled[1]");
     expect(generateColorFragmentShader(1)).toContain("float nodeMask(vec3 color, int index, vec2 coord)");
+    expect(generateColorFragmentShader(1)).toContain("uniform vec2 uCurvePoints[64]");
+    expect(generateColorFragmentShader(1)).toContain("vec3 applyCurves(vec3 color, int nodeIndex)");
+    expect(generateColorFragmentShader(1)).toContain("corrected0 = applyCurves(corrected0, 0)");
   });
 
   it("returns a full mask when the qualifier is disabled", () => {

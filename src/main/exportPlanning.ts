@@ -136,12 +136,6 @@ function applyResizePolicy(
   const sourceAspect = sourceWidth / sourceHeight;
 
   if (policy === "fit") {
-    const fitsInTarget = sourceAspect <= targetAspect
-      ? targetAspect > sourceAspect
-      : sourceAspect < targetAspect;
-    if (fitsInTarget) {
-      return { width: targetWidth, height: targetHeight };
-    }
     if (sourceAspect > targetAspect) {
       return { width: targetWidth, height: Math.round(targetWidth / sourceAspect) };
     }

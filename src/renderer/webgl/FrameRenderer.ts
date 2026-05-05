@@ -1,6 +1,7 @@
 import type { DecodedFrame } from "../../shared/ipc";
-import type { ColorNode, PrimaryCorrection } from "../../shared/colorEngine";
+import type { ColorNode, CurveChannel, PrimaryCorrection } from "../../shared/colorEngine";
 import {
+  MAX_CURVE_POINTS,
   createColorNode,
   generateColorFragmentShader,
   normalizeNodeGraph,
@@ -37,6 +38,9 @@ interface ShaderUniforms {
   saturation: WebGLUniformLocation;
   temperature: WebGLUniformLocation;
   tint: WebGLUniformLocation;
+  curveEnabled: WebGLUniformLocation;
+  curvePointCount: WebGLUniformLocation;
+  curvePoints: WebGLUniformLocation;
   matteNodeIndex: WebGLUniformLocation;
   qualifierEnabled: WebGLUniformLocation;
   hueCenter: WebGLUniformLocation;
@@ -62,6 +66,8 @@ interface ShaderUniforms {
   rectangleSoftness: WebGLUniformLocation;
   rectangleInvert: WebGLUniformLocation;
 }
+
+const shaderCurveChannels: readonly Extract<CurveChannel, "master" | "red" | "green" | "blue">[] = ["master", "red", "green", "blue"];
 
 export class FrameRenderer {
   private readonly canvas: HTMLCanvasElement;
@@ -296,6 +302,9 @@ export class FrameRenderer {
     const saturation = flattenScalar(resolvedNodes.map((node) => node.primaries.saturation));
     const temperature = flattenScalar(resolvedNodes.map((node) => node.primaries.temperature));
     const tint = flattenScalar(resolvedNodes.map((node) => node.primaries.tint));
+    const curveEnabled = flattenCurveEnabled(resolvedNodes);
+    const curvePointCount = flattenCurvePointCount(resolvedNodes);
+    const curvePoints = flattenCurvePoints(resolvedNodes);
     const qualifierEnabled = new Int32Array(resolvedNodes.map((node) => (node.qualifier.enabled ? 1 : 0)));
     const qualifierInvert = new Int32Array(resolvedNodes.map((node) => (node.qualifier.invert ? 1 : 0)));
     const ellipseEnabled = new Int32Array(resolvedNodes.map((node) => (node.windows.ellipse.enabled ? 1 : 0)));
@@ -314,6 +323,9 @@ export class FrameRenderer {
     gl.uniform1fv(this.uniforms.saturation, saturation);
     gl.uniform1fv(this.uniforms.temperature, temperature);
     gl.uniform1fv(this.uniforms.tint, tint);
+    gl.uniform1iv(this.uniforms.curveEnabled, curveEnabled);
+    gl.uniform1iv(this.uniforms.curvePointCount, curvePointCount);
+    gl.uniform2fv(this.uniforms.curvePoints, curvePoints);
     gl.uniform1iv(this.uniforms.qualifierEnabled, qualifierEnabled);
     gl.uniform1fv(this.uniforms.hueCenter, flattenScalar(resolvedNodes.map((node) => node.qualifier.hueCenter)));
     gl.uniform1fv(this.uniforms.hueWidth, flattenScalar(resolvedNodes.map((node) => node.qualifier.hueWidth)));
@@ -419,6 +431,9 @@ function getShaderUniforms(gl: WebGL2RenderingContext, program: WebGLProgram): S
     saturation: mustGetUniformLocation(gl, program, "uSaturation[0]"),
     temperature: mustGetUniformLocation(gl, program, "uTemperature[0]"),
     tint: mustGetUniformLocation(gl, program, "uTint[0]"),
+    curveEnabled: mustGetUniformLocation(gl, program, "uCurveEnabled[0]"),
+    curvePointCount: mustGetUniformLocation(gl, program, "uCurvePointCount[0]"),
+    curvePoints: mustGetUniformLocation(gl, program, "uCurvePoints[0]"),
     matteNodeIndex: mustGetUniformLocation(gl, program, "uMatteNodeIndex"),
     qualifierEnabled: mustGetUniformLocation(gl, program, "uQualifierEnabled[0]"),
     hueCenter: mustGetUniformLocation(gl, program, "uHueCenter[0]"),
@@ -451,6 +466,34 @@ function flattenRgb(values: PrimaryCorrection[keyof Pick<PrimaryCorrection, "lif
 }
 
 function flattenScalar(values: number[]): Float32Array {
+  return new Float32Array(values);
+}
+
+function flattenCurveEnabled(nodes: readonly ColorNode[]): Int32Array {
+  return new Int32Array(nodes.flatMap((node) =>
+    shaderCurveChannels.map((channel) => (node.curves[channel].enabled ? 1 : 0))
+  ));
+}
+
+function flattenCurvePointCount(nodes: readonly ColorNode[]): Int32Array {
+  return new Int32Array(nodes.flatMap((node) =>
+    shaderCurveChannels.map((channel) => Math.min(node.curves[channel].points.length, MAX_CURVE_POINTS))
+  ));
+}
+
+function flattenCurvePoints(nodes: readonly ColorNode[]): Float32Array {
+  const values: number[] = [];
+  for (const node of nodes) {
+    for (const channel of shaderCurveChannels) {
+      const points = node.curves[channel].points.slice(0, MAX_CURVE_POINTS);
+      const fallback = points.at(-1) ?? { x: 1, y: 1 };
+      for (let index = 0; index < MAX_CURVE_POINTS; index += 1) {
+        const point = points[index] ?? fallback;
+        values.push(point.x, point.y);
+      }
+    }
+  }
+
   return new Float32Array(values);
 }
 

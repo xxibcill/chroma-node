@@ -453,7 +453,8 @@ async function processFrames(
 }
 
 async function mergeAudioPassthrough(ffmpegPath: string, snapshot: ExportJobSnapshot): Promise<void> {
-  const tempWithAudioPath = `${snapshot.tempOutputPath}.audio-temp`;
+  const outputExt = path.extname(snapshot.outputPath) || path.extname(snapshot.tempOutputPath);
+  const tempWithAudioPath = `${snapshot.tempOutputPath}.audio-temp${outputExt}`;
   const audioStreamIndex = snapshot.media.audioStreamIndex ?? snapshot.media.videoStreamIndex + 1;
 
   const args = [
@@ -466,7 +467,7 @@ async function mergeAudioPassthrough(ffmpegPath: string, snapshot: ExportJobSnap
     "-map",
     "0:v",
     "-map",
-    `1:a:${audioStreamIndex}`,
+    `1:${audioStreamIndex}`,
     "-c:v",
     "copy",
     "-c:a",

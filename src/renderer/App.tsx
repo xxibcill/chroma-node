@@ -823,7 +823,7 @@ export function App() {
     }));
     setRelinkState({ isRelinking: false });
     void extractPreviewFrame(relinkResult.media, currentFrame);
-  }, [api, commitProject, project.playback.currentFrame, relinkState.originalPath, extractPreviewFrame]);
+  }, [commitProject, project.playback.currentFrame, relinkState.originalPath, extractPreviewFrame]);
 
   const cancelRelink = useCallback(() => {
     setRelinkState({ isRelinking: false });
@@ -1325,7 +1325,7 @@ export function App() {
       tracking: { targetShape: activeNode.tracking.targetShape, keyframes: [], state: "empty" }
     };
     commitProject((current) => ({ ...current, nodes: [...current.nodes, newNode] }));
-  }, [activeNode, galleryStills.length, project.nodes.length, commitProject]);
+  }, [activeNode, galleryStills, project.nodes.length, commitProject]);
 
   const setTrackingTarget = useCallback((targetShape: PowerWindowShape) => {
     if (trackingOperation) {

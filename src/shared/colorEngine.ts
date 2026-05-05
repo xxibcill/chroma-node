@@ -1,4 +1,5 @@
 export const MAX_SERIAL_NODES = 3;
+export const MAX_CURVE_POINTS = 16;
 
 export interface RgbVector {
   r: number;
@@ -545,7 +546,7 @@ export function sanitizeCurve(input: Partial<CurveData> | undefined): CurveData 
   }
 
   const points = Array.isArray(input.points) && input.points.length >= 2
-    ? input.points.map(sanitizeCurvePoint).sort((a, b) => a.x - b.x)
+    ? input.points.map(sanitizeCurvePoint).sort((a, b) => a.x - b.x).slice(0, MAX_CURVE_POINTS)
     : fallback.points;
 
   return {
@@ -1039,6 +1040,7 @@ export function parseCubeLut(content: string): LutData | null {
 
 export function generateColorFragmentShader(nodeCount: number): string {
   const count = Math.max(1, Math.min(MAX_SERIAL_NODES, Math.floor(nodeCount)));
+  const curveCount = count * 4;
   const nodeLines = Array.from({ length: count }, (_, index) => {
     return `  float nodeMask${index} = nodeMask(graded, ${index}, vTexCoord);
   if (uMatteNodeIndex == ${index}) {
@@ -1046,6 +1048,7 @@ export function generateColorFragmentShader(nodeCount: number): string {
   }
   if (uEnabled[${index}] == 1) {
     vec3 corrected${index} = applyPrimary(graded, ${index});
+    corrected${index} = applyCurves(corrected${index}, ${index});
     graded = mix(graded, corrected${index}, nodeMask${index});
   }`;
   }).join("\n");
@@ -1069,6 +1072,9 @@ uniform float uPivot[${count}];
 uniform float uSaturation[${count}];
 uniform float uTemperature[${count}];
 uniform float uTint[${count}];
+uniform int uCurveEnabled[${curveCount}];
+uniform int uCurvePointCount[${curveCount}];
+uniform vec2 uCurvePoints[${curveCount * MAX_CURVE_POINTS}];
 uniform int uMatteNodeIndex;
 uniform int uQualifierEnabled[${count}];
 uniform float uHueCenter[${count}];
@@ -1110,6 +1116,79 @@ vec3 applyPrimary(vec3 color, int index) {
   float luma = dot(c, vec3(${REC709_LUMA.r.toFixed(4)}, ${REC709_LUMA.g.toFixed(4)}, ${REC709_LUMA.b.toFixed(4)}));
   c = mix(vec3(luma), c, uSaturation[index]);
   c *= whiteBalanceScale(uTemperature[index], uTint[index]);
+  return clamp(c, vec3(0.0), vec3(1.0));
+}
+
+int curveIndex(int nodeIndex, int channelIndex) {
+  return nodeIndex * 4 + channelIndex;
+}
+
+float interpolateCurve(int index, float x) {
+  int pointCount = uCurvePointCount[index];
+  if (pointCount < 2) {
+    return x;
+  }
+
+  int offset = index * ${MAX_CURVE_POINTS};
+  vec2 firstPoint = uCurvePoints[offset];
+  if (x <= firstPoint.x) {
+    return firstPoint.y;
+  }
+
+  vec2 lastPoint = uCurvePoints[offset + pointCount - 1];
+  if (x >= lastPoint.x) {
+    return lastPoint.y;
+  }
+
+  for (int i = 0; i < ${MAX_CURVE_POINTS - 1}; i += 1) {
+    if (i >= pointCount - 1) {
+      break;
+    }
+
+    vec2 leftPoint = uCurvePoints[offset + i];
+    vec2 rightPoint = uCurvePoints[offset + i + 1];
+    if (x >= leftPoint.x && x <= rightPoint.x) {
+      float denominator = rightPoint.x - leftPoint.x;
+      float t = denominator == 0.0 ? 0.0 : clamp((x - leftPoint.x) / denominator, 0.0, 1.0);
+      return mix(leftPoint.y, rightPoint.y, t);
+    }
+  }
+
+  return x;
+}
+
+vec3 applyCurves(vec3 color, int nodeIndex) {
+  int masterIndex = curveIndex(nodeIndex, 0);
+  int redIndex = curveIndex(nodeIndex, 1);
+  int greenIndex = curveIndex(nodeIndex, 2);
+  int blueIndex = curveIndex(nodeIndex, 3);
+  bool masterEnabled = uCurveEnabled[masterIndex] == 1 && uCurvePointCount[masterIndex] >= 2;
+  bool redEnabled = uCurveEnabled[redIndex] == 1 && uCurvePointCount[redIndex] >= 2;
+  bool greenEnabled = uCurveEnabled[greenIndex] == 1 && uCurvePointCount[greenIndex] >= 2;
+  bool blueEnabled = uCurveEnabled[blueIndex] == 1 && uCurvePointCount[blueIndex] >= 2;
+
+  if (!masterEnabled && !redEnabled && !greenEnabled && !blueEnabled) {
+    return color;
+  }
+
+  vec3 c = color;
+  if (redEnabled) {
+    c.r = interpolateCurve(redIndex, c.r);
+  }
+  if (greenEnabled) {
+    c.g = interpolateCurve(greenIndex, c.g);
+  }
+  if (blueEnabled) {
+    c.b = interpolateCurve(blueIndex, c.b);
+  }
+
+  if (masterEnabled) {
+    float avgLuminance = (c.r + c.g + c.b) / 3.0;
+    float divisor = avgLuminance == 0.0 ? 1.0 : avgLuminance;
+    float masterFactor = interpolateCurve(masterIndex, avgLuminance) / divisor;
+    c *= masterFactor;
+  }
+
   return clamp(c, vec3(0.0), vec3(1.0));
 }
 

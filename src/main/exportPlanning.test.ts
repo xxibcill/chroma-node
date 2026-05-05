@@ -261,6 +261,16 @@ describe("exportPlanning", () => {
       expect(result.height).toBe(608);
     });
 
+    it("applies fit policy to 1080p preset from portrait source", () => {
+      const project = createMockProject({
+        media: createMockMedia({ displayWidth: 1080, displayHeight: 1920 }),
+        exportSettings: { codec: "h264", quality: "standard", sizeMode: "preset", preset: "1080p", resizePolicy: "fit" }
+      });
+      const result = computeExportGeometry(project.exportSettings, project.media!);
+      expect(result.width).toBe(608);
+      expect(result.height).toBe(1080);
+    });
+
     it("applies crop policy to portrait-9:16 preset from landscape source", () => {
       const project = createMockProject({
         media: createMockMedia({ displayWidth: 1920, displayHeight: 1080 }),

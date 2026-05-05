@@ -86,7 +86,7 @@ export function useExport({
     }
 
     setExportOperation(result.value);
-  }, [api, exportOperation]);
+  }, [exportOperation]);
 
   return {
     exportOperation,
