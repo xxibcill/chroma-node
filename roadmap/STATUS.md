@@ -47,6 +47,19 @@
 | Advanced color management overload | Separate beginner defaults from expert controls through profile presets, validation, and progressive disclosure. | Planned for Phases 14 and 16 |
 | Scope suite performance and clutter | Centralize scope sampling/cache policy and expose scopes through workspace presets instead of one crowded panel. | Planned for Phase 15 |
 
+## CI Policy
+
+CI runs on `main` and all `upgrade/phase-*` branches.
+
+| Job | Required | Trigger |
+| --- | --- | --- |
+| `verify` | Yes | All pushes |
+| `e2e-smoke` | No (optional) | Runs after `verify` passes |
+
+Required checks for phase/task completion: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`.
+
+Optional checks (log in verification log when run): `npm run test:e2e`, `npm run test:phaseXX`.
+
 ## Verification Log
 
 | Date | Phase/Task | Verification | Result |

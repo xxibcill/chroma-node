@@ -23,6 +23,7 @@ This roadmap breaks the DaVinci Resolve-inspired Color page learning app into im
 | [Phase 14 - Ultimate Color Management Expansion](phase-14-ultimate-color-management-expansion.md) | Not started | Expand color management into camera log libraries, ACES/OCIO-style workflows, HDR, display simulation, technical LUTs, and delivery conformance. |
 | [Phase 15 - Professional Scopes and Monitoring Suite](phase-15-professional-scopes-and-monitoring-suite.md) | Not started | Add a comprehensive color monitoring suite with waveform, parade, vectorscope, histogram, CIE, gamut, false-color, clipping, and HDR scopes. |
 | [Phase 16 - Color Page Usability and Workflow Upgrade](phase-16-color-page-usability-and-workflow-upgrade.md) | Not started | Refine the Color page into a compact, viewer-first workstation with better panels, controls, navigation, warnings, and validation. |
+| [Phase 17 - Architecture and Quality Foundation](phase-17-architecture-and-quality-foundation.md) | Not started | Deepen core architecture, centralize geometry and export boundaries, repair e2e verification, and align CI with active roadmap work. |
 
 ## Status Values
 
@@ -38,3 +39,28 @@ This roadmap breaks the DaVinci Resolve-inspired Color page learning app into im
 - Update `STATUS.md` at least once per work session.
 - Update task files as implementation progresses.
 - Keep phase files focused on product outcomes and task files focused on engineering execution.
+
+## Phase Completion Policy
+
+Before a phase or task can be marked **Done**, all of the following required checks must pass:
+
+| Check | Command | Notes |
+| --- | --- | --- |
+| Lint | `npm run lint` | No ESLint errors or warnings. |
+| Typecheck | `npm run typecheck` | TypeScript compiles without errors. |
+| Unit tests | `npm test` | All Vitest tests pass. |
+| Build | `npm run build` | Production build succeeds. |
+
+The following checks are **optional** depending on phase scope. When applicable, they should be logged in `STATUS.md`:
+
+| Check | Command | Notes |
+| --- | --- | --- |
+| E2E smoke | `npm run test:e2e` | Playwright browser tests; requires Playwright setup to be reliable (Phase 17 target). |
+| Phase-specific export/media tests | `npm run test:phaseXX` | Phase-specific smoke scripts when they exist. |
+| Package/packaging | `npm run package` | Only when packaging is in scope. |
+
+### CI Policy
+
+CI runs on `main` and all `upgrade/phase-*` branches. The `verify` job (lint, typecheck, unit tests, build) is required for all pushes. The `e2e-smoke` job runs after `verify` passes; if `verify` fails, e2e is skipped.
+
+Use `upgrade/phase-*` pattern so any active development branch is covered automatically.
