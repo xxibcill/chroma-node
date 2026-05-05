@@ -21,7 +21,7 @@ import type {
 import { IpcChannel } from "../shared/ipc.js";
 import { appError, fail, isAppError, ok } from "./errors.js";
 import { cancelExport, exportProject, outputPathExists } from "./exportProject.js";
-import { exportSequence } from "./exportSequence.js";
+import { exportSequence, toSequenceOutputPattern } from "./exportSequence.js";
 import { exportStill } from "./exportStill.js";
 import { exportSynthetic } from "./exportSynthetic.js";
 import { extractFrame } from "./frame.js";
@@ -259,9 +259,9 @@ async function prepareSequenceRequest(request: ExportSequenceRequest): Promise<E
 
   let overwriteConfirmed = request.overwriteConfirmed ?? false;
   if (!overwriteConfirmed) {
-    // Check if any files would be overwritten - for sequence, we check a sample path
-    const samplePath = outputPath.replace("%04d", "0001");
-    if (await outputPathExists(samplePath)) {
+    const samplePath = toSequenceOutputPattern(outputPath).replace("%04d", String(request.startFrame ?? 0).padStart(4, "0"));
+    const sampleExists = await outputPathExists(samplePath);
+    if (sampleExists) {
       const confirmation = await dialog.showMessageBox({
         type: "warning",
         title: "Replace existing sequence?",
@@ -273,10 +273,9 @@ async function prepareSequenceRequest(request: ExportSequenceRequest): Promise<E
       });
       overwriteConfirmed = confirmation.response === 0;
     }
-  }
-
-  if (!overwriteConfirmed) {
-    throw appError("EXPORT_OUTPUT_EXISTS", "Export sequence output already exists and needs confirmation.", outputPath);
+    if (sampleExists && !overwriteConfirmed) {
+      throw appError("EXPORT_OUTPUT_EXISTS", "Export sequence output already exists and needs confirmation.", outputPath);
+    }
   }
 
   return { ...request, outputPath, overwriteConfirmed };
