@@ -267,8 +267,7 @@ describe("exportPlanning", () => {
         exportSettings: { codec: "h264", quality: "standard", sizeMode: "preset", preset: "portrait-9:16", resizePolicy: "crop" }
       });
       const result = computeExportGeometry(project.exportSettings, project.media!);
-      // crop: landscape source fills portrait target (extra width is cropped off)
-      expect(result.width).toBe(3413);
+      expect(result.width).toBe(1080);
       expect(result.height).toBe(1920);
     });
 

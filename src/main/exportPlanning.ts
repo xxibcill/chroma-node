@@ -149,12 +149,7 @@ function applyResizePolicy(
   }
 
   if (policy === "crop") {
-    if (sourceAspect > targetAspect) {
-      const scaledWidth = Math.round(targetHeight * sourceAspect);
-      return { width: scaledWidth, height: targetHeight };
-    }
-    const scaledHeight = Math.round(targetWidth / sourceAspect);
-    return { width: targetWidth, height: scaledHeight };
+    return { width: targetWidth, height: targetHeight };
   }
 
   return { width: targetWidth, height: targetHeight };
