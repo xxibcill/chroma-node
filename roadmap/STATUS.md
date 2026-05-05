@@ -4,7 +4,7 @@
 
 - Phase: Phase 08 - Media Geometry and Vertical Video
 - Status: In progress (2 partial tasks: P8-T3 viewer/overlay layout, P8-T4 tracking geometry parity)
-- Last updated: 2026-05-04
+- Last updated: 2026-05-05
 
 ## Active Decisions
 
@@ -14,7 +14,7 @@
 | UI stack | React + TypeScript | Keeps the learning app inspectable and accessible to a solo developer. |
 | Render path | WebGL2 | Required for shader-based node evaluation. |
 | Media backend | Local or bundled FFmpeg | Phase 00 verifies local discovery; packaging can add bundled binaries later. |
-| Color space | Rec.709 SDR today; Phase 13 planned | Current implementation remains Rec.709 SDR. Phase 13 scopes Apple Log and profile-aware color management. |
+| Color space | Rec.709 SDR today; Phases 13-14 planned | Current implementation remains Rec.709 SDR. Phases 13-14 scope Apple Log, profile-aware color management, HDR, ACES/OCIO-style workflows, and delivery conformance. |
 | Geometry model | Add coded vs display raster fields | Vertical and rotated media should stop relying on ad hoc width/height swaps. |
 | Audio handling | Source audio passthrough with stream copy | Audio re-encoding out of scope for Phase 11. |
 | Additional codecs | HEVC, ProRes, VP9 supported | Encoder availability validated at export start. |
@@ -30,6 +30,9 @@
 | Should export presets default to fit, crop, or pad when aspect ratios differ? | TBD | Open |
 | How far should the first high-resolution pass go beyond 1080p before proxy preview becomes mandatory? | TBD | Open |
 | Which Apple Log reference transform should verify Phase 13? | TBD | Open |
+| Which camera log profiles should be supported first after Apple Log? | TBD | Open |
+| Which scope families should be visible in the default workspace versus advanced presets? | TBD | Open |
+| Which Color page layout presets should ship by default? | TBD | Open |
 
 ## Cross-Phase Risks
 
@@ -41,6 +44,8 @@
 | WebGL readback export speed | Add proxy preview and profile larger rasters before removing practical limits. | Open |
 | Tracking instability | Use confidence thresholds and stop instead of writing bad keyframes. | Open |
 | Color-managed preview/export mismatch | Keep input, working, output, tone, and gamut transforms in shared CPU/GLSL-parity code. | Planned for Phase 13 |
+| Advanced color management overload | Separate beginner defaults from expert controls through profile presets, validation, and progressive disclosure. | Planned for Phases 14 and 16 |
+| Scope suite performance and clutter | Centralize scope sampling/cache policy and expose scopes through workspace presets instead of one crowded panel. | Planned for Phase 15 |
 
 ## Verification Log
 
@@ -65,3 +70,4 @@
 | 2026-04-26 | Phase 10 | All 5 tasks COMPLETE. Proxy policy, frame cache, scope perf, profiling, docs. | Passed |
 | 2026-04-26 | Phase 09 | All 5 tasks COMPLETE. Export schema/presets, fit/crop/pad pipeline, UI, validation, tests. | Passed |
 | 2026-05-04 | Roadmap extension | Added Phase 13 and task breakdown for Apple Log and advanced color management. | Planned |
+| 2026-05-05 | Roadmap extension | Added Phases 14-16 for ultimate color management, professional scopes, and Color page usability. | Planned |

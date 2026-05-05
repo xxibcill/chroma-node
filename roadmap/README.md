@@ -20,6 +20,9 @@ This roadmap breaks the DaVinci Resolve-inspired Color page learning app into im
 | [Phase 11 - Format and Delivery Expansion](phase-11-format-and-delivery-expansion.md) | Done | Expand delivery options with audio, more outputs, and broader publishing workflows. |
 | [Phase 12 - Resolve-Style Color Page Upgrade](phase-12-resolve-style-color-page-upgrade.md) | Not started | Upgrade the Color page with Resolve-inspired layout, controls, curves, secondary tools, scopes, gallery, LUTs, and parity hardening. |
 | [Phase 13 - Apple Log and Advanced Color Management](phase-13-apple-log-and-advanced-color-management.md) | Not started | Support Apple Log and broader profile-aware color management with parity-safe preview, export, metadata, and validation. |
+| [Phase 14 - Ultimate Color Management Expansion](phase-14-ultimate-color-management-expansion.md) | Not started | Expand color management into camera log libraries, ACES/OCIO-style workflows, HDR, display simulation, technical LUTs, and delivery conformance. |
+| [Phase 15 - Professional Scopes and Monitoring Suite](phase-15-professional-scopes-and-monitoring-suite.md) | Not started | Add a comprehensive color monitoring suite with waveform, parade, vectorscope, histogram, CIE, gamut, false-color, clipping, and HDR scopes. |
+| [Phase 16 - Color Page Usability and Workflow Upgrade](phase-16-color-page-usability-and-workflow-upgrade.md) | Not started | Refine the Color page into a compact, viewer-first workstation with better panels, controls, navigation, warnings, and validation. |
 
 ## Status Values
 
