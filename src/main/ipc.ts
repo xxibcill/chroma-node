@@ -10,9 +10,19 @@ import type {
   ExportSyntheticRequest,
   FfmpegDiagnostics,
   FrameExtractRequest,
+  InstalledPack,
   LearningProgressPayload,
+  LibraryAddRequest,
+  LibraryDeleteRequest,
+  LibraryDuplicateRequest,
+  LibraryItem,
+  LibraryToggleFavoriteRequest,
+  LibraryUpdateRequest,
   MediaRef,
   OpenProjectResult,
+  PackExportRequest,
+  PackImportRequest,
+  PackImportResult,
   ProbeMediaRequest,
   SaveProjectRequest,
   SaveProjectResult,
@@ -30,6 +40,21 @@ import { extractFrame } from "./frame.js";
 import { getFfmpegDiagnostics } from "./ffmpeg.js";
 import { probeMedia } from "./mediaProbe.js";
 import { relinkMedia } from "./mediaRelink.js";
+import {
+  addLibraryItem,
+  deleteLibraryItem,
+  duplicateLibraryItem,
+  getLibraryItem,
+  loadLibrary,
+  toggleLibraryItemFavorite,
+  updateLibraryItem
+} from "./libraryStore.js";
+import {
+  exportPack,
+  getInstalledPacks,
+  importPack,
+  uninstallPack
+} from "./packStore.js";
 import { loadProgress, resetProgress, saveProgress } from "./progressStore.js";
 import { openProjectFile, saveProjectFile } from "./projectFile.js";
 
@@ -194,6 +219,149 @@ export function registerIpcHandlers(): void {
       try {
         const preparedRequest = await prepareSequenceRequest(request);
         return ok(await exportSequence(preparedRequest));
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(IpcChannel.LibraryLoad, async (): Promise<VersionedResponse<LibraryItem[]>> => {
+    try {
+      return ok(await loadLibrary());
+    } catch (error) {
+      return fail(toAppError(error));
+    }
+  });
+
+  ipcMain.handle(
+    IpcChannel.LibraryAdd,
+    async (_event, request: LibraryAddRequest): Promise<VersionedResponse<LibraryItem>> => {
+      try {
+        const result = await addLibraryItem(request);
+        if (!result.ok) {
+          return fail(appError("UNKNOWN", result.errors.map(e => e.message).join("; ")));
+        }
+        return ok(result.item);
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.LibraryUpdate,
+    async (_event, request: LibraryUpdateRequest): Promise<VersionedResponse<LibraryItem>> => {
+      try {
+        const result = await updateLibraryItem(request.id, request.updates);
+        if (!result.ok) {
+          return fail(appError("UNKNOWN", result.errors.map(e => e.message).join("; ")));
+        }
+        return ok(result.item);
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.LibraryDelete,
+    async (_event, request: LibraryDeleteRequest): Promise<VersionedResponse<void>> => {
+      try {
+        await deleteLibraryItem(request.id);
+        return ok(undefined);
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.LibraryGet,
+    async (_event, request: { id: string }): Promise<VersionedResponse<LibraryItem | undefined>> => {
+      try {
+        return ok(await getLibraryItem(request.id));
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.LibraryDuplicate,
+    async (_event, request: LibraryDuplicateRequest): Promise<VersionedResponse<LibraryItem | undefined>> => {
+      try {
+        return ok(await duplicateLibraryItem(request.id, request.newName));
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.LibraryToggleFavorite,
+    async (_event, request: LibraryToggleFavoriteRequest): Promise<VersionedResponse<LibraryItem>> => {
+      try {
+        const result = await toggleLibraryItemFavorite(request.id);
+        if (!result) {
+          return fail(appError("UNKNOWN", `Library item ${request.id} not found`));
+        }
+        return ok(result);
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.PackExport,
+    async (_event, request: PackExportRequest): Promise<VersionedResponse<{ path: string }>> => {
+      try {
+        const items = await loadLibrary();
+        const itemsToExport = items.filter(item => request.itemIds.includes(item.id));
+        if (itemsToExport.length === 0) {
+          return fail(appError("UNKNOWN", "No valid items found to export"));
+        }
+        const result = await exportPack(itemsToExport, request.name);
+        if ("error" in result) {
+          return fail(appError("UNKNOWN", result.error));
+        }
+        return ok(result);
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.PackImport,
+    async (_event, request: PackImportRequest): Promise<VersionedResponse<PackImportResult>> => {
+      try {
+        const options = {
+          duplicateStrategy: request?.duplicateStrategy ?? "skip",
+          trustOverride: request?.trustOverride
+        };
+        const result = await importPack(options);
+        return ok(result);
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(IpcChannel.PackList, async (): Promise<VersionedResponse<InstalledPack[]>> => {
+    try {
+      return ok(await getInstalledPacks());
+    } catch (error) {
+      return fail(toAppError(error));
+    }
+  });
+
+  ipcMain.handle(
+    IpcChannel.PackUninstall,
+    async (_event, request: { path: string }): Promise<VersionedResponse<void>> => {
+      try {
+        await uninstallPack(request.path);
+        return ok(undefined);
       } catch (error) {
         return fail(toAppError(error));
       }

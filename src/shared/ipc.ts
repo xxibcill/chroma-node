@@ -2,6 +2,10 @@ export const IPC_CONTRACT_VERSION = 1 as const;
 
 export type IpcContractVersion = typeof IPC_CONTRACT_VERSION;
 
+import type { LibraryItem, LibraryItemType } from "./library.js";
+import type { PackDuplicateStrategy, PackImportResult } from "./pack.js";
+export type { LibraryItem, LibraryItemType, PackImportResult, PackDuplicateStrategy };
+
 export const IpcChannel = {
   SelectMedia: "dialog:select-media",
   SaveProject: "project:save",
@@ -18,7 +22,19 @@ export const IpcChannel = {
   CancelExport: "export:cancel",
   ExportProgress: "export:progress",
   ExportStill: "export:still",
-  ExportSequence: "export:sequence"
+  ExportSequence: "export:sequence",
+  LibraryLoad: "library:load",
+  LibrarySave: "library:save",
+  LibraryAdd: "library:add",
+  LibraryUpdate: "library:update",
+  LibraryDelete: "library:delete",
+  LibraryGet: "library:get",
+  LibraryDuplicate: "library:duplicate",
+  LibraryToggleFavorite: "library:toggle-favorite",
+  PackExport: "pack:export",
+  PackImport: "pack:import",
+  PackList: "pack:list",
+  PackUninstall: "pack:uninstall"
 } as const;
 
 export type IpcChannelName = (typeof IpcChannel)[keyof typeof IpcChannel];
@@ -248,6 +264,100 @@ export type RelinkMediaResult =
   | { ok: true; media: MediaRef }
   | { ok: false; error: AppError };
 
+export interface LibraryAddRequest {
+  type: LibraryItemType;
+  name: string;
+  description?: string;
+  author?: string;
+  authorId?: string;
+  tags: string[];
+  thumbnail?: { dataUrl?: string; width?: number; height?: number };
+  favorite?: boolean;
+  compatibility: {
+    appVersionMin?: string;
+    appVersionMax?: string;
+    schemaVersionMin?: string;
+    schemaVersionMax?: string;
+    colorProfiles: string[];
+    lutFormats?: string[];
+  };
+  trust?: "first-party" | "verified-creator" | "local";
+  source?: { projectId?: string; projectName?: string; nodeIndex?: number; frameTime?: number };
+  data: {
+    kind: "look" | "recipe";
+    nodes: unknown[];
+    compatibleProfiles: string[];
+    tags?: string[];
+  } | {
+    kind: "lut";
+    lutType?: "creative" | "technical";
+    cubeContent?: string;
+    size?: number;
+    fileName?: string;
+  } | {
+    kind: "still";
+    imageData: string;
+    width: number;
+    height: number;
+    sourceMediaId?: string;
+  } | {
+    kind: "sample-project";
+    projectJson: string;
+    mediaPaths: string[];
+  } | {
+    kind: "lesson-pack";
+    lessonIds: string[];
+    customLessons?: unknown[];
+  };
+}
+
+export interface LibraryUpdateRequest {
+  id: string;
+  updates: Partial<Omit<LibraryItem, "id" | "createdAt" | "updatedAt">>;
+}
+
+export interface LibraryDeleteRequest {
+  id: string;
+}
+
+export interface LibraryDuplicateRequest {
+  id: string;
+  newName?: string;
+}
+
+export interface LibraryToggleFavoriteRequest {
+  id: string;
+}
+
+export interface PackExportRequest {
+  itemIds: string[];
+  name: string;
+  description?: string;
+  author?: string;
+  options?: {
+    includeThumbnails?: boolean;
+    includeSourceReferences?: boolean;
+  };
+}
+
+export interface PackImportRequest {
+  duplicateStrategy?: "skip" | "replace" | "rename";
+  trustOverride?: "first-party" | "verified-creator" | "local";
+}
+
+export interface InstalledPack {
+  name: string;
+  path: string;
+  manifest: {
+    packId: string;
+    name: string;
+    version: string;
+    author?: string;
+    trust: "first-party" | "verified-creator" | "local";
+    items: { id: string; type: string; name: string }[];
+  };
+}
+
 export interface ChromaNodeApi {
   selectMedia(): Promise<VersionedResponse<SelectMediaResponse>>;
   saveProject(request: SaveProjectRequest): Promise<VersionedResponse<SaveProjectResult>>;
@@ -265,6 +375,17 @@ export interface ChromaNodeApi {
   startExport(request: ExportProjectRequest): Promise<VersionedResponse<ExportJobResult>>;
   cancelExport(request: CancelExportRequest): Promise<VersionedResponse<ExportProgress>>;
   onExportProgress(listener: (progress: ExportProgress) => void): () => void;
+  loadLibrary(): Promise<VersionedResponse<LibraryItem[]>>;
+  addLibraryItem(request: LibraryAddRequest): Promise<VersionedResponse<LibraryItem>>;
+  updateLibraryItem(request: LibraryUpdateRequest): Promise<VersionedResponse<LibraryItem>>;
+  deleteLibraryItem(request: LibraryDeleteRequest): Promise<VersionedResponse<void>>;
+  getLibraryItem(request: { id: string }): Promise<VersionedResponse<LibraryItem | undefined>>;
+  duplicateLibraryItem(request: LibraryDuplicateRequest): Promise<VersionedResponse<LibraryItem | undefined>>;
+  toggleLibraryItemFavorite(request: LibraryToggleFavoriteRequest): Promise<VersionedResponse<LibraryItem>>;
+  exportPack(request: PackExportRequest): Promise<VersionedResponse<{ path: string }>>;
+  importPack(request?: PackImportRequest): Promise<VersionedResponse<import("./pack.js").PackImportResult>>;
+  getInstalledPacks(): Promise<VersionedResponse<InstalledPack[]>>;
+  uninstallPack(request: { path: string }): Promise<VersionedResponse<void>>;
 }
 
 declare global {

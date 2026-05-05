@@ -8,11 +8,21 @@ import type {
   ExportStillRequest,
   ExportSyntheticRequest,
   FrameExtractRequest,
+  InstalledPack,
   LearningProgressPayload,
+  LibraryAddRequest,
+  LibraryDeleteRequest,
+  LibraryDuplicateRequest,
+  LibraryItem,
+  LibraryToggleFavoriteRequest,
+  LibraryUpdateRequest,
+  PackExportRequest,
+  PackImportRequest,
   ProbeMediaRequest,
   RelinkMediaRequest,
   SaveProjectRequest
 } from "../shared/ipc.js";
+import type { PackImportResult } from "../shared/pack.js";
 
 const IpcChannel = {
   SelectMedia: "dialog:select-media",
@@ -30,7 +40,19 @@ const IpcChannel = {
   ExportSequence: "export:sequence",
   StartExport: "export:start",
   CancelExport: "export:cancel",
-  ExportProgress: "export:progress"
+  ExportProgress: "export:progress",
+  LibraryLoad: "library:load",
+  LibrarySave: "library:save",
+  LibraryAdd: "library:add",
+  LibraryUpdate: "library:update",
+  LibraryDelete: "library:delete",
+  LibraryGet: "library:get",
+  LibraryDuplicate: "library:duplicate",
+  LibraryToggleFavorite: "library:toggle-favorite",
+  PackExport: "pack:export",
+  PackImport: "pack:import",
+  PackList: "pack:list",
+  PackUninstall: "pack:uninstall"
 } as const;
 
 const api: ChromaNodeApi = {
@@ -53,7 +75,18 @@ const api: ChromaNodeApi = {
     const handler = (_event: Electron.IpcRendererEvent, progress: ExportProgress) => listener(progress);
     ipcRenderer.on(IpcChannel.ExportProgress, handler);
     return () => ipcRenderer.off(IpcChannel.ExportProgress, handler);
-  }
+  },
+  loadLibrary: () => ipcRenderer.invoke(IpcChannel.LibraryLoad),
+  addLibraryItem: (request: LibraryAddRequest) => ipcRenderer.invoke(IpcChannel.LibraryAdd, request),
+  updateLibraryItem: (request: LibraryUpdateRequest) => ipcRenderer.invoke(IpcChannel.LibraryUpdate, request),
+  deleteLibraryItem: (request: LibraryDeleteRequest) => ipcRenderer.invoke(IpcChannel.LibraryDelete, request),
+  getLibraryItem: (request: { id: string }) => ipcRenderer.invoke(IpcChannel.LibraryGet, request),
+  duplicateLibraryItem: (request: LibraryDuplicateRequest) => ipcRenderer.invoke(IpcChannel.LibraryDuplicate, request),
+  toggleLibraryItemFavorite: (request: LibraryToggleFavoriteRequest) => ipcRenderer.invoke(IpcChannel.LibraryToggleFavorite, request),
+  exportPack: (request: PackExportRequest) => ipcRenderer.invoke(IpcChannel.PackExport, request),
+  importPack: (request?: PackImportRequest) => ipcRenderer.invoke(IpcChannel.PackImport, request),
+  getInstalledPacks: () => ipcRenderer.invoke(IpcChannel.PackList),
+  uninstallPack: (request: { path: string }) => ipcRenderer.invoke(IpcChannel.PackUninstall, request)
 };
 
 contextBridge.exposeInMainWorld("chromaNode", api);
