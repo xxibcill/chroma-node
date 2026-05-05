@@ -2,6 +2,85 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2026-05-05] - Phase 20: Look Library and Marketplace Foundation Complete
+
+- P20-T1: Local look library with LibraryItem schema (look/lut/recipe/still/sample-project/lesson-pack types), LibraryBrowser component
+- P20-T2: Look pack import/export with .chromapack format, createPackFromItems(), parsePackContent(), exportPack() IPC
+- P20-T3: Library browser with search, type filter, favorites, sort by name/created/updated, compatibility checking
+- P20-T4: Asset compatibility and migration via checkLibraryItemCompatibility() with version/profile validation and quarantine
+- P20-T5: Marketplace package foundation with trust levels (first-party/verified-creator/local), pack manifest validation
+
+Local look library operational with pack import/export and marketplace foundation.
+
+## [2026-05-05] - Phase 19: AI Assisted Grading and Shot Matching Complete
+
+- P19-T1: Auto balance and diagnostics via analyzeFrame() measuring exposure zones, RGB levels, saturation, white balance, contrast; generateAutoBalanceSuggestions() produces primary correction nodes
+- P19-T2: Reference shot matching via matchToReference() analyzing source/reference frames, computing luma/chroma/contrast deltas
+- P19-T3: Natural language grade intent parsing 12 intent actions (warmer, cooler, softer, contrasty, moodier, brighter, darker, less/more saturated, cleaner-whites, punchier, desaturated-look)
+- P19-T4: Explainable AI review with metadata reason, confidence, risk, and changedControls[] with before/after values
+- P19-T5: AI safety, privacy, cost controls via AiSettings (offline/cloud-assisted mode, request budget, telemetry consent, timeout, degraded fallback)
+
+AI-assisted grading with auto-balance, reference matching, natural language intent, and safety controls.
+
+## [2026-05-05] - Phase 18: Guided Learning and Creator Workflows Complete
+
+- P18-T1: First run sample projects with sample-project LibraryItem type and SampleProjectData schema
+- P18-T2: Interactive color lessons with 9 COLOR_LESSONS (exposure, white-balance, contrast, saturation, skin-tone, secondaries, tracking, scopes, export-check), step-by-step instruction and milestone detection
+- P18-T3: Grade recipes and node starters with 7 GRADE_RECIPES (neutral-balance, clean-contrast, warm-portrait, cool-night, phone-log-normalization, sky-isolation, face-window) each with nodes, compatible profiles, and tags
+- P18-T4: Practice targets and scope goals with 3 DEFAULT_PRACTICE_TARGETS (legal-delivery, skin-tone-standard, balanced-exposure) and scorePracticeTarget() evaluation
+- P18-T5: Learning progress and review with LearningProgress interface tracking lessonsCompleted, lessonAttempts, practiceAttempts, savedLooks
+
+Guided learning system operational with lessons, recipes, practice targets, and progress tracking.
+
+## [2026-05-05] - Phase 17: Architecture and Quality Foundation Complete
+
+- P17-T1: Deepened color rendering module via colorPipeline.ts public contract (ResolvedPipeline, PipelineInput) separating preview and export from color management decisions
+- P17-T2: Split renderer workflows with GPU shaders for preview, CPU evaluation for export, both through shared color pipeline
+- P17-T3: Export service boundary with exportProject receiving pipeline settings via resolvePipeline() without owning color management decisions
+- P17-T4: Centralized media geometry via mediaGeometry.ts (getDisplaySize, normalizeRotation, isRotated, MAX_DISPLAY_WIDTH=3840, MAX_DISPLAY_HEIGHT=2160) used by preview, export, and tracking
+- P17-T5: Repaired e2e verification with updated Playwright config and stable selectors
+- P17-T6: Updated CI roadmap coverage with verify job on all branches, e2e-smoke as optional job
+
+Architecture clarified with explicit color pipeline contract and centralized media geometry.
+
+## [2026-05-05] - Phase 16: Color Page Usability and Workflow Upgrade Complete
+
+- P16-T1: Workstation shell with dominant viewer, compact panels, internal scrolling fitting typical laptop viewport
+- P16-T2: Workspace presets and adaptive panels for Color, Review, Export modes
+- P16-T3: Grading control ergonomics via LearningPanel (recipe application, lesson interaction) and LibraryBrowser (look browsing)
+- P16-T4: Node grade and shot navigation with node strip (Copy/Paste/Duplicate/Bypass/Delete)
+- P16-T5: Command shortcuts and undo workflows via keyboard event handlers and project state management
+- P16-T6: Status warnings and empty states for proxy mode, playback, export progress, no-media scenarios
+- P16-T7: Accessibility and usability validation via Playwright e2e regression checks
+
+Color page workstation layout optimized for laptop viewport with adaptive panels and keyboard shortcuts.
+
+## [2026-05-05] - Phase 15: Professional Scopes and Monitoring Suite Complete
+
+- P15-T1: Scope engine and measurement model via getScopeMaxWidth(), getPreviewPolicy(), scope capability metadata in previewPolicy.ts
+- P15-T2: Waveform family with waveform.ts rendering, createWaveformImageData(), YUV and RGB modes
+- P15-T3: Parade family via parade.ts with createRgbParadeImageData() and RGB parade rendering
+- P15-T4: Vectorscope and chroma tools with vectorscope.ts rendering, skin tone line overlay, I/Q axes
+- P15-T5: Histogram levels and distribution scopes via histogram.ts (createRgbHistogram, createRgbParadeHistogram, createLuminanceHistogram)
+- P15-T6: CIE gamut and 3D color visualization with isOutOfGamut() and gamut boundary checking
+- P15-T7: Exposure false color and clipping monitors via falseColor.ts and analyzeFrame() clipping detection
+- P15-T8: Scope layouts performance and validation via adaptive scope sampling by playback state and resolution
+
+Professional scope suite complete with waveform, parade, vectorscope, histogram, CIE gamut, and false color.
+
+## [2026-05-05] - Phase 14: Ultimate Color Management Expansion Complete
+
+- P14-T1: Profile registry and transform graph with COLORSPACES registry (20+ color spaces) in colorEngine.ts and ResolvedPipeline/PipelineInput in colorPipeline.ts
+- P14-T2: Camera log input transform library with decodeTransfer()/encodeTransfer() for appleLog2, sLog3, LogC, HLG, pq variants
+- P14-T3: ACES and OCIO compatible workflows via buildPrimariesConversionMatrixByType() and ACES path in evaluateNodeGraph()
+- P14-T4: HDR wide gamut and display rendering via toneMapSdr(), compressGamut(), ToneMappingMode, GamutMappingMode, sourceIsHdr flag
+- P14-T5: Technical LUT management via parseCubeLut() with size validation and trilinear application
+- P14-T6: Display simulation and calibration awareness via displaySimulation in generateColorFragmentShader() and toDisplayPrimaries matrix
+- P14-T7: Delivery conformance and metadata validation via validateExportGeometry() and project schema ExportSettings
+- P14-T8: Color science reference validation via colorEngine.parity.test.ts verifying CPU/GPU parity for primaries conversion, tone mapping, gamut mapping
+
+Professional color management system with camera log profiles, ACES workflows, HDR handling, and delivery validation.
+
 ## [2026-05-05] - Phase 10: High-Resolution Preview and Performance Complete
 
 - P10-T1: Preview proxy policy with 1920px threshold, 1280px proxy max, user-facing PROXY indicator

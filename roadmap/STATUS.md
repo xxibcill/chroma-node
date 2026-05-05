@@ -2,9 +2,18 @@
 
 ## Current Phase
 
-- Phase: Phase 18 - Guided Learning and Creator Workflows
-- Status: Complete (5 tasks implemented: P18-T1 First Run Sample Projects, P18-T2 Interactive Color Lessons, P18-T3 Grade Recipes and Node Starters, P18-T4 Practice Targets and Scope Goals, P18-T5 Learning Progress and Review)
+- Phase: Phase 21 - Professional Review and Collaboration
+- Status: Not Started (5 tasks)
 - Last updated: 2026-05-05
+
+## Completed Phases
+
+| Phase | Status | Verified |
+|-------|--------|----------|
+| 00–11 | Complete | 2026-04-26 |
+| 12 | 8/10 complete (P12-T2 wheel UI deferred, P12-T6 handle editing deferred) | 2026-05-04 |
+| 13 | Not Started (0/7) | 2026-05-04 |
+| 14–20 | Complete | 2026-05-05 |
 
 ## Active Decisions
 
@@ -93,3 +102,12 @@ Optional checks (log in verification log when run): `npm run test:e2e`, `npm run
 | 2026-05-04 | Roadmap extension | Added Phase 13 and task breakdown for Apple Log and advanced color management. | Planned |
 | 2026-05-05 | Roadmap extension | Added Phases 14-16 for ultimate color management, professional scopes, and Color page usability. | Planned |
 | 2026-05-05 | Roadmap extension | Added Phases 18-22 for guided learning, AI assistance, look library and marketplace foundation, professional review, and commercial readiness. | Planned |
+| 2026-05-05 | Phase 14 | All 8 tasks COMPLETE. Profile registry, camera log transforms, ACES workflows, HDR/gamut, LUT management, display simulation, delivery conformance, color science tests. | Passed |
+| 2026-05-05 | Phase 15 | All 8 tasks COMPLETE. Scope engine, waveform, parade, vectorscope, histogram, CIE gamut, false color, performance validation. | Passed |
+| 2026-05-05 | Phase 16 | All 7 tasks COMPLETE. Workstation shell, workspace presets, grading ergonomics, node navigation, shortcuts, status warnings, accessibility validation. | Passed |
+| 2026-05-05 | Phase 17 | All 6 tasks COMPLETE. Color pipeline contract, split renderer workflows, export boundary, centralized media geometry, e2e repair, CI coverage. | Passed |
+| 2026-05-05 | Phase 18 | All 5 tasks COMPLETE. Sample projects, interactive lessons, grade recipes, practice targets, learning progress. | Passed |
+| 2026-05-05 | Phase 19 | All 5 tasks COMPLETE. Auto balance, reference matching, natural language intent, explainable AI, safety controls. | Passed |
+| 2026-05-05 | Phase 20 | All 5 tasks COMPLETE. Local look library, pack import/export, browser search, compatibility checking, marketplace foundation. | Passed |
+| 2026-05-05 | Phase 21 | All 5 tasks NOT_FOUND. Grade versions, annotations, review package, feedback import, project handoff not implemented. | Not Started |
+| 2026-05-05 | Phase 22 | All 5 tasks NOT_FOUND. Licensing, packaging, telemetry, support, launch docs not implemented. | Not Started |
