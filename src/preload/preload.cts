@@ -4,6 +4,8 @@ import type {
   ChromaNodeApi,
   ExportProgress,
   ExportProjectRequest,
+  ExportSequenceRequest,
+  ExportStillRequest,
   ExportSyntheticRequest,
   FrameExtractRequest,
   ProbeMediaRequest,
@@ -20,6 +22,8 @@ const IpcChannel = {
   ProbeMedia: "media:probe",
   ExtractFrame: "frame:extract",
   ExportSynthetic: "export:synthetic",
+  ExportStill: "export:still",
+  ExportSequence: "export:sequence",
   StartExport: "export:start",
   CancelExport: "export:cancel",
   ExportProgress: "export:progress"
@@ -34,6 +38,8 @@ const api: ChromaNodeApi = {
   probeMedia: (request: ProbeMediaRequest) => ipcRenderer.invoke(IpcChannel.ProbeMedia, request),
   extractFrame: (request: FrameExtractRequest) => ipcRenderer.invoke(IpcChannel.ExtractFrame, request),
   exportSynthetic: (request?: ExportSyntheticRequest) => ipcRenderer.invoke(IpcChannel.ExportSynthetic, request),
+  exportStill: (request: ExportStillRequest) => ipcRenderer.invoke(IpcChannel.ExportStill, request),
+  exportSequence: (request: ExportSequenceRequest) => ipcRenderer.invoke(IpcChannel.ExportSequence, request),
   startExport: (request: ExportProjectRequest) => ipcRenderer.invoke(IpcChannel.StartExport, request),
   cancelExport: (request: CancelExportRequest) => ipcRenderer.invoke(IpcChannel.CancelExport, request),
   onExportProgress: (listener: (progress: ExportProgress) => void) => {

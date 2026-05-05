@@ -1,10 +1,19 @@
 import type { ExportQuality, MediaRef } from "./ipc.js";
+import { isRotated } from "./mediaGeometry.js";
 import {
   MAX_SERIAL_NODES,
   createColorNode,
   normalizeNodeGraph,
   sanitizeColorNode,
-  type ColorNode
+  createDefaultColorManagementSettings,
+  COLORSPACES,
+  PRIMARIES,
+  TRANSFER_FUNCTIONS,
+  type ColorNode,
+  type ColorManagementSettings,
+  type ColorMetadata,
+  type ColorMatrixType,
+  type ColorRangeType
 } from "./colorEngine.js";
 
 export const PROJECT_SCHEMA_VERSION = "1.0.0";
@@ -17,10 +26,24 @@ export interface ProjectPlaybackState {
   splitPosition: number;
 }
 
+export type ExportSizeMode = "source" | "preset" | "custom";
+export type ExportPreset = "1080p" | "720p" | "480p" | "square-1:1" | "square-4:5" | "portrait-9:16" | "portrait-4:5" | "portrait-3:4";
+export type ExportResizePolicy = "fit" | "crop" | "pad";
+export type ExportCodec = "h264" | "hevc" | "prores" | "vp9";
+export type AudioBehavior = "passthrough" | "strip";
+export type WorkflowPreset = "review" | "social" | "archive";
+
 export interface ProjectExportSettings {
-  codec: "h264";
+  codec: ExportCodec;
   outputPath?: string;
   quality: ExportQuality;
+  sizeMode: ExportSizeMode;
+  preset?: ExportPreset;
+  customWidth?: number;
+  customHeight?: number;
+  resizePolicy: ExportResizePolicy;
+  audioBehavior: AudioBehavior;
+  workflowPreset?: WorkflowPreset;
 }
 
 export interface ChromaProject {
@@ -31,6 +54,7 @@ export interface ChromaProject {
   playback: ProjectPlaybackState;
   nodes: ColorNode[];
   exportSettings: ProjectExportSettings;
+  colorManagementSettings?: ColorManagementSettings;
 }
 
 export interface ProjectValidationIssue {
@@ -59,8 +83,13 @@ export function createDefaultProject(): ChromaProject {
     nodes: [createColorNode(1)],
     exportSettings: {
       codec: "h264",
-      quality: "standard"
-    }
+      quality: "standard",
+      sizeMode: "source",
+      resizePolicy: "fit",
+      audioBehavior: "strip",
+      workflowPreset: undefined
+    },
+    colorManagementSettings: createDefaultColorManagementSettings()
   };
 }
 
@@ -87,6 +116,7 @@ export function validateProject(input: unknown): ProjectValidationResult {
   const exportSettings = readExportSettings(source.exportSettings, warnings);
   const media = readMedia(source.media, errors, warnings);
   const nodes = readNodes(source.nodes, warnings, media?.totalFrames);
+  const colorManagementSettings = readColorManagementSettings(source.colorManagementSettings, warnings);
 
   if (errors.length > 0) {
     return { ok: false, errors };
@@ -102,7 +132,8 @@ export function validateProject(input: unknown): ProjectValidationResult {
       media,
       playback,
       nodes,
-      exportSettings
+      exportSettings,
+      colorManagementSettings
     }
   };
 }
@@ -200,10 +231,66 @@ function readExportSettings(input: unknown, warnings: ProjectValidationIssue[]):
   }
 
   return {
-    codec: "h264",
+    codec: readExportCodec(source.codec, warnings),
     outputPath: typeof source.outputPath === "string" && source.outputPath.trim() ? source.outputPath : undefined,
-    quality: readExportQuality(source.quality, warnings)
+    quality: readExportQuality(source.quality, warnings),
+    sizeMode: readExportSizeMode(source.sizeMode, warnings),
+    preset: readExportPreset(source.preset, warnings),
+    customWidth: readExportCustomDimension(source.customWidth, "customWidth", warnings),
+    customHeight: readExportCustomDimension(source.customHeight, "customHeight", warnings),
+    resizePolicy: readExportResizePolicy(source.resizePolicy, warnings),
+    audioBehavior: readAudioBehavior(source.audioBehavior, warnings),
+    workflowPreset: readWorkflowPreset(source.workflowPreset, warnings)
   };
+}
+
+function readExportSizeMode(input: unknown, warnings: ProjectValidationIssue[]): ExportSizeMode {
+  if (input === "source" || input === "preset" || input === "custom") {
+    return input;
+  }
+
+  if (input !== undefined) {
+    warnings.push(issue("exportSettings.sizeMode", "DEFAULTED", "Invalid export size mode; source size was used.", input));
+  }
+
+  return "source";
+}
+
+function readExportPreset(input: unknown, warnings: ProjectValidationIssue[]): ExportPreset | undefined {
+  const validPresets: ExportPreset[] = ["1080p", "720p", "480p", "square-1:1", "square-4:5", "portrait-9:16", "portrait-4:5", "portrait-3:4"];
+  if (typeof input === "string" && validPresets.includes(input as ExportPreset)) {
+    return input as ExportPreset;
+  }
+
+  if (input !== undefined) {
+    warnings.push(issue("exportSettings.preset", "DEFAULTED", "Invalid export preset; no preset was used.", input));
+  }
+
+  return undefined;
+}
+
+function readExportCustomDimension(input: unknown, path: string, warnings: ProjectValidationIssue[]): number | undefined {
+  if (typeof input === "number" && Number.isFinite(input) && input > 0 && input <= 7680) {
+    return Math.round(input);
+  }
+
+  if (input !== undefined) {
+    warnings.push(issue(`exportSettings.${path}`, "DEFAULTED", `Invalid ${path}; no value was used.`, input));
+  }
+
+  return undefined;
+}
+
+function readExportResizePolicy(input: unknown, warnings: ProjectValidationIssue[]): ExportResizePolicy {
+  if (input === "fit" || input === "crop" || input === "pad") {
+    return input;
+  }
+
+  if (input !== undefined) {
+    warnings.push(issue("exportSettings.resizePolicy", "DEFAULTED", "Invalid export resize policy; fit was used.", input));
+  }
+
+  return "fit";
 }
 
 function readExportQuality(input: unknown, warnings: ProjectValidationIssue[]): ExportQuality {
@@ -216,6 +303,89 @@ function readExportQuality(input: unknown, warnings: ProjectValidationIssue[]): 
   }
 
   return "standard";
+}
+
+function readExportCodec(input: unknown, warnings: ProjectValidationIssue[]): ExportCodec {
+  if (input === "h264" || input === "hevc" || input === "prores" || input === "vp9") {
+    return input;
+  }
+
+  if (input !== undefined) {
+    warnings.push(issue("exportSettings.codec", "DEFAULTED", "Invalid export codec; H.264 was used.", input));
+  }
+
+  return "h264";
+}
+
+function readAudioBehavior(input: unknown, warnings: ProjectValidationIssue[]): AudioBehavior {
+  if (input === "passthrough" || input === "strip") {
+    return input;
+  }
+
+  if (input !== undefined) {
+    warnings.push(issue("exportSettings.audioBehavior", "DEFAULTED", "Invalid audio behavior; audio was stripped.", input));
+  }
+
+  return "strip";
+}
+
+function readWorkflowPreset(input: unknown, warnings: ProjectValidationIssue[]): WorkflowPreset | undefined {
+  if (input === "review" || input === "social" || input === "archive") {
+    return input;
+  }
+
+  if (input !== undefined) {
+    warnings.push(issue("exportSettings.workflowPreset", "DEFAULTED", "Invalid workflow preset; none was used.", input));
+  }
+
+  return undefined;
+}
+
+function readColorManagementSettings(input: unknown, warnings: ProjectValidationIssue[]): ColorManagementSettings | undefined {
+  if (input === undefined) {
+    return undefined;
+  }
+
+  if (!isRecord(input)) {
+    warnings.push(issue("colorManagementSettings", "DEFAULTED", "Color management settings were missing or invalid; defaults were used.", input));
+    return undefined;
+  }
+
+  const validColorSpaces = ["auto", "rec709", "rec2020", "srgb", "p3", "appleLog", "hlg", "pq", "linear"] as const;
+  const validInputTransforms = ["auto", "none", "rec709", "rec2020", "srgb", "p3", "appleLog", "hlg", "pq"] as const;
+  const validOutputTransforms = ["none", "rec709", "rec2020", "srgb", "p3"] as const;
+  const validToneMapping = ["none", "sdr", "hlg", "pq"] as const;
+  const validGamutMapping = ["none", "clip", "compress"] as const;
+
+  const readColorSpace = (field: string, fallback: string): string => {
+    if (validColorSpaces.includes(input[field] as typeof validColorSpaces[number])) {
+      return input[field] as string;
+    }
+    if (input[field] !== undefined) {
+      warnings.push(issue(`colorManagementSettings.${field}`, "DEFAULTED", `Invalid ${field}; default was used.`, input[field]));
+    }
+    return fallback;
+  };
+
+  const readTransform = (field: string, fallback: string, valid: readonly string[]): string => {
+    if (valid.includes(input[field] as string)) {
+      return input[field] as string;
+    }
+    if (input[field] !== undefined) {
+      warnings.push(issue(`colorManagementSettings.${field}`, "DEFAULTED", `Invalid ${field}; default was used.`, input[field]));
+    }
+    return fallback;
+  };
+
+  return {
+    inputColorSpace: readColorSpace("inputColorSpace", "auto") as ColorManagementSettings["inputColorSpace"],
+    outputColorSpace: readColorSpace("outputColorSpace", "rec709") as ColorManagementSettings["outputColorSpace"],
+    workingColorSpace: readColorSpace("workingColorSpace", "rec709") as ColorManagementSettings["workingColorSpace"],
+    inputTransform: readTransform("inputTransform", "auto", validInputTransforms) as ColorManagementSettings["inputTransform"],
+    outputTransform: readTransform("outputTransform", "none", validOutputTransforms) as ColorManagementSettings["outputTransform"],
+    toneMapping: readTransform("toneMapping", "sdr", validToneMapping) as ColorManagementSettings["toneMapping"],
+    gamutMapping: readTransform("gamutMapping", "clip", validGamutMapping) as ColorManagementSettings["gamutMapping"]
+  };
 }
 
 function readMedia(
@@ -237,21 +407,88 @@ function readMedia(
     errors.push(issue("media.sourcePath", "INVALID_TYPE", "Media sourcePath is required when media is present.", input.sourcePath));
   }
 
+  const rawWidth = clampInteger(readNumber(input.width, "media.width", 0, warnings), 0, 7680);
+  const rawHeight = clampInteger(readNumber(input.height, "media.height", 0, warnings), 0, 4320);
+  const rawDisplayWidth = clampInteger(readNumber(input.displayWidth, "media.displayWidth", 0, warnings), 0, 7680);
+  const rawDisplayHeight = clampInteger(readNumber(input.displayHeight, "media.displayHeight", 0, warnings), 0, 4320);
+  const rotation = clampInteger(readNumber(input.rotation, "media.rotation", 0, warnings), -360, 360);
+
+  // Legacy project migration: compute display dimensions from rotation
+  const displayWidth = rawDisplayWidth > 0 ? rawDisplayWidth : isRotated(rotation) ? rawHeight : rawWidth;
+  const displayHeight = rawDisplayHeight > 0 ? rawDisplayHeight : isRotated(rotation) ? rawWidth : rawHeight;
+
   return {
     id: readString(input.id, "media.id", sourcePath || "missing-media", warnings),
     sourcePath,
     fileName: readString(input.fileName, "media.fileName", sourcePath.split(/[\\/]/).pop() || "Unknown", warnings),
     container: readString(input.container, "media.container", "unknown", warnings),
     codec: readString(input.codec, "media.codec", "unknown", warnings),
-    width: clampInteger(readNumber(input.width, "media.width", 0, warnings), 0, 7680),
-    height: clampInteger(readNumber(input.height, "media.height", 0, warnings), 0, 4320),
+    width: rawWidth,
+    height: rawHeight,
+    displayWidth,
+    displayHeight,
     durationSeconds: clampNumber(readNumber(input.durationSeconds, "media.durationSeconds", 0, warnings), 0, Number.MAX_SAFE_INTEGER, "media.durationSeconds", warnings),
     frameRate: clampNumber(readNumber(input.frameRate, "media.frameRate", 24, warnings), 1, 240, "media.frameRate", warnings),
     totalFrames: input.totalFrames === undefined ? undefined : clampInteger(readNumber(input.totalFrames, "media.totalFrames", 0, warnings), 0, Number.MAX_SAFE_INTEGER),
     hasAudio: typeof input.hasAudio === "boolean" ? input.hasAudio : false,
-    rotation: clampInteger(readNumber(input.rotation, "media.rotation", 0, warnings), -360, 360),
-    videoStreamIndex: clampInteger(readNumber(input.videoStreamIndex, "media.videoStreamIndex", 0, warnings), 0, Number.MAX_SAFE_INTEGER)
+    audioStreamIndex: input.audioStreamIndex === undefined ? undefined : clampInteger(readNumber(input.audioStreamIndex, "media.audioStreamIndex", 0, warnings), 0, Number.MAX_SAFE_INTEGER),
+    rotation,
+    videoStreamIndex: clampInteger(readNumber(input.videoStreamIndex, "media.videoStreamIndex", 0, warnings), 0, Number.MAX_SAFE_INTEGER),
+    colorMetadata: readColorMetadata(input.colorMetadata, warnings),
+    detectedColorProfile: readDetectedColorProfile(input.detectedColorProfile, warnings)
   };
+}
+
+function readColorMetadata(input: unknown, warnings: ProjectValidationIssue[]): ColorMetadata | undefined {
+  if (input === undefined) {
+    return undefined;
+  }
+  if (!isRecord(input)) {
+    warnings.push(issue("media.colorMetadata", "DEFAULTED", "Invalid color metadata was removed.", input));
+    return undefined;
+  }
+
+  const primariesType = isRecord(input.primaries) && typeof input.primaries.type === "string" && input.primaries.type in PRIMARIES
+    ? input.primaries.type as keyof typeof PRIMARIES
+    : "rec709";
+  const transferType = isRecord(input.transfer) && typeof input.transfer.type === "string" && input.transfer.type in TRANSFER_FUNCTIONS
+    ? input.transfer.type as keyof typeof TRANSFER_FUNCTIONS
+    : "bt1886";
+  const matrixType = isRecord(input.matrix) && isColorMatrixType(input.matrix.type) ? input.matrix.type : "bt709";
+  const rangeType = isRecord(input.range) && isColorRangeType(input.range.type) ? input.range.type : "limited";
+
+  return {
+    primaries: PRIMARIES[primariesType],
+    transfer: TRANSFER_FUNCTIONS[transferType],
+    matrix: { type: matrixType },
+    range: { type: rangeType },
+    bitDepth: readBitDepth(input.bitDepth),
+    profileLabel: typeof input.profileLabel === "string" && input.profileLabel.trim() ? input.profileLabel.trim().slice(0, 80) : "Unknown"
+  };
+}
+
+function readDetectedColorProfile(input: unknown, warnings: ProjectValidationIssue[]): MediaRef["detectedColorProfile"] | undefined {
+  if (input === undefined) {
+    return undefined;
+  }
+  if (typeof input === "string" && input in COLORSPACES) {
+    return input;
+  }
+
+  warnings.push(issue("media.detectedColorProfile", "DEFAULTED", "Invalid detected color profile was removed.", input));
+  return undefined;
+}
+
+function readBitDepth(input: unknown): 8 | 10 | 12 | 16 {
+  return input === 10 || input === 12 || input === 16 ? input : 8;
+}
+
+function isColorMatrixType(input: unknown): input is ColorMatrixType {
+  return input === "bt601" || input === "bt709" || input === "bt2020nc" || input === "bt2020c" || input === "identity" || input === "unknown";
+}
+
+function isColorRangeType(input: unknown): input is ColorRangeType {
+  return input === "full" || input === "limited";
 }
 
 function collectNodeClampWarnings(
@@ -401,11 +638,52 @@ function issue(
   return { path, code, message, received };
 }
 
-function createProjectId(): string {
+export function createProjectId(): string {
   const cryptoApi = globalThis.crypto;
   if (cryptoApi && "randomUUID" in cryptoApi) {
     return cryptoApi.randomUUID();
   }
 
   return `project-${Date.now().toString(36)}`;
+}
+
+export interface WorkflowPresetDefinition {
+  codec: ExportCodec;
+  quality: ExportQuality;
+  audioBehavior: AudioBehavior;
+  description: string;
+}
+
+export const WORKFLOW_PRESET_DEFINITIONS: Record<WorkflowPreset, WorkflowPresetDefinition> = {
+  review: {
+    codec: "h264",
+    quality: "draft",
+    audioBehavior: "strip",
+    description: "Fast, compressed grade preview"
+  },
+  social: {
+    codec: "h264",
+    quality: "standard",
+    audioBehavior: "passthrough",
+    description: "Ready-to-share with audio retained"
+  },
+  archive: {
+    codec: "prores",
+    quality: "high",
+    audioBehavior: "passthrough",
+    description: "Maximum quality master with audio"
+  }
+};
+
+export function applyWorkflowPreset(
+  current: ProjectExportSettings,
+  preset: WorkflowPreset
+): ProjectExportSettings {
+  const def = WORKFLOW_PRESET_DEFINITIONS[preset];
+  return {
+    ...current,
+    codec: def.codec,
+    quality: def.quality,
+    audioBehavior: def.audioBehavior
+  };
 }

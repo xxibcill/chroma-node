@@ -1,6 +1,18 @@
 import type { DecodedFrame } from "../../shared/ipc";
-import type { ColorNode, PrimaryCorrection } from "../../shared/colorEngine";
+import type {
+  ColorManagementSettings,
+  ColorMetadata,
+  ColorNode,
+  ColorPrimariesType,
+  CurveChannel,
+  PrimaryCorrection,
+  ToneMappingMode,
+  TransferFunctionType
+} from "../../shared/colorEngine";
 import {
+  COLORSPACES,
+  MAX_CURVE_POINTS,
+  buildPrimariesConversionMatrixByType,
   createColorNode,
   generateColorFragmentShader,
   normalizeNodeGraph,
@@ -27,6 +39,12 @@ interface ShaderUniforms {
   scale: WebGLUniformLocation;
   viewerMode: WebGLUniformLocation;
   splitPosition: WebGLUniformLocation;
+  sourceTransfer: WebGLUniformLocation;
+  targetTransfer: WebGLUniformLocation;
+  toneMapping: WebGLUniformLocation;
+  sourceIsHdr: WebGLUniformLocation;
+  applySourceToWorking: WebGLUniformLocation;
+  sourceToWorkingRows: WebGLUniformLocation;
   enabled: WebGLUniformLocation;
   lift: WebGLUniformLocation;
   gamma: WebGLUniformLocation;
@@ -37,6 +55,9 @@ interface ShaderUniforms {
   saturation: WebGLUniformLocation;
   temperature: WebGLUniformLocation;
   tint: WebGLUniformLocation;
+  curveEnabled: WebGLUniformLocation;
+  curvePointCount: WebGLUniformLocation;
+  curvePoints: WebGLUniformLocation;
   matteNodeIndex: WebGLUniformLocation;
   qualifierEnabled: WebGLUniformLocation;
   hueCenter: WebGLUniformLocation;
@@ -63,6 +84,24 @@ interface ShaderUniforms {
   rectangleInvert: WebGLUniformLocation;
 }
 
+const shaderCurveChannels: readonly Extract<CurveChannel, "master" | "red" | "green" | "blue">[] = ["master", "red", "green", "blue"];
+const transferUniformValues: Record<TransferFunctionType, number> = {
+  bt1886: 0,
+  srgb: 1,
+  linear: 2,
+  hlg: 3,
+  pq: 4,
+  appleLog: 5,
+  log25: 0,
+  unknown: 0
+};
+const toneMappingUniformValues: Record<ToneMappingMode, number> = {
+  none: 0,
+  sdr: 1,
+  hlg: 2,
+  pq: 3
+};
+
 export class FrameRenderer {
   private readonly canvas: HTMLCanvasElement;
   private readonly gl: WebGL2RenderingContext;
@@ -78,6 +117,13 @@ export class FrameRenderer {
   private splitPosition = 0.5;
   private matteNodeIndex = -1;
   private currentFrame = 0;
+  private sourceTransfer: TransferFunctionType = "bt1886";
+  private targetTransfer: TransferFunctionType = "bt1886";
+  private toneMapping: ToneMappingMode = "sdr";
+  private sourceIsHdr = false;
+  private sourcePrimaries: ColorPrimariesType = "rec709";
+  private workingPrimaries: ColorPrimariesType = "rec709";
+  private sourceToWorkingRows = identityMatrix3();
   private videoSource: HTMLVideoElement | undefined;
   private isPlaybackActive = false;
   private animationFrameId: number | undefined;
@@ -158,6 +204,22 @@ export class FrameRenderer {
   setViewerMode(mode: ViewerMode, splitPosition: number): void {
     this.viewerMode = mode;
     this.splitPosition = Math.min(1, Math.max(0, splitPosition));
+    this.uploadViewerUniforms();
+    this.render();
+  }
+
+  setColorPipeline(settings: ColorManagementSettings | undefined, metadata: ColorMetadata | undefined): void {
+    this.sourceTransfer = metadata?.transfer.type ?? "bt1886";
+    this.targetTransfer = settings?.outputTransform && settings.outputTransform !== "none"
+      ? (COLORSPACES[settings.outputTransform]?.transfer ?? "bt1886")
+      : "bt1886";
+    this.toneMapping = settings?.toneMapping ?? "sdr";
+    this.sourceIsHdr = metadata?.transfer.type === "hlg" || metadata?.transfer.type === "pq" || metadata?.transfer.type === "appleLog";
+    this.sourcePrimaries = metadata?.primaries.type ?? "rec709";
+    this.workingPrimaries = settings?.workingColorSpace
+      ? (COLORSPACES[settings.workingColorSpace]?.primaries ?? "rec709")
+      : "rec709";
+    this.sourceToWorkingRows = buildPrimariesConversionMatrixByType(this.sourcePrimaries, this.workingPrimaries);
     this.uploadViewerUniforms();
     this.render();
   }
@@ -280,6 +342,12 @@ export class FrameRenderer {
     this.gl.uniform1i(this.uniforms.frame, 0);
     this.gl.uniform1i(this.uniforms.viewerMode, mode);
     this.gl.uniform1f(this.uniforms.splitPosition, this.splitPosition);
+    this.gl.uniform1i(this.uniforms.sourceTransfer, transferUniformValues[this.sourceTransfer]);
+    this.gl.uniform1i(this.uniforms.targetTransfer, transferUniformValues[this.targetTransfer]);
+    this.gl.uniform1i(this.uniforms.toneMapping, toneMappingUniformValues[this.toneMapping]);
+    this.gl.uniform1i(this.uniforms.sourceIsHdr, this.sourceIsHdr ? 1 : 0);
+    this.gl.uniform1i(this.uniforms.applySourceToWorking, this.sourcePrimaries === this.workingPrimaries ? 0 : 1);
+    this.gl.uniform3fv(this.uniforms.sourceToWorkingRows, new Float32Array(this.sourceToWorkingRows));
     this.gl.uniform1i(this.uniforms.matteNodeIndex, this.matteNodeIndex);
   }
 
@@ -296,6 +364,9 @@ export class FrameRenderer {
     const saturation = flattenScalar(resolvedNodes.map((node) => node.primaries.saturation));
     const temperature = flattenScalar(resolvedNodes.map((node) => node.primaries.temperature));
     const tint = flattenScalar(resolvedNodes.map((node) => node.primaries.tint));
+    const curveEnabled = flattenCurveEnabled(resolvedNodes);
+    const curvePointCount = flattenCurvePointCount(resolvedNodes);
+    const curvePoints = flattenCurvePoints(resolvedNodes);
     const qualifierEnabled = new Int32Array(resolvedNodes.map((node) => (node.qualifier.enabled ? 1 : 0)));
     const qualifierInvert = new Int32Array(resolvedNodes.map((node) => (node.qualifier.invert ? 1 : 0)));
     const ellipseEnabled = new Int32Array(resolvedNodes.map((node) => (node.windows.ellipse.enabled ? 1 : 0)));
@@ -314,6 +385,9 @@ export class FrameRenderer {
     gl.uniform1fv(this.uniforms.saturation, saturation);
     gl.uniform1fv(this.uniforms.temperature, temperature);
     gl.uniform1fv(this.uniforms.tint, tint);
+    gl.uniform1iv(this.uniforms.curveEnabled, curveEnabled);
+    gl.uniform1iv(this.uniforms.curvePointCount, curvePointCount);
+    gl.uniform2fv(this.uniforms.curvePoints, curvePoints);
     gl.uniform1iv(this.uniforms.qualifierEnabled, qualifierEnabled);
     gl.uniform1fv(this.uniforms.hueCenter, flattenScalar(resolvedNodes.map((node) => node.qualifier.hueCenter)));
     gl.uniform1fv(this.uniforms.hueWidth, flattenScalar(resolvedNodes.map((node) => node.qualifier.hueWidth)));
@@ -409,6 +483,12 @@ function getShaderUniforms(gl: WebGL2RenderingContext, program: WebGLProgram): S
     scale: mustGetUniformLocation(gl, program, "uScale"),
     viewerMode: mustGetUniformLocation(gl, program, "uViewerMode"),
     splitPosition: mustGetUniformLocation(gl, program, "uSplitPosition"),
+    sourceTransfer: mustGetUniformLocation(gl, program, "uSourceTransfer"),
+    targetTransfer: mustGetUniformLocation(gl, program, "uTargetTransfer"),
+    toneMapping: mustGetUniformLocation(gl, program, "uToneMapping"),
+    sourceIsHdr: mustGetUniformLocation(gl, program, "uSourceIsHdr"),
+    applySourceToWorking: mustGetUniformLocation(gl, program, "uApplySourceToWorking"),
+    sourceToWorkingRows: mustGetUniformLocation(gl, program, "uSourceToWorkingRows[0]"),
     enabled: mustGetUniformLocation(gl, program, "uEnabled[0]"),
     lift: mustGetUniformLocation(gl, program, "uLift[0]"),
     gamma: mustGetUniformLocation(gl, program, "uGamma[0]"),
@@ -419,6 +499,9 @@ function getShaderUniforms(gl: WebGL2RenderingContext, program: WebGLProgram): S
     saturation: mustGetUniformLocation(gl, program, "uSaturation[0]"),
     temperature: mustGetUniformLocation(gl, program, "uTemperature[0]"),
     tint: mustGetUniformLocation(gl, program, "uTint[0]"),
+    curveEnabled: mustGetUniformLocation(gl, program, "uCurveEnabled[0]"),
+    curvePointCount: mustGetUniformLocation(gl, program, "uCurvePointCount[0]"),
+    curvePoints: mustGetUniformLocation(gl, program, "uCurvePoints[0]"),
     matteNodeIndex: mustGetUniformLocation(gl, program, "uMatteNodeIndex"),
     qualifierEnabled: mustGetUniformLocation(gl, program, "uQualifierEnabled[0]"),
     hueCenter: mustGetUniformLocation(gl, program, "uHueCenter[0]"),
@@ -454,6 +537,34 @@ function flattenScalar(values: number[]): Float32Array {
   return new Float32Array(values);
 }
 
+function flattenCurveEnabled(nodes: readonly ColorNode[]): Int32Array {
+  return new Int32Array(nodes.flatMap((node) =>
+    shaderCurveChannels.map((channel) => (node.curves[channel].enabled ? 1 : 0))
+  ));
+}
+
+function flattenCurvePointCount(nodes: readonly ColorNode[]): Int32Array {
+  return new Int32Array(nodes.flatMap((node) =>
+    shaderCurveChannels.map((channel) => Math.min(node.curves[channel].points.length, MAX_CURVE_POINTS))
+  ));
+}
+
+function flattenCurvePoints(nodes: readonly ColorNode[]): Float32Array {
+  const values: number[] = [];
+  for (const node of nodes) {
+    for (const channel of shaderCurveChannels) {
+      const points = node.curves[channel].points.slice(0, MAX_CURVE_POINTS);
+      const fallback = points.at(-1) ?? { x: 1, y: 1 };
+      for (let index = 0; index < MAX_CURVE_POINTS; index += 1) {
+        const point = points[index] ?? fallback;
+        values.push(point.x, point.y);
+      }
+    }
+  }
+
+  return new Float32Array(values);
+}
+
 function flattenWindowPair(
   windows: ColorNode["windows"]["ellipse"][],
   pair: "center" | "size"
@@ -465,6 +576,10 @@ function flattenWindowPair(
 
     return [window.width, window.height];
   }));
+}
+
+function identityMatrix3(): number[] {
+  return [1, 0, 0, 0, 1, 0, 0, 0, 1];
 }
 
 function resizeCanvasToDisplaySize(canvas: HTMLCanvasElement): void {

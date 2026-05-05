@@ -2,9 +2,20 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { MediaRef } from "../shared/ipc.js";
+import {
+  getDisplaySize,
+  MAX_SUPPORTED_DISPLAY_EDGE,
+  MAX_SUPPORTED_DISPLAY_PIXELS,
+  isSupportedDisplayRaster,
+  normalizeRotation
+} from "../shared/mediaGeometry.js";
 import { appError } from "./errors.js";
 import { requireFfprobe } from "./ffmpeg.js";
 import { runProcess } from "./process.js";
+import {
+  type ColorMetadata,
+  detectColorSpaceFromFfprobe
+} from "../shared/colorEngine.js";
 
 interface FfprobeStream {
   index?: number;
@@ -18,6 +29,11 @@ interface FfprobeStream {
   nb_frames?: string;
   tags?: Record<string, string>;
   side_data_list?: Array<{ rotation?: number; displaymatrix?: string }>;
+  color_primaries?: string;
+  transfer_characteristics?: string;
+  matrix_coefficients?: string;
+  pix_fmt?: string;
+  bits_per_raw_sample?: string;
 }
 
 interface FfprobeFormat {
@@ -30,9 +46,7 @@ interface FfprobeJson {
   format?: FfprobeFormat;
 }
 
-const supportedExtensions = new Set([".mp4", ".mov"]);
-const maxDisplayWidth = 1920;
-const maxDisplayHeight = 1080;
+const SUPPORTED_EXTENSIONS = [".mp4", ".mov"] as const;
 
 export async function probeMedia(sourcePath: string): Promise<MediaRef> {
   await assertSupportedPath(sourcePath);
@@ -95,12 +109,12 @@ export function mapProbeOutput(sourcePath: string, parsed: FfprobeJson): MediaRe
   }
 
   const rotation = readRotation(videoStream);
-  const displaySize = getDisplaySize(videoStream.width, videoStream.height, rotation);
-  if (displaySize.width > maxDisplayWidth || displaySize.height > maxDisplayHeight) {
+  const { displayWidth, displayHeight } = getDisplaySize(videoStream.width, videoStream.height, rotation);
+  if (!isSupportedDisplayRaster(displayWidth, displayHeight)) {
     throw appError(
       "UNSUPPORTED_MEDIA",
-      "Media exceeds the Phase 01 limit of 1920 x 1080.",
-      `${displaySize.width} x ${displaySize.height}`
+      `Media exceeds the supported 4K-equivalent display raster (${MAX_SUPPORTED_DISPLAY_EDGE}px max edge, ${MAX_SUPPORTED_DISPLAY_PIXELS} pixels total).`,
+      `${displayWidth} x ${displayHeight}`
     );
   }
 
@@ -110,6 +124,24 @@ export function mapProbeOutput(sourcePath: string, parsed: FfprobeJson): MediaRe
   const nbFrames = toPositiveInteger(videoStream.nb_frames);
   const totalFrames = nbFrames ?? (durationSeconds > 0 && frameRate > 0 ? Math.round(durationSeconds * frameRate) : undefined);
 
+  const audioStream = streams.find((stream) => stream.codec_type === "audio");
+
+  const tags = videoStream.tags ?? {};
+  const colorInfo = detectColorSpaceFromFfprobe({
+    ...tags,
+    color_primaries: videoStream.color_primaries ?? tags.color_primaries ?? tags.color_space ?? "",
+    transfer_characteristics: videoStream.transfer_characteristics ?? tags.transfer_characteristics ?? tags.gamma ?? "",
+    matrix_coefficients: videoStream.matrix_coefficients ?? tags.matrix_coefficients ?? ""
+  }, videoStream.codec_name);
+
+  // Build color metadata from stream properties if available
+  const colorMetadata: ColorMetadata | undefined = colorInfo.metadata ? {
+    ...colorInfo.metadata,
+    bitDepth: readBitDepth(videoStream.bits_per_raw_sample),
+    profileLabel: colorInfo.metadata.profileLabel ||
+      (colorInfo.detectedProfile !== "auto" ? colorInfo.detectedProfile : tags.color_description ?? tags.color_space ?? "Unknown")
+  } : undefined;
+
   return {
     id: crypto.createHash("sha1").update(sourcePath).digest("hex"),
     sourcePath,
@@ -118,18 +150,23 @@ export function mapProbeOutput(sourcePath: string, parsed: FfprobeJson): MediaRe
     codec: videoStream.codec_name,
     width: videoStream.width,
     height: videoStream.height,
+    displayWidth,
+    displayHeight,
     durationSeconds,
     frameRate,
     totalFrames,
-    hasAudio: streams.some((stream) => stream.codec_type === "audio"),
+    hasAudio: audioStream !== undefined,
+    audioStreamIndex: audioStream?.index,
     rotation,
-    videoStreamIndex: videoStream.index ?? 0
+    videoStreamIndex: videoStream.index ?? 0,
+    colorMetadata,
+    detectedColorProfile: colorInfo.detectedProfile
   };
 }
 
 async function assertSupportedPath(sourcePath: string): Promise<void> {
   const extension = path.extname(sourcePath).toLowerCase();
-  if (!supportedExtensions.has(extension)) {
+  if (!SUPPORTED_EXTENSIONS.includes(extension as ".mp4" | ".mov")) {
     throw appError("UNSUPPORTED_MEDIA", "Only MP4 and MOV files are supported in this phase.");
   }
 
@@ -170,11 +207,9 @@ function readRotation(stream: FfprobeStream): number {
   return 0;
 }
 
-function normalizeRotation(rotation: number): number {
-  const normalized = rotation % 360;
-  return normalized < 0 ? normalized + 360 : normalized;
-}
-
-function getDisplaySize(width: number, height: number, rotation: number): { width: number; height: number } {
-  return rotation === 90 || rotation === 270 ? { width: height, height: width } : { width, height };
+function readBitDepth(bitsPerRawSample?: string): 8 | 10 | 12 | 16 {
+  if (!bitsPerRawSample) return 8;
+  const depth = parseInt(bitsPerRawSample, 10);
+  if (depth === 10 || depth === 12 || depth === 16) return depth as 10 | 12 | 16;
+  return 8;
 }

@@ -514,10 +514,6 @@ test.describe("Color Panel - Primary Controls", () => {
     const liftCard = page.locator(".primary-card").first();
     const rSlider = liftCard.locator('.channel-r input[type="range"]');
 
-    // Get initial value
-    const initialValue = await rSlider.inputValue();
-
-    // Change value
     await rSlider.fill("0.1");
     await expect(rSlider).toHaveValue("0.1");
   });

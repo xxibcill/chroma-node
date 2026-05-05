@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useUndoRedo } from "./state/useUndoRedo";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { AppError, DecodedFrame, ExportJobResult, ExportProgress, ExportQuality, FfmpegDiagnostics, MediaRef } from "../shared/ipc";
-import type { ColorNode, HslQualifier, PowerWindow, PowerWindowShape, RgbVector, TrackingKeyframe } from "../shared/colorEngine";
+import type { ColorNode, CurveChannel, CurvePoint, HslQualifier, PowerWindow, PowerWindowShape, RgbVector, TrackingKeyframe } from "../shared/colorEngine";
 import {
   MAX_SERIAL_NODES,
   PRIMARY_RANGES,
@@ -10,13 +10,14 @@ import {
   WINDOW_RANGES,
   clampNumber,
   createColorNode,
+  createDefaultNodeCurves,
   createDefaultPowerWindows,
   createNeutralPrimaries,
   invalidateTrackingForWindow,
   resolveTrackedNode
 } from "../shared/colorEngine";
-import type { ChromaProject, ViewerMode } from "../shared/project";
-import { createDefaultProject, sanitizeProject } from "../shared/project";
+import type { ChromaProject, ExportCodec, ViewerMode, AudioBehavior, WorkflowPreset } from "../shared/project";
+import { applyWorkflowPreset, createDefaultProject, sanitizeProject } from "../shared/project";
 import {
   createGradedScopeFrame,
   createVectorscopeGuides,
@@ -36,6 +37,12 @@ import {
 import type { LumaFrame } from "./tracking/templateTracker";
 import { TrackingFailure, getScaledSearchRadius, matchTranslation } from "./tracking/templateTracker";
 import { FrameRenderer } from "./webgl/FrameRenderer";
+import { ExportSettingsPanel } from "./components/ExportSettingsPanel";
+import {
+  getPreviewPolicy,
+  getTrackingMaxWidth,
+  getScopeMaxWidth
+} from "../shared/previewPolicy";
 
 type Status = "idle" | "busy" | "ready" | "error";
 type RgbPrimaryKey = "lift" | "gamma" | "gain" | "offset";
@@ -86,9 +93,7 @@ const initialProject = createDefaultProject();
 const initialMessage = "Import an MP4 or MOV clip to start playback inspection.";
 const scopeDebounceMs = 50;
 const playbackScopeIntervalMs = 1000 / 15;
-const pausedScopeMaxWidth = 1280;
-const playbackScopeMaxWidth = 640;
-const waveformHistogramSize = { width: 320, height: 160 };
+const waveformHistogramSize = { width: 640, height: 256 };
 const vectorscopeHistogramSize = 220;
 
 export function App() {
@@ -127,7 +132,18 @@ export function App() {
   });
   const [relinkState, setRelinkState] = useState<RelinkState>({ isRelinking: false });
 
+  const [eyedropperMode, setEyedropperModeState] = useState<"none" | "add" | "subtract">("none");
+  const [eyedropperSamples, setEyedropperSamples] = useState<{ h: number; s: number; l: number }[]>([]);
+
+  const [galleryStills, setGalleryStills] = useState<{ id: string; thumbnail: string; timestamp: number; frameIndex: number; gradeName: string }[]>([]);
+  const [compareStillId, setCompareStillId] = useState<string | null>(null);
+
   const mediaUrl = useMemo(() => (state.media ? filePathToUrl(state.media.sourcePath) : undefined), [state.media]);
+  const proxyIndicator = useMemo(() => {
+    if (!state.media) return null;
+    const policy = getPreviewPolicy(state.media.displayWidth, state.media.displayHeight);
+    return policy.isProxy ? `PROXY ${policy.maxWidth}px` : null;
+  }, [state.media]);
   const totalFrames = useMemo(() => getTotalFrameCount(state.media), [state.media]);
   const lastFrameIndex = useMemo(() => getLastFrameIndex(state.media), [state.media]);
   const timecode = useMemo(() => formatTimecode(playback.currentFrame, state.media), [playback.currentFrame, state.media]);
@@ -149,10 +165,10 @@ export function App() {
     () => getContainedRect(
       viewerSize.width,
       viewerSize.height,
-      state.media?.width ?? state.frame?.width ?? 1,
-      state.media?.height ?? state.frame?.height ?? 1
+      state.media?.displayWidth ?? state.frame?.width ?? 1,
+      state.media?.displayHeight ?? state.frame?.height ?? 1
     ),
-    [state.frame?.height, state.frame?.width, state.media?.height, state.media?.width, viewerSize.height, viewerSize.width]
+    [state.frame?.height, state.frame?.width, state.media?.displayHeight, state.media?.displayWidth, viewerSize.height, viewerSize.width]
   );
 
   const diagnosticsLabel = useMemo(() => {
@@ -208,7 +224,9 @@ export function App() {
     }
 
     const requestId = ++scopeRequestId.current;
-    const maxWidth = isPlaybackSample ? playbackScopeMaxWidth : pausedScopeMaxWidth;
+    const displayWidth = state.media?.displayWidth ?? state.frame?.width ?? 0;
+    const displayHeight = state.media?.displayHeight ?? state.frame?.height ?? 0;
+    const maxWidth = getScopeMaxWidth(displayWidth, displayHeight, isPlaybackSample);
 
     try {
       let sourceFrame: RgbaFrame | undefined;
@@ -220,12 +238,12 @@ export function App() {
         }
       }
 
-      if (!sourceFrame && state.frame) {
+      if (!sourceFrame && state.frame && displayWidth > 0 && displayHeight > 0) {
         const image = await loadScopeImage(state.frame.dataUrl);
         if (requestId !== scopeRequestId.current) {
           return;
         }
-        sourceFrame = captureScopeFrame(image, state.frame.width || image.naturalWidth, state.frame.height || image.naturalHeight, maxWidth);
+        sourceFrame = captureScopeFrame(image, displayWidth, displayHeight, maxWidth);
       }
 
       if (!sourceFrame) {
@@ -257,7 +275,7 @@ export function App() {
       clearScopeCanvas(vectorscopeCanvas, "Scope error");
       setScopeInfo(error instanceof Error ? error.message : "Scope analysis failed.");
     }
-  }, [loadScopeImage, project.nodes, state.frame]);
+  }, [loadScopeImage, project.nodes, state.frame, state.media]);
 
   const scheduleScopeAnalysis = useCallback((isPlaybackSample: boolean) => {
     if (scopeDebounceTimer.current !== undefined) {
@@ -283,10 +301,11 @@ export function App() {
 
     const requestId = ++frameRequestId.current;
     setPreviewBusy(true);
+    const policy = getPreviewPolicy(media.displayWidth, media.displayHeight);
     const response = await api.extractFrame({
       sourcePath: media.sourcePath,
       frameIndex: clampFrameIndex(frameIndex, media),
-      maxWidth: 1920
+      maxWidth: policy.maxWidth
     });
 
     if (requestId !== frameRequestId.current) {
@@ -310,7 +329,7 @@ export function App() {
       ...current,
       status: "ready",
       frame: result.value,
-      message: `Decoded frame ${clampFrameIndex(frameIndex, media) + 1}.`,
+      message: `Decoded frame ${clampFrameIndex(frameIndex, media) + 1} (${policy.sourceDescription}).`,
       error: undefined
     }));
   }, []);
@@ -321,10 +340,11 @@ export function App() {
     }
 
     const targetFrame = clampFrameIndex(frameIndex, media);
+    const trackingMaxWidth = getTrackingMaxWidth(media.displayWidth, media.displayHeight);
     const response = await api.extractFrame({
       sourcePath: media.sourcePath,
       frameIndex: targetFrame,
-      maxWidth: 640
+      maxWidth: trackingMaxWidth
     });
     const result = response.result;
 
@@ -623,7 +643,8 @@ export function App() {
       error: undefined
     }));
 
-    const frame = await api.extractFrame({ sourcePath: media.sourcePath, frameIndex: 0, maxWidth: 1920 });
+    const policy = getPreviewPolicy(media.displayWidth, media.displayHeight);
+    const frame = await api.extractFrame({ sourcePath: media.sourcePath, frameIndex: 0, maxWidth: policy.maxWidth });
     const frameResult = frame.result;
     if (!frameResult.ok) {
       setState((current) => ({
@@ -639,7 +660,7 @@ export function App() {
     setState((current) => ({
       ...current,
       status: "ready",
-      message: "Clip imported. Viewer is ready for playback.",
+      message: `Clip imported${policy.isProxy ? " (proxy preview)" : ""}. Viewer is ready for playback.`,
       media,
       frame: frameResult.value,
       error: undefined
@@ -802,7 +823,7 @@ export function App() {
     }));
     setRelinkState({ isRelinking: false });
     void extractPreviewFrame(relinkResult.media, currentFrame);
-  }, [api, commitProject, project.playback.currentFrame, relinkState.originalPath, extractPreviewFrame]);
+  }, [commitProject, project.playback.currentFrame, relinkState.originalPath, extractPreviewFrame]);
 
   const cancelRelink = useCallback(() => {
     setRelinkState({ isRelinking: false });
@@ -1035,6 +1056,277 @@ export function App() {
     }));
   }, [trackingOperation, updateActiveNode]);
 
+  const updateCurvePoint = useCallback((channel: CurveChannel, pointIndex: number, updates: Partial<CurvePoint>) => {
+    updateActiveNode((node) => {
+      const curve = node.curves[channel];
+      if (!curve || pointIndex < 0 || pointIndex >= curve.points.length) {
+        return node;
+      }
+
+      const newPoints = curve.points.map((p, i) =>
+        i === pointIndex ? { x: updates.x ?? p.x, y: updates.y ?? p.y } : p
+      );
+      return {
+        ...node,
+        curves: {
+          ...node.curves,
+          [channel]: { ...curve, points: newPoints }
+        }
+      };
+    });
+  }, [updateActiveNode]);
+
+  const toggleCurveEnabled = useCallback((channel: CurveChannel) => {
+    updateActiveNode((node) => ({
+      ...node,
+      curves: {
+        ...node.curves,
+        [channel]: { ...node.curves[channel], enabled: !node.curves[channel].enabled }
+      }
+    }));
+  }, [updateActiveNode]);
+
+  const addCurvePoint = useCallback((channel: CurveChannel, point: CurvePoint) => {
+    updateActiveNode((node) => {
+      const curve = node.curves[channel];
+      const newPoints = [...curve.points, point].sort((a, b) => a.x - b.x);
+      return {
+        ...node,
+        curves: {
+          ...node.curves,
+          [channel]: { ...curve, points: newPoints }
+        }
+      };
+    });
+  }, [updateActiveNode]);
+
+  const removeCurvePoint = useCallback((channel: CurveChannel, pointIndex: number) => {
+    updateActiveNode((node) => {
+      const curve = node.curves[channel];
+      if (pointIndex <= 0 || pointIndex >= curve.points.length - 1) {
+        return node;
+      }
+      const newPoints = curve.points.filter((_, i) => i !== pointIndex);
+      return {
+        ...node,
+        curves: {
+          ...node.curves,
+          [channel]: { ...curve, points: newPoints }
+        }
+      };
+    });
+  }, [updateActiveNode]);
+
+  const resetCurve = useCallback((channel: CurveChannel) => {
+    const neutral = createDefaultNodeCurves();
+    updateActiveNode((node) => ({
+      ...node,
+      curves: {
+        ...node.curves,
+        [channel]: neutral[channel]
+      }
+    }));
+  }, [updateActiveNode]);
+
+  const setEyedropperMode = useCallback((mode: "none" | "add" | "subtract") => {
+    setEyedropperModeState(mode);
+    if (mode !== "add") {
+      setEyedropperSamples([]);
+    }
+  }, []);
+
+  const sampleFromEyedropper = useCallback((normalizedX: number, normalizedY: number) => {
+    if (eyedropperMode === "none") {
+      return;
+    }
+
+    const video = videoRef.current;
+    if (!video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+      return;
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return;
+    }
+
+    context.drawImage(video, 0, 0);
+    const pixelX = Math.min(video.videoWidth - 1, Math.floor(normalizedX * video.videoWidth));
+    const pixelY = Math.min(video.videoHeight - 1, Math.floor(normalizedY * video.videoHeight));
+    const pixel = context.getImageData(pixelX, pixelY, 1, 1).data;
+
+    const r = pixel[0] / 255;
+    const g = pixel[1] / 255;
+    const b = pixel[2] / 255;
+
+    const hsl = rgbToHslForQualifier(r, g, b);
+    const newSamples = eyedropperMode === "add"
+      ? [...eyedropperSamples, hsl]
+      : eyedropperSamples.slice(0, -1);
+
+    setEyedropperSamples(newSamples);
+
+    if (newSamples.length > 0) {
+      const hues = newSamples.map((s) => s.h);
+      const avgHue = hues.reduce((a, h) => a + h, 0) / hues.length;
+      const minHue = Math.min(...hues);
+      const maxHue = Math.max(...hues);
+      const hueWidth = Math.max(15, (maxHue - minHue + 360) % 360);
+
+      const saturations = newSamples.map((s) => s.s);
+      const avgSat = saturations.reduce((a, s) => a + s, 0) / saturations.length;
+
+      const luminances = newSamples.map((s) => s.l);
+      const avgLum = luminances.reduce((a, l) => a + l, 0) / luminances.length;
+
+      updateActiveNode((node) => ({
+        ...node,
+        qualifier: {
+          ...node.qualifier,
+          hueCenter: avgHue,
+          hueWidth: Math.max(30, hueWidth),
+          saturationMin: Math.max(0, avgSat - 0.15),
+          saturationMax: Math.min(1, avgSat + 0.15),
+          luminanceMin: Math.max(0, avgLum - 0.15),
+          luminanceMax: Math.min(1, avgLum + 0.15)
+        }
+      }));
+    }
+  }, [eyedropperMode, eyedropperSamples, updateActiveNode]);
+
+  const clearEyedropperSamples = useCallback(() => {
+    setEyedropperSamples([]);
+    setEyedropperMode("none");
+  }, [setEyedropperMode]);
+
+  const [copiedNode, setCopiedNode] = useState<ColorNode | null>(null);
+
+  const copyNode = useCallback(() => {
+    if (activeNode) {
+      setCopiedNode({ ...activeNode, id: `node-${Date.now().toString(36)}` });
+    }
+  }, [activeNode]);
+
+  const pasteNode = useCallback(() => {
+    if (!copiedNode || project.nodes.length >= MAX_SERIAL_NODES) {
+      return;
+    }
+
+    const newNode: ColorNode = {
+      ...copiedNode,
+      id: `node-${Date.now().toString(36)}`,
+      name: `${copiedNode.name} (copy)`,
+      tracking: {
+        targetShape: copiedNode.tracking.targetShape,
+        keyframes: [],
+        state: "empty"
+      }
+    };
+
+    commitProject((current) => ({
+      ...current,
+      nodes: [...current.nodes, newNode]
+    }));
+  }, [copiedNode, commitProject, project.nodes.length]);
+
+  const duplicateNode = useCallback(() => {
+    if (!activeNode || project.nodes.length >= MAX_SERIAL_NODES) {
+      return;
+    }
+
+    const newNode: ColorNode = {
+      ...activeNode,
+      id: `node-${Date.now().toString(36)}`,
+      name: `${activeNode.name} (copy)`,
+      tracking: {
+        targetShape: activeNode.tracking.targetShape,
+        keyframes: [],
+        state: "empty"
+      }
+    };
+
+    commitProject((current) => ({
+      ...current,
+      nodes: [...current.nodes, newNode]
+    }));
+    setSelectedNodeId(newNode.id);
+  }, [activeNode, commitProject, project.nodes.length]);
+
+  const toggleNodeBypass = useCallback(() => {
+    if (!activeNode) {
+      return;
+    }
+
+    updateActiveNode((node) => ({
+      ...node,
+      enabled: !node.enabled
+    }));
+  }, [activeNode, updateActiveNode]);
+
+  const captureStill = useCallback(() => {
+    const video = videoRef.current;
+    const canvas = document.createElement("canvas");
+    if (!canvas) {
+      return;
+    }
+
+    let sourceToCapture: CanvasImageSource;
+    if (video && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+      sourceToCapture = video;
+    } else if (state.frame) {
+      const img = new Image();
+      img.src = state.frame.dataUrl;
+      sourceToCapture = img;
+    } else {
+      return;
+    }
+
+    canvas.width = sourceToCapture instanceof HTMLVideoElement ? sourceToCapture.videoWidth : (state.frame?.width ?? 320);
+    canvas.height = sourceToCapture instanceof HTMLVideoElement ? sourceToCapture.videoHeight : (state.frame?.height ?? 180);
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      return;
+    }
+
+    ctx.drawImage(sourceToCapture, 0, 0);
+    const thumbnail = canvas.toDataURL("image/jpeg", 0.6);
+
+    const still = {
+      id: `still-${Date.now().toString(36)}`,
+      thumbnail,
+      timestamp: Date.now(),
+      frameIndex: playback.currentFrame,
+      gradeName: project.name
+    };
+
+    setGalleryStills((prev) => [still, ...prev]);
+  }, [playback.currentFrame, project.name, state.frame]);
+
+  const deleteStill = useCallback((stillId: string) => {
+    setGalleryStills((prev) => prev.filter((s) => s.id !== stillId));
+    if (compareStillId === stillId) {
+      setCompareStillId(null);
+    }
+  }, [compareStillId]);
+
+  const applyStillGrade = useCallback((stillId: string) => {
+    const still = galleryStills.find((s) => s.id === stillId);
+    if (!still || !activeNode || project.nodes.length >= MAX_SERIAL_NODES) {
+      return;
+    }
+    const newNode: ColorNode = {
+      ...activeNode,
+      id: `node-${Date.now().toString(36)}`,
+      name: `Grade ${galleryStills.length}`,
+      tracking: { targetShape: activeNode.tracking.targetShape, keyframes: [], state: "empty" }
+    };
+    commitProject((current) => ({ ...current, nodes: [...current.nodes, newNode] }));
+  }, [activeNode, galleryStills, project.nodes.length, commitProject]);
+
   const setTrackingTarget = useCallback((targetShape: PowerWindowShape) => {
     if (trackingOperation) {
       return;
@@ -1167,6 +1459,10 @@ export function App() {
   useEffect(() => {
     rendererRef.current?.setNodeGraph(project.nodes);
   }, [project.nodes]);
+
+  useEffect(() => {
+    rendererRef.current?.setColorPipeline(project.colorManagementSettings, state.media?.colorMetadata);
+  }, [project.colorManagementSettings, state.media?.colorMetadata]);
 
   useEffect(() => {
     rendererRef.current?.setMatteNode(showMatte ? selectedNodeId : undefined);
@@ -1327,6 +1623,101 @@ export function App() {
                   <option value="high">High</option>
                 </select>
               </label>
+              <label className="field-label">
+                <span>Codec</span>
+                <select
+                  value={project.exportSettings.codec}
+                  onChange={(event) => {
+                    const codec = event.currentTarget.value as ExportCodec;
+                    commitProject((current) => ({
+                      ...current,
+                      exportSettings: {
+                        ...current.exportSettings,
+                        codec
+                      }
+                    }));
+                  }}
+                  disabled={isExporting}
+                >
+                  <option value="h264">H.264</option>
+                  <option value="hevc">HEVC</option>
+                  <option value="prores">ProRes</option>
+                  <option value="vp9">VP9</option>
+                </select>
+              </label>
+              {state.media?.hasAudio && (
+                <label className="field-label">
+                  <span>Audio</span>
+                  <select
+                    value={project.exportSettings.audioBehavior}
+                    onChange={(event) => {
+                      const audioBehavior = event.currentTarget.value as AudioBehavior;
+                      commitProject((current) => ({
+                        ...current,
+                        exportSettings: {
+                          ...current.exportSettings,
+                          audioBehavior
+                        }
+                      }));
+                    }}
+                    disabled={isExporting}
+                  >
+                    <option value="strip">Strip</option>
+                    <option value="passthrough">Passthrough</option>
+                  </select>
+                </label>
+              )}
+              <label className="field-label">
+                <span>Workflow</span>
+                <select
+                  value={project.exportSettings.workflowPreset ?? ""}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value as WorkflowPreset | "";
+                    if (!value) {
+                      // User cleared the preset - no change to settings
+                      return;
+                    }
+                    commitProject((current) => ({
+                      ...current,
+                      exportSettings: applyWorkflowPreset(current.exportSettings, value)
+                    }));
+                  }}
+                  disabled={isExporting}
+                >
+                  <option value="">Manual</option>
+                  <option value="review">Review (Draft H.264)</option>
+                  <option value="social">Social (Standard + Audio)</option>
+                  <option value="archive">Archive (ProRes Master)</option>
+                </select>
+              </label>
+              <ExportSettingsPanel
+                sizeMode={project.exportSettings.sizeMode}
+                preset={project.exportSettings.preset}
+                customWidth={project.exportSettings.customWidth}
+                customHeight={project.exportSettings.customHeight}
+                resizePolicy={project.exportSettings.resizePolicy}
+                media={state.media}
+                onSizeModeChange={(sizeMode) => commitProject((current) => ({
+                  ...current,
+                  exportSettings: { ...current.exportSettings, sizeMode }
+                }))}
+                onPresetChange={(preset) => commitProject((current) => ({
+                  ...current,
+                  exportSettings: { ...current.exportSettings, preset }
+                }))}
+                onCustomWidthChange={(customWidth) => commitProject((current) => ({
+                  ...current,
+                  exportSettings: { ...current.exportSettings, customWidth }
+                }))}
+                onCustomHeightChange={(customHeight) => commitProject((current) => ({
+                  ...current,
+                  exportSettings: { ...current.exportSettings, customHeight }
+                }))}
+                onResizePolicyChange={(resizePolicy) => commitProject((current) => ({
+                  ...current,
+                  exportSettings: { ...current.exportSettings, resizePolicy }
+                }))}
+              />
               {exportOperation && exportOperation.state !== "completed" ? (
                 <ExportProgressPanel progress={exportOperation} onCancel={cancelProjectExport} />
               ) : state.exportResult ? (
@@ -1376,7 +1767,13 @@ export function App() {
                 />
               ) : null}
 
-              <canvas ref={canvasRef} className="viewer-canvas" aria-label="Video viewer" />
+              <canvas ref={canvasRef} className="viewer-canvas" aria-label="Video viewer" onClick={(e) => {
+                if (eyedropperMode === "none") return;
+                const rect = e.currentTarget.getBoundingClientRect();
+                const x = (e.clientX - rect.left) / rect.width;
+                const y = (e.clientY - rect.top) / rect.height;
+                sampleFromEyedropper(x, y);
+              }} />
               {state.media ? (
                 <WindowOverlay
                   activeNode={resolvedActiveNode}
@@ -1398,7 +1795,7 @@ export function App() {
                 <div className="empty-state">
                   <p className="eyebrow">Viewer</p>
                   <h2>Import a supported clip</h2>
-                  <p>Load one MP4 or MOV up to 1920 x 1080, then inspect playback with frame stepping, scrubbing, and before-after modes.</p>
+                  <p>Load one MP4 or MOV, then inspect playback with frame stepping, scrubbing, and before-after modes. Portrait, square, and rotated media are supported.</p>
                   <button className="primary-action" type="button" onClick={importMedia} disabled={state.status === "busy"}>
                     Import Clip
                   </button>
@@ -1527,6 +1924,11 @@ export function App() {
               >
                 {diagnosticsLabel}
               </span>
+              {proxyIndicator && (
+                <span className="status-pill status-busy" title="Preview is using a reduced resolution for interactivity">
+                  {proxyIndicator}
+                </span>
+              )}
             </div>
             <div className="action-row">
               <button type="button" onClick={() => { const prev = undo(); if (prev) { setProject(prev); setSelectedNodeId(prev.nodes[0]?.id ?? selectedNodeId); } }} disabled={!canUndo}>
@@ -1586,6 +1988,26 @@ export function App() {
             onSetTrackingTarget={setTrackingTarget}
             showMatte={showMatte}
             onShowMatteChange={setShowMatte}
+            onUpdateCurvePoint={updateCurvePoint}
+            onToggleCurveEnabled={toggleCurveEnabled}
+            onAddCurvePoint={addCurvePoint}
+            onRemoveCurvePoint={removeCurvePoint}
+            onResetCurve={resetCurve}
+            onCopyNode={copyNode}
+            onPasteNode={pasteNode}
+            onDuplicateNode={duplicateNode}
+            onToggleNodeBypass={toggleNodeBypass}
+            onSetEyedropperMode={setEyedropperMode}
+            eyedropperMode={eyedropperMode}
+            eyedropperSampleCount={eyedropperSamples.length}
+            onClearEyedropperSamples={clearEyedropperSamples}
+            onCaptureStill={captureStill}
+            galleryStills={galleryStills}
+            onDeleteStill={deleteStill}
+            onApplyStillGrade={applyStillGrade}
+            onSetCompareStill={setCompareStillId}
+            compareStillId={compareStillId}
+            copiedNode={copiedNode}
           />
       </section>
     </main>
@@ -1613,6 +2035,26 @@ function ColorPanel({
   onUpdateScalar,
   onUpdateWindow,
   onUpdateWindowScalar,
+  onUpdateCurvePoint,
+  onToggleCurveEnabled,
+  onAddCurvePoint,
+  onRemoveCurvePoint,
+  onResetCurve,
+  onCopyNode,
+  onPasteNode,
+  onDuplicateNode,
+  onToggleNodeBypass,
+  onSetEyedropperMode,
+  eyedropperMode,
+  eyedropperSampleCount,
+  onClearEyedropperSamples,
+  onCaptureStill,
+  galleryStills,
+  onDeleteStill,
+  onApplyStillGrade,
+  onSetCompareStill,
+  compareStillId,
+  copiedNode,
   showMatte
 }: {
   activeNode: ColorNode;
@@ -1635,6 +2077,26 @@ function ColorPanel({
   onUpdateScalar: (key: ScalarPrimaryKey, value: number) => void;
   onUpdateWindow: (shape: PowerWindowShape, updater: (window: PowerWindow) => PowerWindow) => void;
   onUpdateWindowScalar: (shape: PowerWindowShape, key: WindowScalarKey, value: number) => void;
+  onUpdateCurvePoint: (channel: CurveChannel, pointIndex: number, updates: Partial<CurvePoint>) => void;
+  onToggleCurveEnabled: (channel: CurveChannel) => void;
+  onAddCurvePoint: (channel: CurveChannel, point: CurvePoint) => void;
+  onRemoveCurvePoint: (channel: CurveChannel, pointIndex: number) => void;
+  onResetCurve: (channel: CurveChannel) => void;
+  onCopyNode: () => void;
+  onPasteNode: () => void;
+  onDuplicateNode: () => void;
+  onToggleNodeBypass: () => void;
+  onSetEyedropperMode: (mode: "none" | "add" | "subtract") => void;
+  eyedropperMode: "none" | "add" | "subtract";
+  eyedropperSampleCount: number;
+  onClearEyedropperSamples: () => void;
+  onCaptureStill: () => void;
+  galleryStills: { id: string; thumbnail: string; timestamp: number; frameIndex: number; gradeName: string }[];
+  onDeleteStill: (stillId: string) => void;
+  onApplyStillGrade: (stillId: string) => void;
+  onSetCompareStill: (stillId: string | null) => void;
+  compareStillId: string | null;
+  copiedNode: ColorNode | null;
   showMatte: boolean;
 }) {
   const isTracking = Boolean(trackingOperation);
@@ -1649,15 +2111,32 @@ function ColorPanel({
                 <button type="button" className="node-select" onClick={() => onSelectNode(node.id)} disabled={isTracking}>
                   <span className="node-index">{index + 1}</span>
                   <span className="node-label">{node.name}</span>
-                  <span className="node-state">{node.enabled ? "On" : "Bypass"}</span>
+                  <span className="node-state">{node.enabled ? "On" : "Off"}</span>
                 </button>
-                {index < nodes.length - 1 ? <span className="node-arrow">-&gt;</span> : null}
+                {index < nodes.length - 1 ? <span className="node-arrow">&#8594;</span> : null}
               </div>
             ))}
           </div>
-          <button className="add-node" type="button" onClick={onAddNode} disabled={nodes.length >= MAX_SERIAL_NODES || isTracking}>
-            Add Node
-          </button>
+          <div className="node-strip-actions">
+            <button className="add-node" type="button" onClick={onAddNode} disabled={nodes.length >= MAX_SERIAL_NODES || isTracking}>
+              Add
+            </button>
+            <button type="button" onClick={onCopyNode} disabled={isTracking}>
+              Copy
+            </button>
+            <button type="button" onClick={onPasteNode} disabled={!copiedNode || nodes.length >= MAX_SERIAL_NODES || isTracking}>
+              Paste
+            </button>
+            <button type="button" onClick={onDuplicateNode} disabled={nodes.length >= MAX_SERIAL_NODES || isTracking}>
+              Duplicate
+            </button>
+            <button type="button" onClick={onToggleNodeBypass}>
+              {activeNode.enabled ? "Bypass" : "Enable"}
+            </button>
+            <button type="button" onClick={onDeleteNode} disabled={nodes.length <= 1 || isTracking}>
+              Delete
+            </button>
+          </div>
         </section>
 
         <section className="control-section">
@@ -1708,6 +2187,18 @@ function ColorPanel({
         </section>
 
         <section className="control-section">
+          <div className="panel-title">Curves</div>
+          <CurvesPalette
+            curves={activeNode.curves}
+            onUpdateCurvePoint={onUpdateCurvePoint}
+            onToggleCurveEnabled={onToggleCurveEnabled}
+            onAddCurvePoint={onAddCurvePoint}
+            onRemoveCurvePoint={onRemoveCurvePoint}
+            onResetCurve={onResetCurve}
+          />
+        </section>
+
+        <section className="control-section">
           <div className="panel-title">Qualifier</div>
           <section className="mask-card">
             <div className="mask-toggle-grid">
@@ -1741,6 +2232,36 @@ function ColorPanel({
                 />
                 <span>Show Matte</span>
               </label>
+              <button type="button" onClick={() => onSetEyedropperMode(eyedropperMode === "add" ? "none" : "add")}>
+                {eyedropperMode === "add" ? "Stop Eyedropper" : "Eyedropper Add"}
+              </button>
+              <button type="button" onClick={() => onSetEyedropperMode("subtract")} disabled={eyedropperSampleCount === 0}>
+                Eyedropper Sub
+              </button>
+              <button type="button" onClick={onClearEyedropperSamples} disabled={eyedropperSampleCount === 0}>
+                Clear
+              </button>
+              <span className="sample-count">{eyedropperSampleCount} samples</span>
+            </div>
+            <div className="gallery-row">
+              <button type="button" onClick={onCaptureStill}>Capture Still</button>
+              {galleryStills.length > 0 && (
+                <div className="gallery-thumbs">
+                  {galleryStills.slice(0, 4).map((still) => (
+                    <button
+                      key={still.id}
+                      type="button"
+                      className={`gallery-thumb ${compareStillId === still.id ? "is-active" : ""}`}
+                      onClick={() => onSetCompareStill(compareStillId === still.id ? null : still.id)}
+                      onContextMenu={(e) => { e.preventDefault(); onApplyStillGrade(still.id); }}
+                      title={`Frame ${still.frameIndex} - click to compare, right-click to apply grade`}
+                    >
+                      <img src={still.thumbnail} alt={`Frame ${still.frameIndex}`} />
+                      <button type="button" className="gallery-thumb-delete" onClick={(e) => { e.stopPropagation(); onDeleteStill(still.id); }} title="Delete still">x</button>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
             <QualifierControl label="Hue Center" value={activeNode.qualifier.hueCenter} rangeKey="hueCenter" onChange={onUpdateQualifierScalar} />
             <QualifierControl label="Hue Width" value={activeNode.qualifier.hueWidth} rangeKey="hueWidth" onChange={onUpdateQualifierScalar} />
@@ -1789,6 +2310,90 @@ function ColorPanel({
         </section>
       </div>
     </aside>
+  );
+}
+
+function CurvesPalette({
+  curves,
+  onUpdateCurvePoint,
+  onToggleCurveEnabled,
+  onAddCurvePoint,
+  onRemoveCurvePoint,
+  onResetCurve
+}: {
+  curves: ColorNode["curves"];
+  onUpdateCurvePoint: (channel: CurveChannel, pointIndex: number, updates: Partial<CurvePoint>) => void;
+  onToggleCurveEnabled: (channel: CurveChannel) => void;
+  onAddCurvePoint: (channel: CurveChannel, point: CurvePoint) => void;
+  onRemoveCurvePoint: (channel: CurveChannel, pointIndex: number) => void;
+  onResetCurve: (channel: CurveChannel) => void;
+}) {
+  const curveChannels: { key: CurveChannel; label: string }[] = [
+    { key: "master", label: "Master" },
+    { key: "red", label: "Red" },
+    { key: "green", label: "Green" },
+    { key: "blue", label: "Blue" }
+  ];
+
+  return (
+    <section className="curves-card">
+      <div className="curves-channels">
+        {curveChannels.map(({ key, label }) => (
+          <div key={key} className="curve-channel-row">
+            <label className="toggle-row">
+              <input
+                type="checkbox"
+                checked={curves[key].enabled}
+                onChange={() => onToggleCurveEnabled(key)}
+              />
+              <span>{label}</span>
+            </label>
+            <button type="button" onClick={() => onResetCurve(key)}>Reset</button>
+          </div>
+        ))}
+      </div>
+      <div className="curves-points">
+        <div className="curve-points-header">Master Curve Points</div>
+        <div className="curve-points-list">
+          {curves.master.points.map((point, index) => (
+            <div key={index} className="curve-point-row">
+              <span className="curve-point-index">{index + 1}</span>
+              <label className="curve-point-input">
+                <span>X</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={point.x.toFixed(2)}
+                  onChange={(e) => onUpdateCurvePoint("master", index, { x: Number(e.currentTarget.value) })}
+                />
+              </label>
+              <label className="curve-point-input">
+                <span>Y</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={point.y.toFixed(2)}
+                  onChange={(e) => onUpdateCurvePoint("master", index, { y: Number(e.currentTarget.value) })}
+                />
+              </label>
+              {index > 0 && index < curves.master.points.length - 1 && (
+                <button type="button" onClick={() => onRemoveCurvePoint("master", index)}>X</button>
+              )}
+            </div>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={() => onAddCurvePoint("master", { x: 0.5, y: 0.5 })}
+        >
+          Add Point
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -2297,12 +2902,13 @@ function MetadataTable({ media }: { media: MediaRef }) {
     <dl className="metadata-table">
       <MetadataRow label="File" value={media.fileName} />
       <MetadataRow label="Codec" value={media.codec} />
-      <MetadataRow label="Raster" value={`${media.width} x ${media.height}`} />
+      <MetadataRow label="Coded Raster" value={`${media.width} x ${media.height}`} />
+      <MetadataRow label="Display Raster" value={`${media.displayWidth} x ${media.displayHeight}`} />
       <MetadataRow label="Duration" value={`${media.durationSeconds.toFixed(2)}s`} />
       <MetadataRow label="Frame Rate" value={`${media.frameRate.toFixed(3)} fps`} />
       <MetadataRow label="Frames" value={String(media.totalFrames ?? "Unknown")} />
       <MetadataRow label="Audio" value={media.hasAudio ? "Present" : "Ignored"} />
-      <MetadataRow label="Rotation" value={`${media.rotation} deg`} />
+      {media.rotation !== 0 ? <MetadataRow label="Rotation" value={`${media.rotation} deg`} /> : null}
     </dl>
   );
 }
@@ -2486,6 +3092,30 @@ function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value));
 }
 
+function rgbToHslForQualifier(r: number, g: number, b: number): { h: number; s: number; l: number } {
+  const maxValue = Math.max(r, g, b);
+  const minValue = Math.min(r, g, b);
+  const delta = maxValue - minValue;
+  const lightness = (maxValue + minValue) / 2;
+
+  let hue = 0;
+  let saturation = 0;
+
+  if (delta > 0.00001) {
+    saturation = delta / (1 - Math.abs(2 * lightness - 1));
+    if (maxValue === r) {
+      hue = 60 * (((g - b) / delta) % 6);
+    } else if (maxValue === g) {
+      hue = 60 * ((b - r) / delta + 2);
+    } else {
+      hue = 60 * ((r - g) / delta + 4);
+    }
+    hue = ((hue % 360) + 360) % 360;
+  }
+
+  return { h: hue, s: saturation, l: lightness };
+}
+
 function captureScopeFrame(
   source: CanvasImageSource,
   sourceWidth: number,
@@ -2586,7 +3216,7 @@ function RelinkPanel({
         <p>Select a replacement media file to continue. The replacement must be:</p>
         <ul>
           <li>An MP4 or MOV file with H.264 video codec</li>
-          <li>Maximum resolution of 1920 x 1080</li>
+          <li>A 4K-equivalent display raster, such as 3840 x 2160 or 2160 x 3840</li>
         </ul>
         <div className="relink-actions">
           <button type="button" className="primary-action" onClick={onRelink}>

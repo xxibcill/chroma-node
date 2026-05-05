@@ -1,4 +1,5 @@
 export const MAX_SERIAL_NODES = 3;
+export const MAX_CURVE_POINTS = 16;
 
 export interface RgbVector {
   r: number;
@@ -16,6 +17,11 @@ export interface PrimaryCorrection {
   saturation: number;
   temperature: number;
   tint: number;
+  hueShift: number;
+  colorBoost: number;
+  midtoneDetail: number;
+  shadowAmount: number;
+  highlightAmount: number;
 }
 
 export interface HslQualifier {
@@ -67,6 +73,165 @@ export interface TrackingData {
   failureReason?: string;
 }
 
+export interface CurvePoint {
+  x: number;
+  y: number;
+}
+
+export type CurveChannel = "master" | "red" | "green" | "blue" | "hueVsHue" | "hueVsSaturation" | "hueVsLuminance" | "luminanceVsSaturation" | "saturationVsSaturation";
+
+export interface CurveData {
+  enabled: boolean;
+  points: CurvePoint[];
+}
+
+export interface NodeCurves {
+  master: CurveData;
+  red: CurveData;
+  green: CurveData;
+  blue: CurveData;
+  hueVsHue: CurveData;
+  hueVsSaturation: CurveData;
+  hueVsLuminance: CurveData;
+  luminanceVsSaturation: CurveData;
+  saturationVsSaturation: CurveData;
+}
+
+export interface LutData {
+  name: string;
+  size: number;
+  data: Float32Array;
+}
+
+export interface LutSettings {
+  enabled: boolean;
+  lut: LutData | null;
+  intensity: number;
+}
+
+export interface ColorManagementSettings {
+  inputColorSpace: ColorSpace;
+  outputColorSpace: ColorSpace;
+  workingColorSpace: ColorSpace;
+  inputTransform: InputTransform;
+  outputTransform: OutputTransform;
+  toneMapping: ToneMappingMode;
+  gamutMapping: GamutMappingMode;
+}
+
+export type ColorSpace =
+  | "auto"
+  | "rec709"
+  | "rec2020"
+  | "srgb"
+  | "p3"
+  | "appleLog"
+  | "hlg"
+  | "pq"
+  | "linear";
+
+export type InputTransform =
+  | "auto"
+  | "none"
+  | "rec709"
+  | "rec2020"
+  | "srgb"
+  | "p3"
+  | "appleLog"
+  | "hlg"
+  | "pq";
+
+export type OutputTransform =
+  | "none"
+  | "rec709"
+  | "rec2020"
+  | "srgb"
+  | "p3";
+
+export type ToneMappingMode =
+  | "none"
+  | "sdr"
+  | "hlg"
+  | "pq";
+
+export type GamutMappingMode =
+  | "none"
+  | "clip"
+  | "compress";
+
+export interface ColorPrimaries {
+  type: ColorPrimariesType;
+  redX: number;
+  redY: number;
+  greenX: number;
+  greenY: number;
+  blueX: number;
+  blueY: number;
+  whiteX: number;
+  whiteY: number;
+}
+
+export type ColorPrimariesType =
+  | "rec709"
+  | "rec2020"
+  | "p3"
+  | "appleLog"
+  | "unknown";
+
+export interface TransferFunction {
+  type: TransferFunctionType;
+  power?: number;
+  epsilon?: number;
+  alpha?: number;
+  beta?: number;
+}
+
+export type TransferFunctionType =
+  | "bt1886"
+  | "srgb"
+  | "linear"
+  | "hlg"
+  | "pq"
+  | "appleLog"
+  | "log25"
+  | "unknown";
+
+export interface ColorMatrix {
+  type: ColorMatrixType;
+}
+
+export type ColorMatrixType =
+  | "bt601"
+  | "bt709"
+  | "bt2020nc"
+  | "bt2020c"
+  | "identity"
+  | "unknown";
+
+export interface ColorRange {
+  type: ColorRangeType;
+}
+
+export type ColorRangeType =
+  | "full"
+  | "limited";
+
+export interface ColorMetadata {
+  primaries: ColorPrimaries;
+  transfer: TransferFunction;
+  matrix: ColorMatrix;
+  range: ColorRange;
+  bitDepth: 8 | 10 | 12 | 16;
+  profileLabel: string;
+}
+
+export interface SourceColorInfo {
+  metadata: ColorMetadata | null;
+  detectedProfile: ColorSpace;
+  isHDR: boolean;
+  isWideGamut: boolean;
+}
+
 export interface ColorNode {
   id: string;
   name: string;
@@ -75,6 +240,8 @@ export interface ColorNode {
   qualifier: HslQualifier;
   windows: PowerWindows;
   tracking: TrackingData;
+  curves: NodeCurves;
+  lut: LutSettings;
 }
 
 export interface Pixel {
@@ -111,7 +278,12 @@ export const PRIMARY_RANGES = {
   pivot: { min: 0, max: 1, neutral: 0.5, step: 0.01 },
   saturation: { min: 0, max: 2, neutral: 1, step: 0.01 },
   temperature: { min: -1, max: 1, neutral: 0, step: 0.01 },
-  tint: { min: -1, max: 1, neutral: 0, step: 0.01 }
+  tint: { min: -1, max: 1, neutral: 0, step: 0.01 },
+  hueShift: { min: -180, max: 180, neutral: 0, step: 1 },
+  colorBoost: { min: 0, max: 2, neutral: 1, step: 0.01 },
+  midtoneDetail: { min: 0, max: 2, neutral: 1, step: 0.01 },
+  shadowAmount: { min: -1, max: 1, neutral: 0, step: 0.01 },
+  highlightAmount: { min: -1, max: 1, neutral: 0, step: 0.01 }
 } as const satisfies Record<string, NumericRange>;
 
 export const QUALIFIER_RANGES = {
@@ -138,6 +310,44 @@ export const WINDOW_RANGES = {
 export const TRACKING_OFFSET_RANGE = { min: -1, max: 1, neutral: 0, step: 0.001 } as const satisfies NumericRange;
 export const TRACKING_CONFIDENCE_RANGE = { min: 0, max: 1, neutral: 0, step: 0.001 } as const satisfies NumericRange;
 
+export const CURVE_RANGE = { min: 0, max: 1, neutral: 0, step: 0.01 } as const satisfies NumericRange;
+
+export const LUT_RANGE = { min: 0, max: 1, neutral: 1, step: 0.01 } as const satisfies NumericRange;
+
+const IDENTITY_CURVE_POINTS: CurvePoint[] = [
+  { x: 0, y: 0 },
+  { x: 1, y: 1 }
+];
+
+export function createNeutralCurve(): CurveData {
+  return {
+    enabled: false,
+    points: IDENTITY_CURVE_POINTS.map((p) => ({ ...p }))
+  };
+}
+
+export function createDefaultNodeCurves(): NodeCurves {
+  return {
+    master: createNeutralCurve(),
+    red: createNeutralCurve(),
+    green: createNeutralCurve(),
+    blue: createNeutralCurve(),
+    hueVsHue: createNeutralCurve(),
+    hueVsSaturation: createNeutralCurve(),
+    hueVsLuminance: createNeutralCurve(),
+    luminanceVsSaturation: createNeutralCurve(),
+    saturationVsSaturation: createNeutralCurve()
+  };
+}
+
+export function createDefaultLutSettings(): LutSettings {
+  return {
+    enabled: false,
+    lut: null,
+    intensity: LUT_RANGE.neutral
+  };
+}
+
 const NEUTRAL_RGB_ADD: RgbVector = { r: 0, g: 0, b: 0 };
 const NEUTRAL_RGB_MULTIPLY: RgbVector = { r: 1, g: 1, b: 1 };
 
@@ -151,7 +361,12 @@ export function createNeutralPrimaries(): PrimaryCorrection {
     pivot: PRIMARY_RANGES.pivot.neutral,
     saturation: PRIMARY_RANGES.saturation.neutral,
     temperature: PRIMARY_RANGES.temperature.neutral,
-    tint: PRIMARY_RANGES.tint.neutral
+    tint: PRIMARY_RANGES.tint.neutral,
+    hueShift: PRIMARY_RANGES.hueShift.neutral,
+    colorBoost: PRIMARY_RANGES.colorBoost.neutral,
+    midtoneDetail: PRIMARY_RANGES.midtoneDetail.neutral,
+    shadowAmount: PRIMARY_RANGES.shadowAmount.neutral,
+    highlightAmount: PRIMARY_RANGES.highlightAmount.neutral
   };
 }
 
@@ -211,7 +426,9 @@ export function createColorNode(index: number): ColorNode {
     primaries: createNeutralPrimaries(),
     qualifier: createDefaultQualifier(),
     windows: createDefaultPowerWindows(),
-    tracking: createDefaultTrackingData()
+    tracking: createDefaultTrackingData(),
+    curves: createDefaultNodeCurves(),
+    lut: createDefaultLutSettings()
   };
 }
 
@@ -258,7 +475,12 @@ export function sanitizePrimaries(input: Partial<PrimaryCorrection> | undefined)
     pivot: clampNumber(readNumber(input?.pivot, neutral.pivot), PRIMARY_RANGES.pivot),
     saturation: clampNumber(readNumber(input?.saturation, neutral.saturation), PRIMARY_RANGES.saturation),
     temperature: clampNumber(readNumber(input?.temperature, neutral.temperature), PRIMARY_RANGES.temperature),
-    tint: clampNumber(readNumber(input?.tint, neutral.tint), PRIMARY_RANGES.tint)
+    tint: clampNumber(readNumber(input?.tint, neutral.tint), PRIMARY_RANGES.tint),
+    hueShift: clampNumber(readNumber(input?.hueShift, neutral.hueShift), PRIMARY_RANGES.hueShift),
+    colorBoost: clampNumber(readNumber(input?.colorBoost, neutral.colorBoost), PRIMARY_RANGES.colorBoost),
+    midtoneDetail: clampNumber(readNumber(input?.midtoneDetail, neutral.midtoneDetail), PRIMARY_RANGES.midtoneDetail),
+    shadowAmount: clampNumber(readNumber(input?.shadowAmount, neutral.shadowAmount), PRIMARY_RANGES.shadowAmount),
+    highlightAmount: clampNumber(readNumber(input?.highlightAmount, neutral.highlightAmount), PRIMARY_RANGES.highlightAmount)
   };
 }
 
@@ -303,6 +525,52 @@ export function sanitizePowerWindows(input: Partial<PowerWindows> | undefined): 
   return {
     ellipse: sanitizePowerWindow(input?.ellipse, "ellipse"),
     rectangle: sanitizePowerWindow(input?.rectangle, "rectangle")
+  };
+}
+
+export function sanitizeCurvePoint(input: unknown): CurvePoint {
+  if (input && typeof input === "object") {
+    const point = input as Partial<CurvePoint>;
+    return {
+      x: clampNumber(readNumber(point.x, 0.5), CURVE_RANGE),
+      y: clampNumber(readNumber(point.y, 0.5), CURVE_RANGE)
+    };
+  }
+  return { x: 0.5, y: 0.5 };
+}
+
+export function sanitizeCurve(input: Partial<CurveData> | undefined): CurveData {
+  const fallback = createNeutralCurve();
+  if (!input || typeof input !== "object") {
+    return { ...fallback };
+  }
+
+  const points = Array.isArray(input.points) && input.points.length >= 2
+    ? input.points.map(sanitizeCurvePoint).sort((a, b) => a.x - b.x).slice(0, MAX_CURVE_POINTS)
+    : fallback.points;
+
+  return {
+    enabled: typeof input.enabled === "boolean" ? input.enabled : fallback.enabled,
+    points
+  };
+}
+
+export function sanitizeNodeCurves(input: Partial<NodeCurves> | undefined): NodeCurves {
+  const fallback = createDefaultNodeCurves();
+  if (!input || typeof input !== "object") {
+    return { ...fallback };
+  }
+
+  return {
+    master: sanitizeCurve(input.master),
+    red: sanitizeCurve(input.red),
+    green: sanitizeCurve(input.green),
+    blue: sanitizeCurve(input.blue),
+    hueVsHue: sanitizeCurve(input.hueVsHue),
+    hueVsSaturation: sanitizeCurve(input.hueVsSaturation),
+    hueVsLuminance: sanitizeCurve(input.hueVsLuminance),
+    luminanceVsSaturation: sanitizeCurve(input.luminanceVsSaturation),
+    saturationVsSaturation: sanitizeCurve(input.saturationVsSaturation)
   };
 }
 
@@ -395,7 +663,22 @@ export function sanitizeColorNode(input: Partial<ColorNode> | undefined, fallbac
     primaries: sanitizePrimaries(input?.primaries),
     qualifier: sanitizeQualifier(input?.qualifier),
     windows: sanitizePowerWindows(input?.windows),
-    tracking: sanitizeTrackingData(input?.tracking, frameCount)
+    tracking: sanitizeTrackingData(input?.tracking, frameCount),
+    curves: sanitizeNodeCurves(input?.curves),
+    lut: sanitizeLutSettings(input?.lut)
+  };
+}
+
+export function sanitizeLutSettings(input: Partial<LutSettings> | undefined): LutSettings {
+  const fallback = createDefaultLutSettings();
+  if (!input || typeof input !== "object") {
+    return { ...fallback };
+  }
+
+  return {
+    enabled: typeof input.enabled === "boolean" ? input.enabled : fallback.enabled,
+    lut: input.lut ?? null,
+    intensity: clampNumber(readNumber(input.intensity, fallback.intensity), LUT_RANGE)
   };
 }
 
@@ -533,20 +816,231 @@ export function evaluateNodeMask(pixel: Pixel, node: ColorNode, point: Normalize
   return evaluateQualifierMask(pixel, sanitized.qualifier) * evaluatePowerWindowMask(point, sanitized.windows);
 }
 
+function interpolateCurve(points: CurvePoint[], x: number): number {
+  if (points.length < 2) {
+    return x;
+  }
+
+  if (x <= points[0].x) {
+    return points[0].y;
+  }
+  if (x >= points[points.length - 1].x) {
+    return points[points.length - 1].y;
+  }
+
+  for (let i = 0; i < points.length - 1; i++) {
+    if (x >= points[i].x && x <= points[i + 1].x) {
+      const t = (x - points[i].x) / (points[i + 1].x - points[i].x);
+      return points[i].y + t * (points[i + 1].y - points[i].y);
+    }
+  }
+
+  return x;
+}
+
+export function applyCurves(pixel: Pixel, curves: NodeCurves): Pixel {
+  const masterEnabled = curves.master.enabled && curves.master.points.length >= 2;
+  const redEnabled = curves.red.enabled && curves.red.points.length >= 2;
+  const greenEnabled = curves.green.enabled && curves.green.points.length >= 2;
+  const blueEnabled = curves.blue.enabled && curves.blue.points.length >= 2;
+
+  if (!masterEnabled && !redEnabled && !greenEnabled && !blueEnabled) {
+    return pixel;
+  }
+
+  let r = pixel.r;
+  let g = pixel.g;
+  let b = pixel.b;
+
+  if (redEnabled) {
+    r = interpolateCurve(curves.red.points, r);
+  }
+  if (greenEnabled) {
+    g = interpolateCurve(curves.green.points, g);
+  }
+  if (blueEnabled) {
+    b = interpolateCurve(curves.blue.points, b);
+  }
+
+  if (masterEnabled) {
+    const avgLuminance = (r + g + b) / 3;
+    const masterFactor = interpolateCurve(curves.master.points, avgLuminance) / (avgLuminance || 1);
+    r = r * masterFactor;
+    g = g * masterFactor;
+    b = b * masterFactor;
+  }
+
+  return {
+    r: clamp01(r),
+    g: clamp01(g),
+    b: clamp01(b),
+    a: pixel.a
+  };
+}
+
+export function applyLut(pixel: Pixel, lut: LutSettings): Pixel {
+  if (!lut.enabled || !lut.lut) {
+    return pixel;
+  }
+
+  const lutData = lut.lut;
+  const size = lutData.size;
+  const data = lutData.data;
+
+  const rScaled = clamp01(pixel.r) * (size - 1);
+  const gScaled = clamp01(pixel.g) * (size - 1);
+  const bScaled = clamp01(pixel.b) * (size - 1);
+
+  const r0 = Math.floor(rScaled);
+  const g0 = Math.floor(gScaled);
+  const b0 = Math.floor(bScaled);
+  const r1 = Math.min(r0 + 1, size - 1);
+  const g1 = Math.min(g0 + 1, size - 1);
+  const b1 = Math.min(b0 + 1, size - 1);
+
+  const rFrac = rScaled - r0;
+  const gFrac = gScaled - g0;
+  const bFrac = bScaled - b0;
+
+  const getLutValue = (r: number, g: number, b: number): { r: number; g: number; b: number } => {
+    const index = ((b * size + g) * size + r) * 3;
+    return {
+      r: data[index],
+      g: data[index + 1],
+      b: data[index + 2]
+    };
+  };
+
+  const c000 = getLutValue(r0, g0, b0);
+  const c001 = getLutValue(r1, g0, b0);
+  const c010 = getLutValue(r0, g1, b0);
+  const c011 = getLutValue(r1, g1, b0);
+  const c100 = getLutValue(r0, g0, b1);
+  const c101 = getLutValue(r1, g0, b1);
+  const c110 = getLutValue(r0, g1, b1);
+  const c111 = getLutValue(r1, g1, b1);
+
+  const tr = c000.r * (1 - rFrac) * (1 - gFrac) * (1 - bFrac) +
+             c001.r * rFrac * (1 - gFrac) * (1 - bFrac) +
+             c010.r * (1 - rFrac) * gFrac * (1 - bFrac) +
+             c011.r * rFrac * gFrac * (1 - bFrac) +
+             c100.r * (1 - rFrac) * (1 - gFrac) * bFrac +
+             c101.r * rFrac * (1 - gFrac) * bFrac +
+             c110.r * (1 - rFrac) * gFrac * bFrac +
+             c111.r * rFrac * gFrac * bFrac;
+
+  const tg = c000.g * (1 - rFrac) * (1 - gFrac) * (1 - bFrac) +
+             c001.g * rFrac * (1 - gFrac) * (1 - bFrac) +
+             c010.g * (1 - rFrac) * gFrac * (1 - bFrac) +
+             c011.g * rFrac * gFrac * (1 - bFrac) +
+             c100.g * (1 - rFrac) * (1 - gFrac) * bFrac +
+             c101.g * rFrac * (1 - gFrac) * bFrac +
+             c110.g * (1 - rFrac) * gFrac * bFrac +
+             c111.g * rFrac * gFrac * bFrac;
+
+  const tb = c000.b * (1 - rFrac) * (1 - gFrac) * (1 - bFrac) +
+             c001.b * rFrac * (1 - gFrac) * (1 - bFrac) +
+             c010.b * (1 - rFrac) * gFrac * (1 - bFrac) +
+             c011.b * rFrac * gFrac * (1 - bFrac) +
+             c100.b * (1 - rFrac) * (1 - gFrac) * bFrac +
+             c101.b * rFrac * (1 - gFrac) * bFrac +
+             c110.b * (1 - rFrac) * gFrac * bFrac +
+             c111.b * rFrac * gFrac * bFrac;
+
+  const blended = {
+    r: clamp01(tr),
+    g: clamp01(tg),
+    b: clamp01(tb)
+  };
+
+  const intensity = clampNumber(lut.intensity, LUT_RANGE);
+  return {
+    r: pixel.r + (blended.r - pixel.r) * intensity,
+    g: pixel.g + (blended.g - pixel.g) * intensity,
+    b: pixel.b + (blended.b - pixel.b) * intensity,
+    a: pixel.a
+  };
+}
+
 export function evaluateNodeGraph(pixel: Pixel, nodes: readonly ColorNode[], point: NormalizedPoint = { x: 0.5, y: 0.5 }): Pixel {
   return normalizeNodeGraph(nodes).reduce<Pixel>((current, node) => {
     if (!node.enabled) {
       return current;
     }
 
-    const corrected = applyPrimaryCorrection(current, node.primaries);
+    let corrected = applyPrimaryCorrection(current, node.primaries);
+    corrected = applyCurves(corrected, node.curves);
+    corrected = applyLut(corrected, node.lut);
     const mask = evaluateNodeMask(current, node, point);
     return mixPixels(current, corrected, mask);
   }, pixel);
 }
 
+export function parseCubeLut(content: string): LutData | null {
+  const lines = content.split("\n");
+  let size = 0;
+  const values: number[] = [];
+  let name = "Imported LUT";
+  let inData = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (trimmed === "" || trimmed.startsWith("#")) {
+      continue;
+    }
+
+    if (trimmed.startsWith("TITLE")) {
+      const match = trimmed.match(/TITLE\s+"(.+)"/);
+      if (match) {
+        name = match[1];
+      }
+      continue;
+    }
+
+    if (trimmed.startsWith("LUT_3D_SIZE")) {
+      const match = trimmed.match(/LUT_3D_SIZE\s+(\d+)/);
+      if (match) {
+        size = parseInt(match[1], 10);
+      }
+      continue;
+    }
+
+    if (trimmed === "BEGIN_DATA" || trimmed === "DATA") {
+      inData = true;
+      continue;
+    }
+
+    if (inData || size > 0) {
+      const parts = trimmed.split(/\s+/);
+      if (parts.length >= 3) {
+        const r = parseFloat(parts[0]);
+        const g = parseFloat(parts[1]);
+        const b = parseFloat(parts[2]);
+        if (Number.isFinite(r) && Number.isFinite(g) && Number.isFinite(b)) {
+          values.push(clamp01(r));
+          values.push(clamp01(g));
+          values.push(clamp01(b));
+        }
+      }
+    }
+  }
+
+  const expectedCount = size * size * size * 3;
+  if (size === 0 || values.length !== expectedCount) {
+    return null;
+  }
+
+  return {
+    name,
+    size,
+    data: new Float32Array(values)
+  };
+}
+
 export function generateColorFragmentShader(nodeCount: number): string {
   const count = Math.max(1, Math.min(MAX_SERIAL_NODES, Math.floor(nodeCount)));
+  const curveCount = count * 4;
   const nodeLines = Array.from({ length: count }, (_, index) => {
     return `  float nodeMask${index} = nodeMask(graded, ${index}, vTexCoord);
   if (uMatteNodeIndex == ${index}) {
@@ -554,6 +1048,7 @@ export function generateColorFragmentShader(nodeCount: number): string {
   }
   if (uEnabled[${index}] == 1) {
     vec3 corrected${index} = applyPrimary(graded, ${index});
+    corrected${index} = applyCurves(corrected${index}, ${index});
     graded = mix(graded, corrected${index}, nodeMask${index});
   }`;
   }).join("\n");
@@ -567,6 +1062,12 @@ out vec4 outColor;
 uniform sampler2D uFrame;
 uniform int uViewerMode;
 uniform float uSplitPosition;
+uniform int uSourceTransfer;
+uniform int uTargetTransfer;
+uniform int uToneMapping;
+uniform int uSourceIsHdr;
+uniform int uApplySourceToWorking;
+uniform vec3 uSourceToWorkingRows[3];
 uniform int uEnabled[${count}];
 uniform vec3 uLift[${count}];
 uniform vec3 uGamma[${count}];
@@ -577,6 +1078,9 @@ uniform float uPivot[${count}];
 uniform float uSaturation[${count}];
 uniform float uTemperature[${count}];
 uniform float uTint[${count}];
+uniform int uCurveEnabled[${curveCount}];
+uniform int uCurvePointCount[${curveCount}];
+uniform vec2 uCurvePoints[${curveCount * MAX_CURVE_POINTS}];
 uniform int uMatteNodeIndex;
 uniform int uQualifierEnabled[${count}];
 uniform float uHueCenter[${count}];
@@ -618,6 +1122,79 @@ vec3 applyPrimary(vec3 color, int index) {
   float luma = dot(c, vec3(${REC709_LUMA.r.toFixed(4)}, ${REC709_LUMA.g.toFixed(4)}, ${REC709_LUMA.b.toFixed(4)}));
   c = mix(vec3(luma), c, uSaturation[index]);
   c *= whiteBalanceScale(uTemperature[index], uTint[index]);
+  return clamp(c, vec3(0.0), vec3(1.0));
+}
+
+int curveIndex(int nodeIndex, int channelIndex) {
+  return nodeIndex * 4 + channelIndex;
+}
+
+float interpolateCurve(int index, float x) {
+  int pointCount = uCurvePointCount[index];
+  if (pointCount < 2) {
+    return x;
+  }
+
+  int offset = index * ${MAX_CURVE_POINTS};
+  vec2 firstPoint = uCurvePoints[offset];
+  if (x <= firstPoint.x) {
+    return firstPoint.y;
+  }
+
+  vec2 lastPoint = uCurvePoints[offset + pointCount - 1];
+  if (x >= lastPoint.x) {
+    return lastPoint.y;
+  }
+
+  for (int i = 0; i < ${MAX_CURVE_POINTS - 1}; i += 1) {
+    if (i >= pointCount - 1) {
+      break;
+    }
+
+    vec2 leftPoint = uCurvePoints[offset + i];
+    vec2 rightPoint = uCurvePoints[offset + i + 1];
+    if (x >= leftPoint.x && x <= rightPoint.x) {
+      float denominator = rightPoint.x - leftPoint.x;
+      float t = denominator == 0.0 ? 0.0 : clamp((x - leftPoint.x) / denominator, 0.0, 1.0);
+      return mix(leftPoint.y, rightPoint.y, t);
+    }
+  }
+
+  return x;
+}
+
+vec3 applyCurves(vec3 color, int nodeIndex) {
+  int masterIndex = curveIndex(nodeIndex, 0);
+  int redIndex = curveIndex(nodeIndex, 1);
+  int greenIndex = curveIndex(nodeIndex, 2);
+  int blueIndex = curveIndex(nodeIndex, 3);
+  bool masterEnabled = uCurveEnabled[masterIndex] == 1 && uCurvePointCount[masterIndex] >= 2;
+  bool redEnabled = uCurveEnabled[redIndex] == 1 && uCurvePointCount[redIndex] >= 2;
+  bool greenEnabled = uCurveEnabled[greenIndex] == 1 && uCurvePointCount[greenIndex] >= 2;
+  bool blueEnabled = uCurveEnabled[blueIndex] == 1 && uCurvePointCount[blueIndex] >= 2;
+
+  if (!masterEnabled && !redEnabled && !greenEnabled && !blueEnabled) {
+    return color;
+  }
+
+  vec3 c = color;
+  if (redEnabled) {
+    c.r = interpolateCurve(redIndex, c.r);
+  }
+  if (greenEnabled) {
+    c.g = interpolateCurve(greenIndex, c.g);
+  }
+  if (blueEnabled) {
+    c.b = interpolateCurve(blueIndex, c.b);
+  }
+
+  if (masterEnabled) {
+    float avgLuminance = (c.r + c.g + c.b) / 3.0;
+    float divisor = avgLuminance == 0.0 ? 1.0 : avgLuminance;
+    float masterFactor = interpolateCurve(masterIndex, avgLuminance) / divisor;
+    c *= masterFactor;
+  }
+
   return clamp(c, vec3(0.0), vec3(1.0));
 }
 
@@ -721,8 +1298,144 @@ float nodeMask(vec3 color, int index, vec2 coord) {
   return qualifierMask(color, index) * windowMask(coord, index);
 }
 
+vec3 decodeSrgb(vec3 color) {
+  vec3 low = color / 12.92;
+  vec3 high = pow(max((color + vec3(0.055)) / 1.055, vec3(0.0)), vec3(2.4));
+  return mix(high, low, lessThanEqual(color, vec3(0.04045)));
+}
+
+vec3 encodeSrgb(vec3 color) {
+  vec3 low = color * 12.92;
+  vec3 high = 1.055 * pow(max(color, vec3(0.0)), vec3(1.0 / 2.4)) - vec3(0.055);
+  return mix(high, low, lessThanEqual(color, vec3(0.0031308)));
+}
+
+vec3 decodeHlg(vec3 color) {
+  const float HLG_E = 1.2;
+  vec3 low = color * color * (1.0 / (3.0 * HLG_E));
+  float a = sqrt((3.0 * HLG_E - 0.5) / 3.0);
+  vec3 high = a * sqrt(max(color, vec3(0.0))) - vec3(a - 1.0 / (3.0 * HLG_E));
+  return mix(high, low, lessThanEqual(color, vec3(0.5)));
+}
+
+vec3 encodeHlg(vec3 color) {
+  const float HLG_E = 1.2;
+  vec3 low = sqrt(max(3.0 * HLG_E * color, vec3(0.0)));
+  vec3 high = vec3((3.0 * HLG_E - 0.5) / 3.0) + 2.0 * sqrt(max(color - vec3(1.0 / (3.0 * HLG_E)), vec3(0.0)));
+  return mix(high, low, lessThanEqual(color, vec3(1.0 / (3.0 * HLG_E))));
+}
+
+vec3 decodePq(vec3 color) {
+  const float c = 0.1593017578125;
+  const float m1 = 2610.0 / 16384.0;
+  const float m2 = 2523.0 / 4096.0 * 128.0;
+  const float y1 = 1.7;
+  const float y2 = 1.0 / 1.7;
+  vec3 xn = pow(max(color / 10000.0, vec3(0.0)), vec3(m1));
+  vec3 n = xn * xn * xn + pow(max(xn, vec3(0.0)), vec3(y2));
+  vec3 nM2 = pow(max(n, vec3(0.0)), vec3(m2 / m1));
+  return pow(nM2 + vec3(pow(c, m2 / m1)), vec3(y1));
+}
+
+vec3 encodePq(vec3 color) {
+  const float c = 0.1593017578125;
+  const float m1 = 16384.0 / 2610.0;
+  const float m2 = 4096.0 / 2523.0;
+  const float y1 = 1.7;
+  const float y2 = 1.0 / 1.7;
+  vec3 y = pow(max(color, vec3(0.0)), vec3(y2));
+  vec3 yY1 = pow(max(y, vec3(0.0)), vec3(1.0 / y1));
+  vec3 xM2 = pow(yY1 + vec3(pow(c, y1)), vec3(m2 * y2));
+  return 10000.0 * pow(xM2 / (xM2 + vec3(pow(c, y1))), vec3(1.0 / m1));
+}
+
+vec3 decodeAppleLog(vec3 color) {
+  const float a = 5.555556;
+  const float d = 0.385371;
+  const float e = 1.0;
+  const float f = 0.817092;
+  vec3 low = color / e;
+  vec3 high = e * pow(max((color + d - 1.0) / (1.0 + d - 1.0), vec3(0.0)), vec3(a)) * (1.0 - f) + vec3(f);
+  return mix(high, low, lessThan(color, vec3(0.247190 - 0.052272 * f)));
+}
+
+vec3 encodeAppleLog(vec3 color) {
+  const float a = 5.555556;
+  const float d = 0.385371;
+  const float e = 1.0;
+  const float f = 0.817092;
+  vec3 low = color / e;
+  vec3 high = pow(max((color - f * e) / ((1.0 - f) * e), vec3(0.0)), vec3(1.0 / a)) * (1.0 + d - 1.0) + vec3(d - 1.0);
+  return mix(high, low, lessThan(color, vec3((1.0 - f) * e)));
+}
+
+vec3 decodeTransfer(vec3 color, int transfer) {
+  if (transfer == 1) {
+    return decodeSrgb(color);
+  }
+  if (transfer == 3) {
+    return decodeHlg(color);
+  }
+  if (transfer == 4) {
+    return decodePq(color);
+  }
+  if (transfer == 5) {
+    return decodeAppleLog(color);
+  }
+  return color;
+}
+
+vec3 encodeTransfer(vec3 color, int transfer) {
+  if (transfer == 1) {
+    return encodeSrgb(color);
+  }
+  if (transfer == 3) {
+    return encodeHlg(color);
+  }
+  if (transfer == 4) {
+    return encodePq(color);
+  }
+  if (transfer == 5) {
+    return encodeAppleLog(color);
+  }
+  return color;
+}
+
+vec3 toneMapSdrShader(vec3 color) {
+  vec3 numerator = color - vec3(0.4);
+  vec3 denominator = vec3(1.0) + abs(numerator);
+  vec3 high = 0.5 * pow(max(color, vec3(0.0)), vec3(0.8)) + 0.5 * (numerator / denominator + vec3(1.0)) * color;
+  vec3 low = color * 2.0;
+  return clamp(mix(high, low, lessThanEqual(color, vec3(0.5))), vec3(0.0), vec3(1.0));
+}
+
+vec3 applySourceToWorkingGamut(vec3 color) {
+  if (uApplySourceToWorking == 0) {
+    return color;
+  }
+
+  vec3 mapped = vec3(
+    dot(uSourceToWorkingRows[0], color),
+    dot(uSourceToWorkingRows[1], color),
+    dot(uSourceToWorkingRows[2], color)
+  );
+  float maxComp = max(max(max(mapped.r, mapped.g), mapped.b), 0.0);
+  if (maxComp > 1.0) {
+    mapped /= maxComp;
+  }
+  return clamp(mapped, vec3(0.0), vec3(1.0));
+}
+
+vec3 applyOutputPipeline(vec3 color) {
+  vec3 result = applySourceToWorkingGamut(color);
+  if (uSourceIsHdr == 1 && uToneMapping == 1) {
+    result = toneMapSdrShader(result);
+  }
+  return encodeTransfer(result, uTargetTransfer);
+}
+
 vec4 applyColor(vec4 source) {
-  vec3 graded = source.rgb;
+  vec3 graded = decodeTransfer(source.rgb, uSourceTransfer);
   float activeMatte = 1.0;
 ${nodeLines}
 
@@ -738,7 +1451,7 @@ ${nodeLines}
     return source;
   }
 
-  return vec4(graded, source.a);
+  return vec4(applyOutputPipeline(graded), source.a);
 }
 
 void main() {
@@ -899,4 +1612,556 @@ function normalizeDegrees(value: number): number {
 function normalizeSignedDegrees(value: number): number {
   const degrees = normalizeDegrees(value + 180) - 180;
   return degrees === -180 ? 180 : degrees;
+}
+
+// Color space constants
+
+export const COLORSPACES: Record<ColorSpace, { label: string; primaries: ColorPrimariesType; transfer: TransferFunctionType }> = {
+  auto: { label: "Auto", primaries: "rec709", transfer: "bt1886" },
+  rec709: { label: "Rec.709 SDR", primaries: "rec709", transfer: "bt1886" },
+  rec2020: { label: "Rec.2020", primaries: "rec2020", transfer: "pq" },
+  srgb: { label: "sRGB", primaries: "rec709", transfer: "srgb" },
+  p3: { label: "Display P3", primaries: "p3", transfer: "srgb" },
+  appleLog: { label: "Apple Log", primaries: "rec2020", transfer: "appleLog" },
+  hlg: { label: "Rec.2020 HLG", primaries: "rec2020", transfer: "hlg" },
+  pq: { label: "Rec.2020 PQ", primaries: "rec2020", transfer: "pq" },
+  linear: { label: "Linear", primaries: "rec709", transfer: "linear" }
+};
+
+export const PRIMARIES: Record<ColorPrimariesType, ColorPrimaries> = {
+  rec709: { type: "rec709", redX: 0.64, redY: 0.33, greenX: 0.3, greenY: 0.6, blueX: 0.15, blueY: 0.06, whiteX: 0.3127, whiteY: 0.329 },
+  rec2020: { type: "rec2020", redX: 0.708, redY: 0.292, greenX: 0.17, greenY: 0.797, blueX: 0.131, blueY: 0.046, whiteX: 0.3127, whiteY: 0.329 },
+  p3: { type: "p3", redX: 0.68, redY: 0.32, greenX: 0.265, greenY: 0.69, blueX: 0.15, blueY: 0.06, whiteX: 0.3127, whiteY: 0.329 },
+  appleLog: { type: "appleLog", redX: 0.708, redY: 0.292, greenX: 0.17, greenY: 0.797, blueX: 0.131, blueY: 0.046, whiteX: 0.3127, whiteY: 0.329 },
+  unknown: { type: "unknown", redX: 0.64, redY: 0.33, greenX: 0.3, greenY: 0.6, blueX: 0.15, blueY: 0.06, whiteX: 0.3127, whiteY: 0.329 }
+};
+
+export const TRANSFER_FUNCTIONS: Record<TransferFunctionType, TransferFunction> = {
+  bt1886: { type: "bt1886", power: 2.4, epsilon: 0.0, alpha: 1.0, beta: 0.0 },
+  srgb: { type: "srgb", power: 2.4, epsilon: 0.055, alpha: 1.055, beta: 0.04045 },
+  linear: { type: "linear", power: 1.0, epsilon: 0.0, alpha: 1.0, beta: 0.0 },
+  hlg: { type: "hlg", power: 1.2, epsilon: 0.0, alpha: 1.0, beta: 0.0 },
+  pq: { type: "pq", power: 1.0, epsilon: 0.0, alpha: 1.0, beta: 0.0 },
+  appleLog: { type: "appleLog", power: 1.0, epsilon: 0.0, alpha: 1.0, beta: 0.0 },
+  log25: { type: "log25", power: 1.0, epsilon: 0.0, alpha: 1.0, beta: 0.0 },
+  unknown: { type: "unknown", power: 2.4, epsilon: 0.0, alpha: 1.0, beta: 0.0 }
+};
+
+// Transform helpers
+
+export function createDefaultColorManagementSettings(): ColorManagementSettings {
+  return {
+    inputColorSpace: "auto",
+    outputColorSpace: "rec709",
+    workingColorSpace: "rec709",
+    inputTransform: "auto",
+    outputTransform: "none",
+    toneMapping: "sdr",
+    gamutMapping: "clip"
+  };
+}
+
+export function createDefaultColorMetadata(): ColorMetadata {
+  return {
+    primaries: PRIMARIES.rec709,
+    transfer: TRANSFER_FUNCTIONS.bt1886,
+    matrix: { type: "bt709" },
+    range: { type: "limited" },
+    bitDepth: 8,
+    profileLabel: "Rec.709 SDR"
+  };
+}
+
+export function detectColorSpaceFromFfprobe(tags: Record<string, string>, codecName: string): SourceColorInfo {
+  const primariesStr = tags.color_primaries || tags.color_space || "";
+  const transferStr = tags.transfer_characteristics || tags.gamma || "";
+  const matrixStr = tags.matrix_coefficients || "";
+
+  const detectedProfile = inferColorSpace(primariesStr, transferStr, matrixStr, codecName);
+  const metadata = buildColorMetadata(primariesStr, transferStr, matrixStr, codecName);
+
+  return {
+    metadata,
+    detectedProfile,
+    isHDR: isHdrProfile(detectedProfile),
+    isWideGamut: isWideGamutProfile(detectedProfile)
+  };
+}
+
+function inferColorSpace(primaries: string, transfer: string, matrix: string, codec: string): ColorSpace {
+  const primariesLC = primaries.toLowerCase();
+  const transferLC = transfer.toLowerCase();
+
+  // Apple Log detection
+  if (codec === "dvi" || codec === "ap4n" || transferLC.includes("log") || transferLC.includes("apple")) {
+    return "appleLog";
+  }
+
+  // HDR profiles
+  if (transferLC.includes("hlg") || transferLC === "bt2020hlg") {
+    return "hlg";
+  }
+  if (transferLC.includes("pq") || transferLC === "bt2020pq" || transferLC === "smpte2084") {
+    return "pq";
+  }
+
+  // Wide gamut
+  if (primariesLC === "bt2020" || primariesLC === "bt2020nc" || primariesLC === "bt2020c" || primariesLC === "rec2020") {
+    if (transferLC.includes("bt1886") || transferLC === "") {
+      return "rec2020";
+    }
+  }
+
+  // P3
+  if (primariesLC === "p3") {
+    return "p3";
+  }
+
+  // Rec.709 / sRGB defaults
+  if (primariesLC === "bt709" || primariesLC === "rec709" || primariesLC === "" || primariesLC === "unspecified") {
+    if (transferLC === "srgb" || transferLC === "ieee61966-2-1" || transferLC === "bt709") {
+      return "srgb";
+    }
+    return "rec709";
+  }
+
+  return "rec709";
+}
+
+function buildColorMetadata(primaries: string, transfer: string, matrix: string, codec: string): ColorMetadata {
+  const primariesType = parsePrimariesType(primaries);
+  const transferType = parseTransferType(transfer);
+  const matrixType = parseMatrixType(matrix);
+  const profileLabel = COLORSPACES[inferColorSpace(primaries, transfer, matrix, codec)]?.label ?? "Unknown";
+
+  return {
+    primaries: PRIMARIES[primariesType] ?? PRIMARIES.rec709,
+    transfer: TRANSFER_FUNCTIONS[transferType] ?? TRANSFER_FUNCTIONS.bt1886,
+    matrix: { type: matrixType },
+    range: { type: "limited" },
+    bitDepth: 8,
+    profileLabel
+  };
+}
+
+function parsePrimariesType(value: string): ColorPrimariesType {
+  const lc = value.toLowerCase();
+  if (lc === "bt709" || lc === "rec709" || lc === "iec61966-2-1" || lc === "srgb" || lc === "") return "rec709";
+  if (lc === "bt2020" || lc === "bt2020nc" || lc === "bt2020c" || lc === "rec2020") return "rec2020";
+  if (lc === "p3" || lc === "displayp3" || lc === "iec61966-2-4") return "p3";
+  if (lc.includes("apple") || lc.includes("log")) return "appleLog";
+  return "unknown";
+}
+
+function parseTransferType(value: string): TransferFunctionType {
+  const lc = value.toLowerCase();
+  if (lc === "bt1886" || lc === "rec709") return "bt1886";
+  if (lc === "srgb" || lc === "ieee61966-2-1" || lc === "iec61966-2-4") return "srgb";
+  if (lc === "linear" || lc === "linearrec709") return "linear";
+  if (lc === "hlg" || lc === "bt2020hlg" || lc === "arib-std-b67") return "hlg";
+  if (lc === "pq" || lc === "bt2020pq" || lc === "smpte2084") return "pq";
+  if (lc.includes("log") || lc === "log25" || lc === "apple") return "appleLog";
+  return "unknown";
+}
+
+function parseMatrixType(value: string): ColorMatrixType {
+  const lc = value.toLowerCase();
+  if (lc === "bt601" || lc === "rec601") return "bt601";
+  if (lc === "bt709" || lc === "rec709" || lc === "") return "bt709";
+  if (lc === "bt2020nc" || lc === "bt2020c" || lc === "rec2020") return "bt2020nc";
+  return "unknown";
+}
+
+function isHdrProfile(profile: ColorSpace): boolean {
+  return profile === "hlg" || profile === "pq" || profile === "appleLog";
+}
+
+function isWideGamutProfile(profile: ColorSpace): boolean {
+  return profile === "rec2020" || profile === "p3" || profile === "appleLog";
+}
+
+// Transfer function decode/encode
+
+export function decodeTransfer(color: Pixel, transfer: TransferFunctionType): Pixel {
+  switch (transfer) {
+    case "srgb":
+      return decodeSrgb(color);
+    case "bt1886":
+    case "linear":
+      return color;
+    case "hlg":
+      return decodeHlg(color);
+    case "pq":
+      return decodePq(color);
+    case "appleLog":
+      return decodeAppleLog(color);
+    default:
+      return color;
+  }
+}
+
+export function encodeTransfer(color: Pixel, transfer: TransferFunctionType): Pixel {
+  switch (transfer) {
+    case "srgb":
+      return encodeSrgb(color);
+    case "bt1886":
+    case "linear":
+      return color;
+    case "hlg":
+      return encodeHlg(color);
+    case "pq":
+      return encodePq(color);
+    case "appleLog":
+      return encodeAppleLog(color);
+    default:
+      return color;
+  }
+}
+
+function decodeSrgb(color: Pixel): Pixel {
+  const linearize = (c: number) => {
+    if (c <= 0.04045) return c / 12.92;
+    return Math.pow((c + 0.055) / 1.055, 2.4);
+  };
+  return { r: linearize(color.r), g: linearize(color.g), b: linearize(color.b), a: color.a };
+}
+
+function encodeSrgb(color: Pixel): Pixel {
+  const encode = (c: number) => {
+    if (c <= 0.0031308) return c * 12.92;
+    return 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
+  };
+  return { r: encode(color.r), g: encode(color.g), b: encode(color.b), a: color.a };
+}
+
+function decodeHlg(color: Pixel): Pixel {
+  const HLG_E = 1.2;
+  const linearize = (c: number) => {
+    if (c <= 0.0) return 0.0;
+    if (c <= 0.5) return c * c * (1.0 / (3.0 * HLG_E));
+    const a = Math.sqrt((3.0 * HLG_E - 0.5) / 3.0);
+    return a * Math.sqrt(c) - (a - 1.0 / (3.0 * HLG_E));
+  };
+  return { r: linearize(color.r), g: linearize(color.g), b: linearize(color.b), a: color.a };
+}
+
+function encodeHlg(color: Pixel): Pixel {
+  const HLG_E = 1.2;
+  const encode = (c: number) => {
+    if (c <= 0.0) return 0.0;
+    if (c <= 1.0 / (3.0 * HLG_E)) return Math.sqrt(3.0 * HLG_E * c);
+    return ((3.0 * HLG_E - 0.5) / 3.0) + (2.0 * Math.sqrt(c - (1.0 / (3.0 * HLG_E))));
+  };
+  return { r: encode(color.r), g: encode(color.g), b: encode(color.b), a: color.a };
+}
+
+function decodePq(color: Pixel): Pixel {
+  const c = 0.1593017578125;
+  const m1 = 2610.0 / 16384.0;
+  const m2 = 2523.0 / 4096.0 * 128.0;
+  const y1 = 1.7;
+  const y2 = 1.0 / 1.7;
+
+  const pqToLinear = (x: number) => {
+    const xn = Math.pow(x / 10000.0, m1);
+    const xn2 = xn * xn;
+    const xn3 = xn2 * xn;
+    const xn_y2 = Math.pow(xn, y2);
+    const n = xn3 + xn_y2;
+    const n_m2 = Math.pow(n, m2 / m1);
+    const y = Math.pow(n_m2 + Math.pow(c, m2 / m1), y1);
+    return y;
+  };
+
+  return { r: pqToLinear(color.r), g: pqToLinear(color.g), b: pqToLinear(color.b), a: color.a };
+}
+
+function encodePq(color: Pixel): Pixel {
+  const c = 0.1593017578125;
+  const m1 = 16384.0 / 2610.0;
+  const m2 = 4096.0 / 2523.0;
+  const y1 = 1.7;
+  const y2 = 1.0 / 1.7;
+
+  const linearToPq = (x: number) => {
+    const y = Math.pow(x, y2);
+    const y_y1 = Math.pow(y, 1.0 / y1);
+    const x_m2 = Math.pow(y_y1 + Math.pow(c, y1), m2 * y2);
+    return 10000.0 * Math.pow(x_m2 / (x_m2 + Math.pow(c, y1)), 1.0 / m1);
+  };
+
+  return { r: linearToPq(color.r), g: linearToPq(color.g), b: linearToPq(color.b), a: color.a };
+}
+
+// Apple Log decoding - based on ARRI Alexa Log C curve family with Apple-style parameters
+// Reference: Apple ProRes White Paper / AFImaging
+function decodeAppleLog(color: Pixel): Pixel {
+  const appleLogToLinear = (x: number): number => {
+    if (x <= 0.0) return 0.0;
+    if (x >= 1.0) return 1.0;
+    // Apple Log parameters (empirical curve fit for native Apple Log handling)
+    const a = 5.555556;
+    const d = 0.385371;
+    const e = 1.0;
+    const f = 0.817092;
+    // Linear region
+    if (x < 0.247190 - 0.052272 * f) {
+      return x / e;
+    }
+    // Log region
+    return e * Math.pow((x + d - 1.0) / (1.0 + d - 1.0), a) * (1.0 - f) + f;
+  };
+
+  return {
+    r: appleLogToLinear(color.r),
+    g: appleLogToLinear(color.g),
+    b: appleLogToLinear(color.b),
+    a: color.a
+  };
+}
+
+function encodeAppleLog(color: Pixel): Pixel {
+  const linearToAppleLog = (x: number): number => {
+    if (x <= 0.0) return 0.0;
+    if (x >= 1.0) return 1.0;
+    const a = 5.555556;
+    const d = 0.385371;
+    const e = 1.0;
+    const f = 0.817092;
+    // Linear region
+    if (x < (1.0 - f) * e) {
+      return x / e;
+    }
+    // Log region
+    return Math.pow((x - f * e) / ((1.0 - f) * e), 1.0 / a) * (1.0 + d - 1.0) + d - 1.0;
+  };
+
+  return {
+    r: linearToAppleLog(color.r),
+    g: linearToAppleLog(color.g),
+    b: linearToAppleLog(color.b),
+    a: color.a
+  };
+}
+
+// Tone mapping for HDR to SDR
+
+export function toneMapSdr(color: Pixel, sourceIsHdr: boolean): Pixel {
+  if (!sourceIsHdr) return color;
+
+  // Simple filmic tone map to compress HDR into SDR range
+  const compress = (v: number) => {
+    if (v <= 0.5) return v * 2.0;
+    const numerator = v - 0.4;
+    const denominator = 1.0 + Math.abs(numerator);
+    return 0.5 * Math.pow(v, 0.8) + 0.5 * (numerator / denominator + 1.0) * v;
+  };
+
+  return {
+    r: clamp01(compress(color.r)),
+    g: clamp01(compress(color.g)),
+    b: clamp01(compress(color.b)),
+    a: color.a
+  };
+}
+
+// Primary conversion matrix helpers
+
+export function primariesToXyz(primaries: ColorPrimaries): { xr: number; yr: number; xg: number; yg: number; xb: number; yb: number; wx: number; wy: number } {
+  return {
+    xr: primaries.redX / primaries.redY,
+    yr: 1.0,
+    xg: primaries.greenX / primaries.greenY,
+    yg: 1.0,
+    xb: primaries.blueX / primaries.blueY,
+    yb: 1.0,
+    wx: primaries.whiteX / primaries.whiteY,
+    wy: 1.0
+  };
+}
+
+export function buildRgbToXyzMatrix(primaries: ColorPrimaries): number[] {
+  const red = xyToXyz(primaries.redX, primaries.redY);
+  const green = xyToXyz(primaries.greenX, primaries.greenY);
+  const blue = xyToXyz(primaries.blueX, primaries.blueY);
+  const white = xyToXyz(primaries.whiteX, primaries.whiteY);
+  const primaryMatrix = [
+    red.x, green.x, blue.x,
+    red.y, green.y, blue.y,
+    red.z, green.z, blue.z
+  ];
+  const inverse = invert3x3(primaryMatrix);
+  const scale = multiplyMatrixVector(inverse, [white.x, white.y, white.z]);
+
+  return [
+    red.x * scale[0], green.x * scale[1], blue.x * scale[2],
+    red.y * scale[0], green.y * scale[1], blue.y * scale[2],
+    red.z * scale[0], green.z * scale[1], blue.z * scale[2]
+  ];
+}
+
+export function xyzToRgb(xyzMatrix: number[], xyz: { x: number; y: number; z: number }): Pixel {
+  return {
+    r: xyzMatrix[0] * xyz.x + xyzMatrix[1] * xyz.y + xyzMatrix[2] * xyz.z,
+    g: xyzMatrix[3] * xyz.x + xyzMatrix[4] * xyz.y + xyzMatrix[5] * xyz.z,
+    b: xyzMatrix[6] * xyz.x + xyzMatrix[7] * xyz.y + xyzMatrix[8] * xyz.z,
+    a: 1
+  };
+}
+
+// Gamut compression to prevent clipping
+
+export function compressGamut(color: Pixel, sourcePrimaries: ColorPrimaries, targetPrimaries: ColorPrimaries): Pixel {
+  if (sourcePrimaries.type === targetPrimaries.type) return color;
+
+  const conversion = buildPrimariesConversionMatrix(sourcePrimaries, targetPrimaries);
+  const mapped = multiplyMatrixVector(conversion, [color.r, color.g, color.b]);
+
+  let [r, g, b] = mapped;
+
+  const maxComp = Math.max(r, g, b, 0);
+  if (maxComp > 1.0) {
+    const scale = 1.0 / maxComp;
+    r *= scale;
+    g *= scale;
+    b *= scale;
+  }
+
+  return { r: clamp01(r), g: clamp01(g), b: clamp01(b), a: color.a };
+}
+
+export function buildPrimariesConversionMatrix(sourcePrimaries: ColorPrimaries, targetPrimaries: ColorPrimaries): number[] {
+  const sourceToXyz = buildRgbToXyzMatrix(sourcePrimaries);
+  const targetToXyz = buildRgbToXyzMatrix(targetPrimaries);
+  return multiplyMatrices(invert3x3(targetToXyz), sourceToXyz);
+}
+
+export function buildPrimariesConversionMatrixByType(sourceType: ColorPrimariesType, targetType: ColorPrimariesType): number[] {
+  const sourcePrimaries = PRIMARIES[sourceType] ?? PRIMARIES.rec709;
+  const targetPrimaries = PRIMARIES[targetType] ?? PRIMARIES.rec709;
+  return buildPrimariesConversionMatrix(sourcePrimaries, targetPrimaries);
+}
+
+function xyToXyz(x: number, y: number): { x: number; y: number; z: number } {
+  if (y === 0) {
+    return { x: 0, y: 0, z: 0 };
+  }
+
+  return {
+    x: x / y,
+    y: 1,
+    z: (1 - x - y) / y
+  };
+}
+
+function invert3x3(matrix: number[]): number[] {
+  const [a, b, c, d, e, f, g, h, i] = matrix;
+  const determinant = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+  if (!Number.isFinite(determinant) || Math.abs(determinant) < 1e-12) {
+    return [1, 0, 0, 0, 1, 0, 0, 0, 1];
+  }
+
+  const invDet = 1 / determinant;
+  return [
+    (e * i - f * h) * invDet,
+    (c * h - b * i) * invDet,
+    (b * f - c * e) * invDet,
+    (f * g - d * i) * invDet,
+    (a * i - c * g) * invDet,
+    (c * d - a * f) * invDet,
+    (d * h - e * g) * invDet,
+    (b * g - a * h) * invDet,
+    (a * e - b * d) * invDet
+  ];
+}
+
+function multiplyMatrixVector(matrix: number[], vector: [number, number, number] | number[]): [number, number, number] {
+  return [
+    matrix[0] * vector[0] + matrix[1] * vector[1] + matrix[2] * vector[2],
+    matrix[3] * vector[0] + matrix[4] * vector[1] + matrix[5] * vector[2],
+    matrix[6] * vector[0] + matrix[7] * vector[1] + matrix[8] * vector[2]
+  ];
+}
+
+function multiplyMatrices(left: number[], right: number[]): number[] {
+  return [
+    left[0] * right[0] + left[1] * right[3] + left[2] * right[6],
+    left[0] * right[1] + left[1] * right[4] + left[2] * right[7],
+    left[0] * right[2] + left[1] * right[5] + left[2] * right[8],
+    left[3] * right[0] + left[4] * right[3] + left[5] * right[6],
+    left[3] * right[1] + left[4] * right[4] + left[5] * right[7],
+    left[3] * right[2] + left[4] * right[5] + left[5] * right[8],
+    left[6] * right[0] + left[7] * right[3] + left[8] * right[6],
+    left[6] * right[1] + left[7] * right[4] + left[8] * right[7],
+    left[6] * right[2] + left[7] * right[5] + left[8] * right[8]
+  ];
+}
+
+// Apply full managed color pipeline to a pixel
+
+export interface ManagedPipelineOptions {
+  sourceTransfer: TransferFunctionType;
+  sourcePrimaries: ColorPrimariesType;
+  targetTransfer: TransferFunctionType;
+  targetPrimaries: ColorPrimariesType;
+  workingPrimaries: ColorPrimariesType;
+  toneMapping: ToneMappingMode;
+  gamutMapping: GamutMappingMode;
+  isHdr: boolean;
+}
+
+export function applyManagedPipeline(pixel: Pixel, options: ManagedPipelineOptions): Pixel {
+  let result = pixel;
+
+  // 1. Decode input transfer to linear
+  result = decodeTransfer(result, options.sourceTransfer);
+
+  // 2. Convert source primaries to working primaries (if different)
+  if (options.sourcePrimaries !== options.workingPrimaries) {
+    const srcP = PRIMARIES[options.sourcePrimaries] ?? PRIMARIES.rec709;
+    const wkP = PRIMARIES[options.workingPrimaries] ?? PRIMARIES.rec709;
+    result = compressGamut(result, srcP, wkP);
+  }
+
+  // 3. Apply creative grade (done by caller via evaluateNodeGraph)
+
+  // 4. Convert working primaries to target primaries
+  if (options.workingPrimaries !== options.targetPrimaries) {
+    const wkP = PRIMARIES[options.workingPrimaries] ?? PRIMARIES.rec709;
+    const tgtP = PRIMARIES[options.targetPrimaries] ?? PRIMARIES.rec709;
+    result = compressGamut(result, wkP, tgtP);
+  }
+
+  // 5. Apply tone mapping
+  if (options.isHdr && options.toneMapping === "sdr") {
+    result = toneMapSdr(result, true);
+  }
+
+  // 6. Encode output transfer
+  result = encodeTransfer(result, options.targetTransfer);
+
+  return result;
+}
+
+// Resolve effective color space from settings and source info
+
+export function resolveEffectiveInputTransform(settings: ColorManagementSettings, sourceInfo: SourceColorInfo): { transfer: TransferFunctionType; primaries: ColorPrimariesType } {
+  const inputTransform = settings.inputTransform;
+  const sourceProfile = settings.inputColorSpace === "auto"
+    ? sourceInfo.detectedProfile
+    : settings.inputColorSpace;
+
+  const transfer = inputTransform === "auto"
+    ? COLORSPACES[sourceProfile]?.transfer ?? "bt1886"
+    : (COLORSPACES[inputTransform as ColorSpace]?.transfer ?? "bt1886");
+
+  const primaries = COLORSPACES[sourceProfile]?.primaries ?? "rec709";
+
+  return { transfer, primaries };
+}
+
+export function resolveEffectiveOutputTransform(settings: ColorManagementSettings): TransferFunctionType {
+  const outputTransform = settings.outputTransform;
+  if (outputTransform === "none") return "bt1886";
+  return COLORSPACES[outputTransform as ColorSpace]?.transfer ?? "bt1886";
 }

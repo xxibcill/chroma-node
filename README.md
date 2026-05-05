@@ -2,11 +2,9 @@
 
 Chroma Node is a desktop color grading learning app inspired by the DaVinci Resolve Color page. It is built as an Electron application with a React/Vite renderer, a TypeScript main process, WebGL2 preview rendering, and FFmpeg/FFprobe for local media probing, frame extraction, and H.264 export.
 
-The current MVP supports one imported clip at a time, up to three serial color nodes, primary corrections, HSL qualification, power windows, translation-only tracking, waveform/vectorscope displays, JSON project save/load, and video-only H.264 MP4 export.
-
 ## Current Capabilities
 
-- Import one MP4 or MOV clip up to 1920 x 1080.
+- Import one MP4 or MOV clip up to 4K-equivalent display resolution (e.g. 3840x2160 portrait, 4096x2160 DCI).
 - Inspect playback with play/pause, first/last frame, frame stepping, scrubbing, timecode, original/graded/split viewer modes, and split position control.
 - Grade through up to 3 serial nodes.
 - Toggle, rename, add, delete, and bypass nodes.
@@ -26,7 +24,14 @@ The current MVP supports one imported clip at a time, up to three serial color n
 - Display luma waveform and chroma vectorscope from the graded frame.
 - Undo and redo recent project edits in the renderer.
 - Save and open JSON project files.
-- Export the graded clip as a video-only H.264 MP4 with draft, standard, or high quality presets.
+- Export the graded clip with flexible output geometry:
+  - Fit, crop, or pad (letterbox) to target dimensions
+  - Preset social sizes (9:16 vertical, 1:1 square, 16:9 widescreen)
+  - Source audio passthrough with stream copy
+  - Video-only H.264 MP4 with draft/standard/high quality presets
+  - Still frame PNG export
+  - Image sequence PNG export with naming patterns
+  - Additional codecs: HEVC, ProRes, VP9 (encoder availability validated at export start)
 - Cancel active exports and receive progress updates.
 
 ## Tech Stack
@@ -36,7 +41,7 @@ The current MVP supports one imported clip at a time, up to three serial color n
 - TypeScript 5.7 with strict type checking.
 - WebGL2 fragment shaders for live viewer color processing.
 - Shared TypeScript color engine for preview shader generation and CPU export evaluation.
-- FFmpeg and FFprobe for media diagnostics, probing, frame extraction, raw frame decode, and MP4 encode.
+- FFmpeg and FFprobe for media diagnostics, probing, frame extraction, raw frame decode, and encode.
 - Vitest for unit tests.
 - ESLint 9 for linting.
 
@@ -48,7 +53,7 @@ The current MVP supports one imported clip at a time, up to three serial color n
   - in common Unix paths such as `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, or `/bin`,
   - through explicit environment variables,
   - or as bundled binaries under `bin/<platform>/<arch>/` in Electron resources.
-- FFmpeg must include the `libx264` encoder for project export.
+- FFmpeg must include the `libx264` encoder for H.264 export.
 - A system/browser environment with WebGL2 support.
 
 Explicit FFmpeg paths can be set with:
@@ -140,23 +145,6 @@ tasks/        Task-level implementation notes by phase
 scripts/      Phase verification scripts
 ```
 
-Important modules:
-
-- `src/main/ipc.ts` registers the Electron IPC handlers.
-- `src/main/ffmpeg.ts` discovers FFmpeg/FFprobe and reports diagnostics.
-- `src/main/mediaProbe.ts` validates MP4/MOV imports and maps FFprobe metadata.
-- `src/main/frame.ts` extracts exact preview/tracking frames.
-- `src/main/projectFile.ts` saves and opens JSON project files.
-- `src/main/exportProject.ts` decodes source frames, evaluates the node graph on CPU, and encodes H.264 MP4 output.
-- `src/preload/preload.ts` exposes the safe `window.chromaNode` renderer API.
-- `src/shared/ipc.ts` defines the versioned IPC request/response contract.
-- `src/shared/project.ts` defines the project schema, validation, sanitization, and serialization.
-- `src/shared/colorEngine.ts` defines node data, primary corrections, qualifiers, power windows, tracking keyframes, CPU evaluation, and WebGL shader generation.
-- `src/renderer/App.tsx` owns the main workspace UI and app state.
-- `src/renderer/webgl/FrameRenderer.ts` renders live preview frames with WebGL2.
-- `src/renderer/scopes/` analyzes and draws waveform/vectorscope views.
-- `src/renderer/tracking/templateTracker.ts` implements translation-only template matching.
-
 ## Runtime Architecture
 
 The app uses a split Electron architecture:
@@ -184,29 +172,31 @@ A project stores:
 - playback state
 - up to 3 serial color nodes
 - per-node primary controls, qualifier, power windows, and tracking data
-- H.264 export settings
+- export settings
 
 Project loading validates and sanitizes the file. Unsupported schema versions fail, while invalid or out-of-range values are clamped/defaulted where possible.
 
 ## Media and Export Notes
 
 - Imports are limited to `.mp4` and `.mov`.
-- Display dimensions above 1920 x 1080 are rejected.
+- Display dimensions up to 4K-equivalent are supported (portrait 3840x2160, DCI 4096x2160, etc.).
 - FFprobe is required for import metadata.
 - FFmpeg is required for exact frame extraction and export.
-- Export writes `.mp4` only.
+- Export writes `.mp4`, `.png` still frames, or `.png` image sequences.
 - Export cannot overwrite the source media.
-- Export presets map to libx264 settings:
+- H.264 presets map to libx264 settings:
   - draft: `ultrafast`, CRF 28
   - standard: `medium`, CRF 23
   - high: `slow`, CRF 18
-- Export is video-only; audio preservation is not implemented in the current MVP.
+- Additional codecs (HEVC, ProRes, VP9) are validated for encoder availability at export start.
+- Export includes source audio passthrough via stream copy when audio is present.
+- Export geometry supports fit, crop, and pad (letterbox) modes with preset social sizes.
 
 ## Current Limits
 
 - One clip at a time.
 - MP4/MOV only.
-- 1080p maximum display size.
+- Maximum display size is 4K-equivalent (e.g. 3840x2160 portrait).
 - No timeline, trimming, multi-clip editing, audio editing, or audio export.
 - Maximum of 3 serial nodes.
 - No parallel node graph or node reordering.
@@ -228,5 +218,13 @@ Current implemented phase coverage includes:
 - Phase 04: waveform and vectorscope
 - Phase 05: translation tracking
 - Phase 06: H.264 export
-
-Phase 07 focuses on hardening, automated coverage, performance work, packaging, and release polish.
+- Phase 07: hardening and packaging
+- Phase 08: media geometry and vertical video
+- Phase 09: flexible export geometry
+- Phase 10: high-resolution preview and performance
+- Phase 11: format and delivery expansion
+- Phase 12: Resolve-style Color page upgrade
+- Phase 13: Apple Log and advanced color management (in progress)
+- Phase 14: ultimate color management expansion
+- Phase 15: professional scopes and monitoring suite
+- Phase 16: Color page usability and workflow upgrade

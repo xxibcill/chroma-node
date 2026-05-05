@@ -13,7 +13,9 @@ export const IpcChannel = {
   ExportSynthetic: "export:synthetic",
   StartExport: "export:start",
   CancelExport: "export:cancel",
-  ExportProgress: "export:progress"
+  ExportProgress: "export:progress",
+  ExportStill: "export:still",
+  ExportSequence: "export:sequence"
 } as const;
 
 export type IpcChannelName = (typeof IpcChannel)[keyof typeof IpcChannel];
@@ -61,6 +63,9 @@ export interface FfmpegDiagnostics {
   ffmpegVersion?: string;
   ffprobeVersion?: string;
   h264EncoderAvailable: boolean;
+  hevcEncoderAvailable: boolean;
+  proresEncoderAvailable: boolean;
+  vp9EncoderAvailable: boolean;
   available: boolean;
   errors: AppError[];
 }
@@ -81,12 +86,26 @@ export interface MediaRef {
   codec: string;
   width: number;
   height: number;
+  displayWidth: number;
+  displayHeight: number;
   durationSeconds: number;
   frameRate: number;
   totalFrames?: number;
   hasAudio: boolean;
+  audioStreamIndex?: number;
   rotation: number;
   videoStreamIndex: number;
+  colorMetadata?: import("./colorEngine.js").ColorMetadata;
+  detectedColorProfile?: string;
+}
+
+export { normalizeRotation } from "./mediaGeometry.js";
+
+export function getDisplaySize(media: { width: number; height: number; rotation: number }): { displayWidth: number; displayHeight: number } {
+  const rotated = media.rotation === 90 || media.rotation === 270;
+  return rotated
+    ? { displayWidth: media.height, displayHeight: media.width }
+    : { displayWidth: media.width, displayHeight: media.height };
 }
 
 export interface FrameExtractRequest {
@@ -109,6 +128,28 @@ export interface ExportSyntheticRequest {
   height?: number;
   frameCount?: number;
   fps?: number;
+}
+
+export interface ExportStillRequest {
+  sourcePath: string;
+  outputPath?: string;
+  frameIndex?: number;
+  timeSeconds?: number;
+  nodes: import("./colorEngine.js").ColorNode[];
+  width: number;
+  height: number;
+  colorManagement?: import("./colorEngine.js").ColorManagementSettings;
+  sourceTransfer?: import("./colorEngine.js").TransferFunctionType;
+  sourcePrimaries?: import("./colorEngine.js").ColorPrimariesType;
+  isHdr?: boolean;
+}
+
+export interface ExportSequenceRequest {
+  project: import("./project.js").ChromaProject;
+  outputPath?: string;
+  startFrame?: number;
+  endFrame?: number;
+  overwriteConfirmed?: boolean;
 }
 
 export type ExportQuality = "draft" | "standard" | "high";
@@ -147,6 +188,7 @@ export interface ExportJobResult {
   codec: string;
   container?: string;
   hasAudio?: boolean;
+  audioBehavior?: string;
   durationSeconds: number;
 }
 
@@ -184,6 +226,8 @@ export interface ChromaNodeApi {
   probeMedia(request: ProbeMediaRequest): Promise<VersionedResponse<MediaRef>>;
   extractFrame(request: FrameExtractRequest): Promise<VersionedResponse<DecodedFrame>>;
   exportSynthetic(request?: ExportSyntheticRequest): Promise<VersionedResponse<ExportJobResult>>;
+  exportStill(request: ExportStillRequest): Promise<VersionedResponse<ExportJobResult>>;
+  exportSequence(request: ExportSequenceRequest): Promise<VersionedResponse<ExportJobResult>>;
   startExport(request: ExportProjectRequest): Promise<VersionedResponse<ExportJobResult>>;
   cancelExport(request: CancelExportRequest): Promise<VersionedResponse<ExportProgress>>;
   onExportProgress(listener: (progress: ExportProgress) => void): () => void;

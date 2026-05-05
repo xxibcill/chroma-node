@@ -605,10 +605,10 @@ h2 {
 .scope-canvas {
   display: block;
   width: 100%;
-  height: 92px;
-  border: 1px solid rgba(178, 191, 225, 0.05);
-  border-radius: 10px;
-  background: #070a10;
+  height: 132px;
+  border: 1px solid rgba(178, 191, 225, 0.08);
+  border-radius: 8px;
+  background: #05070b;
 }
 
 .scope-card-vectorscope .scope-canvas {
@@ -926,6 +926,54 @@ h2 {
   background: none;
 }
 
+.export-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 0;
+}
+
+.export-settings .field-label {
+  display: grid;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.export-settings .field-label input,
+.export-settings .field-label select {
+  background: rgba(8, 12, 18, 0.6);
+  border: 1px solid rgba(136, 151, 185, 0.15);
+  border-radius: 6px;
+  color: var(--text-primary);
+  padding: 5px 8px;
+  font-size: 0.8rem;
+}
+
+.export-settings .custom-dims {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.export-preview-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.export-preview-dims {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.export-preview-warning {
+  color: var(--amber-500);
+}
+
 .field-label,
 .toggle-row {
   display: grid;
@@ -1229,7 +1277,7 @@ h2 {
   }
 
   .scope-canvas {
-    height: 80px;
+    height: 116px;
   }
 
   .scope-card-vectorscope .scope-canvas {
@@ -1241,4 +1289,145 @@ h2 {
     width: 80px;
     min-height: 62px;
   }
+}
+
+.curves-card {
+  padding: 8px;
+  background: var(--bg-control);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  margin-bottom: 8px;
+}
+
+.curves-channels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.curve-channel-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.curve-channel-row .toggle-row {
+  margin-bottom: 0;
+}
+
+.curve-points-header {
+  font-size: 0.7rem;
+  font-weight: 760;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.curves-points {
+  background: var(--bg-control-strong);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+}
+
+.curve-points-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.curve-point-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.curve-point-index {
+  width: 20px;
+  font-size: 0.65rem;
+  color: var(--text-dim);
+}
+
+.curve-point-input {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 0;
+}
+
+.curve-point-input span {
+  font-size: 0.65rem;
+  color: var(--text-dim);
+}
+
+.curve-point-input input {
+  width: 52px;
+  height: 24px;
+  padding: 0 4px;
+  font-size: 0.7rem;
+  border-radius: 4px;
+  text-align: right;
+}
+
+.gallery-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.gallery-thumbs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.gallery-thumb {
+  position: relative;
+  width: 48px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.gallery-thumb.is-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.gallery-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.gallery-thumb-delete {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  font-size: 0.6rem;
+  line-height: 1;
+  background: var(--bg-control);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  opacity: 0;
+}
+
+.gallery-thumb:hover .gallery-thumb-delete {
+  opacity: 1;
+}
+
+.sample-count {
+  font-size: 0.7rem;
+  color: var(--text-muted);
 }

@@ -1,5 +1,4 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { Writable } from "node:stream";
@@ -8,29 +7,29 @@ import type {
   ExportJobResult,
   ExportProgress,
   ExportProjectRequest,
-  ExportQuality,
-  MediaRef
+  ExportQuality
 } from "../shared/ipc.js";
-import type { ChromaProject } from "../shared/project.js";
-import { evaluateNodeGraph, normalizeNodeGraph, resolveTrackedNode, type ColorNode } from "../shared/colorEngine.js";
+import {
+  evaluateNodeGraph,
+  normalizeNodeGraph,
+  resolveTrackedNode,
+  decodeTransfer,
+  encodeTransfer,
+  toneMapSdr,
+  compressGamut,
+  PRIMARIES,
+  COLORSPACES,
+  type ColorNode,
+  type ColorManagementSettings,
+  type TransferFunctionType,
+  type ColorPrimariesType
+} from "../shared/colorEngine.js";
 import { sanitizeProject } from "../shared/project.js";
+import { createExportJobSnapshot, type ExportJobSnapshot } from "./exportPlanning.js";
 import { appError, isAppError } from "./errors.js";
-import { requireFfmpeg, requireFfprobe } from "./ffmpeg.js";
+import { requireFfmpeg, requireFfprobe, getFfmpegDiagnostics } from "./ffmpeg.js";
 import { runProcess } from "./process.js";
-
-export interface ExportJobSnapshot {
-  id: string;
-  project: ChromaProject;
-  media: MediaRef;
-  outputPath: string;
-  tempOutputPath: string;
-  quality: ExportQuality;
-  width: number;
-  height: number;
-  fps: number;
-  totalFrames: number;
-  startedAt: number;
-}
+import { computeProfileResult, createProfilingTimers, formatProfileReport, type ProfilingTimers } from "./exportProfiling.js";
 
 type ProgressListener = (progress: ExportProgress) => void;
 
@@ -38,6 +37,7 @@ interface ActiveExportJob {
   snapshot: ExportJobSnapshot;
   cancelled: boolean;
   processes: Set<ChildProcessWithoutNullStreams>;
+  profiling?: ProfilingTimers;
   cancel(): ExportProgress;
 }
 
@@ -69,48 +69,6 @@ const codecPresets: Record<ExportQuality, string[]> = {
   high: ["-preset", "slow", "-crf", "18"]
 };
 
-export function createExportJobSnapshot(request: ExportProjectRequest): ExportJobSnapshot {
-  const project = sanitizeProject(cloneJson(request.project));
-  const media = project.media;
-  if (!media) {
-    throw appError("EXPORT_FAILED", "Export cannot start without imported media.");
-  }
-
-  const outputPath = normalizeOutputPath(request.outputPath ?? project.exportSettings.outputPath);
-  if (!outputPath) {
-    throw appError("EXPORT_FAILED", "Export output path is required.");
-  }
-
-  if (path.extname(outputPath).toLowerCase() !== ".mp4") {
-    throw appError("EXPORT_FAILED", "H.264 export must use an .mp4 output path.", outputPath);
-  }
-
-  if (path.resolve(outputPath) === path.resolve(media.sourcePath)) {
-    throw appError("EXPORT_FAILED", "Export output cannot overwrite the source media.", outputPath);
-  }
-
-  const quality = request.quality ?? project.exportSettings.quality ?? "standard";
-  const width = clampInteger(media.width, 1, 7680);
-  const height = clampInteger(media.height, 1, 4320);
-  const fps = clampNumber(media.frameRate, 1, 240);
-  const totalFrames = Math.max(1, media.totalFrames ?? (Math.round(media.durationSeconds * fps) || 1));
-  const id = `export-${crypto.randomUUID()}`;
-
-  return {
-    id,
-    project,
-    media,
-    outputPath,
-    tempOutputPath: `${outputPath}.part-${id}.mp4`,
-    quality,
-    width,
-    height,
-    fps,
-    totalFrames,
-    startedAt: Date.now()
-  };
-}
-
 export async function outputPathExists(outputPath: string): Promise<boolean> {
   try {
     const stat = await fs.stat(outputPath);
@@ -126,7 +84,24 @@ export async function exportProject(
 ): Promise<ExportJobResult> {
   requireFfprobe();
   const ffmpegPath = requireFfmpeg();
-  const snapshot = createExportJobSnapshot(request);
+  const sanitizedRequest = {
+    ...request,
+    project: sanitizeProject(cloneJson(request.project))
+  };
+  const snapshot = createExportJobSnapshot(sanitizedRequest);
+
+  // Validate encoder availability before starting export
+  const diagnostics = await getFfmpegDiagnostics();
+  const codec = snapshot.project.exportSettings.codec;
+  const encoderMap: Record<string, boolean> = {
+    h264: diagnostics.h264EncoderAvailable,
+    hevc: diagnostics.hevcEncoderAvailable,
+    prores: diagnostics.proresEncoderAvailable,
+    vp9: diagnostics.vp9EncoderAvailable
+  };
+  if (!encoderMap[codec]) {
+    throw appError("EXPORT_FAILED", `The ${codec.toUpperCase()} encoder is not available in this FFmpeg build.`, diagnostics.ffmpegVersion ?? "unknown version");
+  }
 
   if (await outputPathExists(snapshot.outputPath) && !request.overwriteConfirmed) {
     throw appError("EXPORT_OUTPUT_EXISTS", "Export output already exists and needs confirmation.", snapshot.outputPath);
@@ -139,11 +114,32 @@ export async function exportProject(
   try {
     await fs.mkdir(path.dirname(snapshot.outputPath), { recursive: true });
     await fs.rm(snapshot.tempOutputPath, { force: true });
-    emitProgress(snapshot, "running", 0, "Starting FFmpeg decode and H.264 encode.", onProgress);
+    emitProgress(snapshot, "running", 0, "Starting FFmpeg video encode.", onProgress);
 
     const renderedFrames = await processFrames(ffmpegPath, job, onProgress);
+
+    // Audio passthrough: merge source audio into graded video if requested
+    const { audioBehavior } = snapshot.project.exportSettings;
+    if (audioBehavior === "passthrough" && snapshot.media.hasAudio) {
+      emitProgress(snapshot, "running", renderedFrames, "Merging source audio.", onProgress);
+      await mergeAudioPassthrough(ffmpegPath, snapshot);
+    }
+
     const result = await finalizeExport(snapshot, renderedFrames);
     emitProgress(snapshot, "completed", renderedFrames, "Export complete.", onProgress);
+
+    if (job.profiling) {
+      const profile = computeProfileResult(
+        snapshot.media.displayWidth,
+        snapshot.media.displayHeight,
+        snapshot.width,
+        snapshot.height,
+        renderedFrames,
+        job.profiling
+      );
+      console.log(formatProfileReport(profile));
+    }
+
     return result;
   } catch (error) {
     await fs.rm(snapshot.tempOutputPath, { force: true }).catch(() => undefined);
@@ -176,32 +172,188 @@ export function cancelExport(jobId: string): ExportProgress {
   return job.cancel();
 }
 
-export function renderRgbaFrame(source: Buffer, width: number, height: number, nodes: readonly ColorNode[], frameIndex: number): Buffer {
-  const output = Buffer.allocUnsafe(source.length);
-  const resolvedNodes = normalizeNodeGraph(nodes).map((node) => resolveTrackedNode(node, frameIndex));
+export interface RenderRgbaFrameOptions {
+  colorManagement?: ColorManagementSettings;
+  sourceTransfer?: TransferFunctionType;
+  sourcePrimaries?: ColorPrimariesType;
+  isHdr?: boolean;
+}
 
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const offset = (y * width + x) * 4;
-      const pixel = {
+export function renderRgbaFrame(
+  source: Buffer,
+  sourceWidth: number,
+  sourceHeight: number,
+  nodes: readonly ColorNode[],
+  frameIndex: number,
+  options?: RenderRgbaFrameOptions
+): Buffer {
+  const resolvedNodes = normalizeNodeGraph(nodes).map((node) => resolveTrackedNode(node, frameIndex));
+  const colorManagement = options?.colorManagement;
+  const sourceTransfer = options?.sourceTransfer ?? "bt1886";
+  const sourcePrimaries = options?.sourcePrimaries ?? "rec709";
+  const isHdr = options?.isHdr ?? false;
+
+  const output = Buffer.allocUnsafe(source.length);
+
+  // Determine target output transfer from color management settings
+  const targetTransfer: TransferFunctionType = colorManagement?.outputTransform && colorManagement.outputTransform !== "none"
+    ? (COLORSPACES[colorManagement.outputTransform as keyof typeof COLORSPACES]?.transfer ?? "bt1886")
+    : "bt1886";
+
+  const workingPrimaries: ColorPrimariesType = colorManagement?.workingColorSpace
+    ? (COLORSPACES[colorManagement.workingColorSpace as keyof typeof COLORSPACES]?.primaries ?? "rec709")
+    : "rec709";
+
+  for (let y = 0; y < sourceHeight; y += 1) {
+    for (let x = 0; x < sourceWidth; x += 1) {
+      const offset = (y * sourceWidth + x) * 4;
+      let pixel: { r: number; g: number; b: number; a: number } = {
         r: source[offset] / 255,
         g: source[offset + 1] / 255,
         b: source[offset + 2] / 255,
         a: source[offset + 3] / 255
       };
+
+      // Apply input transfer decode if not linear
+      if (sourceTransfer !== "linear") {
+        pixel = { ...decodeTransfer(pixel, sourceTransfer), a: pixel.a };
+      }
+
+      // Apply creative grade
       const graded = evaluateNodeGraph(pixel, resolvedNodes, {
-        x: (x + 0.5) / width,
-        y: (y + 0.5) / height
+        x: (x + 0.5) / sourceWidth,
+        y: (y + 0.5) / sourceHeight
       });
 
-      output[offset] = floatToByte(graded.r);
-      output[offset + 1] = floatToByte(graded.g);
-      output[offset + 2] = floatToByte(graded.b);
-      output[offset + 3] = floatToByte(graded.a ?? pixel.a);
+      // Apply gamut compression and tone mapping
+      if (sourcePrimaries !== workingPrimaries) {
+        const srcP = PRIMARIES[sourcePrimaries] ?? PRIMARIES.rec709;
+        const wkP = PRIMARIES[workingPrimaries] ?? PRIMARIES.rec709;
+        pixel = { ...compressGamut(graded, srcP, wkP), a: graded.a ?? pixel.a };
+      } else {
+        pixel = { ...graded, a: graded.a ?? pixel.a };
+      }
+
+      if (isHdr && colorManagement?.toneMapping === "sdr") {
+        pixel = { ...toneMapSdr(pixel, true), a: pixel.a };
+      }
+
+      // Encode output transfer
+      pixel = { ...encodeTransfer(pixel, targetTransfer), a: pixel.a };
+
+      output[offset] = floatToByte(pixel.r);
+      output[offset + 1] = floatToByte(pixel.g);
+      output[offset + 2] = floatToByte(pixel.b);
+      output[offset + 3] = floatToByte(pixel.a);
     }
   }
 
   return output;
+}
+
+export function transformRgbaFrame(
+  source: Buffer,
+  sourceWidth: number,
+  sourceHeight: number,
+  targetWidth: number,
+  targetHeight: number,
+  policy: "fit" | "crop" | "pad"
+): Buffer {
+  const output = Buffer.alloc(targetWidth * targetHeight * 4);
+  const sourceAspect = sourceWidth / sourceHeight;
+  const targetAspect = targetWidth / targetHeight;
+
+  let srcX = 0;
+  let srcY = 0;
+  let srcVisibleWidth = sourceWidth;
+  let srcVisibleHeight = sourceHeight;
+
+  if (policy === "fit") {
+    if (sourceAspect > targetAspect) {
+      srcVisibleHeight = Math.round(sourceWidth / targetAspect);
+      srcY = Math.round((sourceHeight - srcVisibleHeight) / 2);
+    } else if (sourceAspect < targetAspect) {
+      srcVisibleWidth = Math.round(sourceHeight * targetAspect);
+      srcX = Math.round((sourceWidth - srcVisibleWidth) / 2);
+    }
+  } else if (policy === "crop") {
+    if (sourceAspect > targetAspect) {
+      srcVisibleWidth = Math.round(sourceHeight * targetAspect);
+      srcX = Math.round((sourceWidth - srcVisibleWidth) / 2);
+    } else if (sourceAspect < targetAspect) {
+      srcVisibleHeight = Math.round(sourceWidth / targetAspect);
+      srcY = Math.round((sourceHeight - srcVisibleHeight) / 2);
+    }
+  }
+  // For "pad", use full source, output has padding (handled separately)
+
+  const paddedContent = policy === "pad"
+    ? getPaddedContentRect(sourceWidth, sourceHeight, targetWidth, targetHeight)
+    : undefined;
+
+  const sx = srcVisibleWidth / targetWidth;
+  const sy = srcVisibleHeight / targetHeight;
+
+  for (let ty = 0; ty < targetHeight; ty += 1) {
+    for (let tx = 0; tx < targetWidth; tx += 1) {
+      let r: number, g: number, b: number, a: number;
+
+      if (paddedContent) {
+        const insideContent = tx >= paddedContent.x &&
+          tx < paddedContent.x + paddedContent.width &&
+          ty >= paddedContent.y &&
+          ty < paddedContent.y + paddedContent.height;
+        if (insideContent) {
+          const srcX = Math.floor(((tx - paddedContent.x) + 0.5) * sourceWidth / paddedContent.width);
+          const srcY = Math.floor(((ty - paddedContent.y) + 0.5) * sourceHeight / paddedContent.height);
+          const idx = (Math.max(0, Math.min(sourceHeight - 1, srcY)) * sourceWidth + Math.max(0, Math.min(sourceWidth - 1, srcX))) * 4;
+          r = source[idx];
+          g = source[idx + 1];
+          b = source[idx + 2];
+          a = source[idx + 3];
+        } else {
+          r = 0;
+          g = 0;
+          b = 0;
+          a = 255;
+        }
+      } else {
+        const px = Math.round(srcX + tx * sx);
+        const py = Math.round(srcY + ty * sy);
+        const idx = (Math.max(0, Math.min(sourceHeight - 1, py)) * sourceWidth + Math.max(0, Math.min(sourceWidth - 1, px))) * 4;
+        r = source[idx];
+        g = source[idx + 1];
+        b = source[idx + 2];
+        a = source[idx + 3];
+      }
+
+      const outOffset = (ty * targetWidth + tx) * 4;
+      output[outOffset] = r;
+      output[outOffset + 1] = g;
+      output[outOffset + 2] = b;
+      output[outOffset + 3] = a;
+    }
+  }
+
+  return output;
+}
+
+function getPaddedContentRect(
+  sourceWidth: number,
+  sourceHeight: number,
+  targetWidth: number,
+  targetHeight: number
+): { x: number; y: number; width: number; height: number } {
+  const scale = Math.min(targetWidth / sourceWidth, targetHeight / sourceHeight);
+  const width = Math.max(1, Math.round(sourceWidth * scale));
+  const height = Math.max(1, Math.round(sourceHeight * scale));
+
+  return {
+    x: Math.floor((targetWidth - width) / 2),
+    y: Math.floor((targetHeight - height) / 2),
+    width,
+    height
+  };
 }
 
 async function processFrames(
@@ -209,8 +361,10 @@ async function processFrames(
   job: ActiveExportJob,
   onProgress: ProgressListener
 ): Promise<number> {
-  const { snapshot } = job;
-  const frameSize = snapshot.width * snapshot.height * 4;
+  const { snapshot, profiling } = job;
+  const sourceWidth = snapshot.media.displayWidth;
+  const sourceHeight = snapshot.media.displayHeight;
+  const sourceFrameSize = sourceWidth * sourceHeight * 4;
   const decoder = spawnFfmpeg(ffmpegPath, buildDecodeArgs(snapshot));
   const encoder = spawnFfmpeg(ffmpegPath, buildEncodeArgs(snapshot));
   decoder.stdin.end();
@@ -226,17 +380,40 @@ async function processFrames(
   let pending: Buffer<ArrayBufferLike> = Buffer.alloc(0);
   let frameIndex = 0;
 
+  if (profiling) {
+    profiling.decodeStart = performance.now();
+  }
+
   try {
     for await (const chunk of decoder.stdout) {
       throwIfCancelled(job);
       pending = pending.length === 0 ? (chunk as Buffer) : Buffer.concat([pending, chunk as Buffer]);
 
-      while (pending.length >= frameSize) {
+      while (pending.length >= sourceFrameSize) {
         throwIfCancelled(job);
-        const sourceFrame = pending.subarray(0, frameSize);
-        pending = pending.subarray(frameSize);
-        const rendered = renderRgbaFrame(sourceFrame, snapshot.width, snapshot.height, snapshot.project.nodes, frameIndex);
-        await writeBuffer(encoder.stdin, rendered);
+        const sourceFrame = pending.subarray(0, sourceFrameSize);
+        pending = pending.subarray(sourceFrameSize);
+
+        if (profiling) {
+          profiling.decodeEnd = performance.now();
+          profiling.renderStart = performance.now();
+        }
+
+        const graded = renderRgbaFrame(sourceFrame, sourceWidth, sourceHeight, snapshot.project.nodes, frameIndex, {
+          colorManagement: snapshot.project.colorManagementSettings,
+          sourceTransfer: snapshot.media.colorMetadata?.transfer.type ?? "bt1886",
+          sourcePrimaries: snapshot.media.colorMetadata?.primaries.type ?? "rec709",
+          isHdr: !!(snapshot.media.colorMetadata?.transfer.type === "hlg" ||
+                 snapshot.media.colorMetadata?.transfer.type === "pq" ||
+                 snapshot.media.colorMetadata?.transfer.type === "appleLog")
+        });
+        const resized = transformRgbaFrame(graded, sourceWidth, sourceHeight, snapshot.width, snapshot.height, snapshot.project.exportSettings.resizePolicy);
+
+        if (profiling) {
+          profiling.renderEnd = performance.now();
+        }
+
+        await writeBuffer(encoder.stdin, resized);
         frameIndex += 1;
         emitProgress(snapshot, "running", frameIndex, `Rendered ${frameIndex} / ${snapshot.totalFrames} frames.`, onProgress);
       }
@@ -257,8 +434,17 @@ async function processFrames(
     throw appError("EXPORT_FAILED", "FFmpeg could not decode the source media.", decoderStderr());
   }
 
+  if (profiling) {
+    profiling.encodeStart = performance.now();
+  }
+
   encoder.stdin.end();
   const encoderExit = await encoderClosed;
+
+  if (profiling) {
+    profiling.encodeEnd = performance.now();
+  }
+
   if (encoderExit.code !== 0) {
     throw appError("EXPORT_FAILED", "FFmpeg could not encode the H.264 MP4.", encoderStderr());
   }
@@ -266,18 +452,49 @@ async function processFrames(
   return frameIndex;
 }
 
+async function mergeAudioPassthrough(ffmpegPath: string, snapshot: ExportJobSnapshot): Promise<void> {
+  const outputExt = path.extname(snapshot.outputPath) || path.extname(snapshot.tempOutputPath);
+  const tempWithAudioPath = `${snapshot.tempOutputPath}.audio-temp${outputExt}`;
+  const audioStreamIndex = snapshot.media.audioStreamIndex ?? snapshot.media.videoStreamIndex + 1;
+
+  const args = [
+    "-hide_banner",
+    "-y",
+    "-i",
+    snapshot.tempOutputPath,
+    "-i",
+    snapshot.media.sourcePath,
+    "-map",
+    "0:v",
+    "-map",
+    `1:${audioStreamIndex}`,
+    "-c:v",
+    "copy",
+    "-c:a",
+    "copy",
+    "-shortest",
+    tempWithAudioPath
+  ];
+
+  const result = await runProcess(ffmpegPath, args, { timeoutMs: 120_000 });
+  if (result.exitCode !== 0) {
+    throw appError("EXPORT_FAILED", "Failed to merge source audio into export.", result.stderr.toString("utf8").trim());
+  }
+
+  await fs.rm(snapshot.tempOutputPath, { force: true });
+  await fs.rename(tempWithAudioPath, snapshot.tempOutputPath);
+}
+
 async function finalizeExport(snapshot: ExportJobSnapshot, renderedFrames: number): Promise<ExportJobResult> {
   const metadata = await probeExport(snapshot.tempOutputPath);
   const issues: string[] = [];
 
-  if (metadata.codec !== "h264") {
+  const expectedCodec = snapshot.project.exportSettings.codec === "prores" ? "prores" : snapshot.project.exportSettings.codec === "vp9" ? "vp9" : snapshot.project.exportSettings.codec === "hevc" ? "hevc" : "h264";
+  if (metadata.codec !== expectedCodec) {
     issues.push(`codec=${metadata.codec}`);
   }
   if (metadata.width !== snapshot.width || metadata.height !== snapshot.height) {
     issues.push(`resolution=${metadata.width}x${metadata.height}`);
-  }
-  if (metadata.hasAudio) {
-    issues.push("audio stream present");
   }
   if (Math.abs(metadata.fps - snapshot.fps) > 0.01) {
     issues.push(`fps=${metadata.fps}`);
@@ -303,6 +520,7 @@ async function finalizeExport(snapshot: ExportJobSnapshot, renderedFrames: numbe
     codec: metadata.codec,
     container: metadata.container,
     hasAudio: metadata.hasAudio,
+    audioBehavior: snapshot.project.exportSettings.audioBehavior,
     durationSeconds: metadata.durationSeconds
   };
 }
@@ -367,6 +585,7 @@ function createActiveJob(snapshot: ExportJobSnapshot): ActiveExportJob {
     snapshot,
     cancelled: false,
     processes: new Set(),
+    profiling: createProfilingTimers(),
     cancel() {
       job.cancelled = true;
       for (const child of job.processes) {
@@ -401,7 +620,8 @@ function buildDecodeArgs(snapshot: ExportJobSnapshot): string[] {
 }
 
 function buildEncodeArgs(snapshot: ExportJobSnapshot): string[] {
-  return [
+  const { codec, quality } = snapshot.project.exportSettings;
+  const args = [
     "-hide_banner",
     "-y",
     "-f",
@@ -413,17 +633,60 @@ function buildEncodeArgs(snapshot: ExportJobSnapshot): string[] {
     "-r",
     String(snapshot.fps),
     "-i",
-    "pipe:0",
-    "-an",
-    "-c:v",
-    "libx264",
-    ...codecPresets[snapshot.quality],
-    "-pix_fmt",
-    "yuv420p",
-    "-movflags",
-    "+faststart",
-    snapshot.tempOutputPath
+    "pipe:0"
   ];
+
+  switch (codec) {
+    case "h264":
+      args.push(
+        "-an",
+        "-c:v",
+        "libx264",
+        ...codecPresets[quality],
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart"
+      );
+      break;
+    case "hevc":
+      args.push(
+        "-an",
+        "-c:v",
+        "libx265",
+        ...codecPresets[quality],
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart"
+      );
+      break;
+    case "prores":
+      args.push(
+        "-an",
+        "-c:v",
+        "prores_ks",
+        "-pix_fmt",
+        "yuv422p10le"
+      );
+      break;
+    case "vp9":
+      args.push(
+        "-an",
+        "-c:v",
+        "libvpx-vp9",
+        "-b:v",
+        "0",
+        quality === "draft" ? "-crf" : "-b:v",
+        quality === "draft" ? "40" : quality === "standard" ? "8M" : "16M",
+        "-pix_fmt",
+        "yuv420p"
+      );
+      break;
+  }
+
+  args.push(snapshot.tempOutputPath);
+  return args;
 }
 
 function spawnFfmpeg(executable: string, args: string[]): ChildProcessWithoutNullStreams {
@@ -534,25 +797,6 @@ function toExportError(error: unknown): AppError {
 
 function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
-}
-
-function normalizeOutputPath(outputPath: string | undefined): string | undefined {
-  const trimmed = outputPath?.trim();
-  return trimmed ? path.resolve(trimmed) : undefined;
-}
-
-function clampInteger(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) {
-    return min;
-  }
-  return Math.max(min, Math.min(max, Math.round(value)));
-}
-
-function clampNumber(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) {
-    return min;
-  }
-  return Math.max(min, Math.min(max, value));
 }
 
 function floatToByte(value: number): number {

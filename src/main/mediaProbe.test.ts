@@ -16,7 +16,7 @@ describe("parseRationalFrameRate", () => {
 });
 
 describe("mapProbeOutput", () => {
-  it("maps ffprobe JSON into the Phase 02 MediaRef shape", () => {
+  it("maps ffprobe JSON into the MediaRef shape with display geometry", () => {
     const media = mapProbeOutput("/clips/sample.mp4", {
       streams: [
         {
@@ -49,6 +49,8 @@ describe("mapProbeOutput", () => {
       codec: "h264",
       width: 1080,
       height: 1920,
+      displayWidth: 1920,
+      displayHeight: 1080,
       durationSeconds: 10,
       totalFrames: 300,
       hasAudio: true,
@@ -68,7 +70,7 @@ describe("mapProbeOutput", () => {
     ).toThrow("No supported video stream");
   });
 
-  it("rejects video streams above the Phase 01 raster limit", () => {
+  it("rejects video streams exceeding the supported 4K-equivalent display raster", () => {
     expect(() =>
       mapProbeOutput("/clips/uhd.mp4", {
         streams: [
@@ -76,14 +78,120 @@ describe("mapProbeOutput", () => {
             index: 0,
             codec_type: "video",
             codec_name: "h264",
-            width: 3840,
-            height: 2160,
+            width: 7680,
+            height: 4320,
             duration: "4.0",
             avg_frame_rate: "24/1"
           }
         ],
         format: { format_name: "mp4", duration: "4.0" }
       })
-    ).toThrow("1920 x 1080");
+    ).toThrow("4K-equivalent display raster");
+  });
+
+  it("allows portrait media within display raster limit", () => {
+    const media = mapProbeOutput("/clips/portrait.mp4", {
+      streams: [
+        {
+          index: 0,
+          codec_type: "video",
+          codec_name: "h264",
+          width: 1080,
+          height: 1920,
+          duration: "5.0",
+          avg_frame_rate: "24/1"
+        }
+      ],
+      format: { format_name: "mp4", duration: "5.0" }
+    });
+    expect(media.displayWidth).toBe(1080);
+    expect(media.displayHeight).toBe(1920);
+  });
+
+  it("allows square media within display raster limit", () => {
+    const media = mapProbeOutput("/clips/square.mp4", {
+      streams: [
+        {
+          index: 0,
+          codec_type: "video",
+          codec_name: "h264",
+          width: 1080,
+          height: 1080,
+          duration: "3.0",
+          avg_frame_rate: "24/1"
+        }
+      ],
+      format: { format_name: "mp4", duration: "3.0" }
+    });
+    expect(media.displayWidth).toBe(1080);
+    expect(media.displayHeight).toBe(1080);
+  });
+
+  it("allows rotated portrait media within display raster limit", () => {
+    const media = mapProbeOutput("/clips/rotated.mp4", {
+      streams: [
+        {
+          index: 0,
+          codec_type: "video",
+          codec_name: "h264",
+          width: 1920,
+          height: 1080,
+          duration: "6.0",
+          avg_frame_rate: "24/1",
+          tags: { rotate: "90" }
+        }
+      ],
+      format: { format_name: "mp4", duration: "6.0" }
+    });
+    expect(media.width).toBe(1920);
+    expect(media.height).toBe(1080);
+    expect(media.displayWidth).toBe(1080);
+    expect(media.displayHeight).toBe(1920);
+    expect(media.rotation).toBe(90);
+  });
+
+  it("allows portrait 4K-equivalent media", () => {
+    const media = mapProbeOutput("/clips/portrait-4k.mp4", {
+      streams: [
+        {
+          index: 0,
+          codec_type: "video",
+          codec_name: "h264",
+          width: 2160,
+          height: 3840,
+          duration: "6.0",
+          avg_frame_rate: "24/1"
+        }
+      ],
+      format: { format_name: "mp4", duration: "6.0" }
+    });
+    expect(media.displayWidth).toBe(2160);
+    expect(media.displayHeight).toBe(3840);
+  });
+
+  it("reads color metadata from ffprobe stream fields", () => {
+    const media = mapProbeOutput("/clips/hdr.mp4", {
+      streams: [
+        {
+          index: 0,
+          codec_type: "video",
+          codec_name: "hevc",
+          width: 1920,
+          height: 1080,
+          duration: "5.0",
+          avg_frame_rate: "24/1",
+          color_primaries: "bt2020",
+          transfer_characteristics: "arib-std-b67",
+          matrix_coefficients: "bt2020nc",
+          bits_per_raw_sample: "10"
+        }
+      ],
+      format: { format_name: "mov,mp4,m4a,3gp,3g2,mj2", duration: "5.0" }
+    });
+
+    expect(media.colorMetadata?.transfer.type).toBe("hlg");
+    expect(media.colorMetadata?.primaries.type).toBe("rec2020");
+    expect(media.colorMetadata?.matrix.type).toBe("bt2020nc");
+    expect(media.colorMetadata?.bitDepth).toBe(10);
   });
 });

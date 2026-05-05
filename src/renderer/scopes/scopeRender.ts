@@ -1,18 +1,41 @@
-import type { ScopeHistogram, VectorscopeGuide } from "./scopeAnalysis";
+import type { ScopeHistogram, VectorscopeGuide, RgbParadeHistogram, RgbHistogram } from "./scopeAnalysis";
 
 export function drawWaveformScope(canvas: HTMLCanvasElement, histogram: ScopeHistogram): void {
   const context = prepareCanvas(canvas);
   const { width, height } = getCanvasSize(canvas);
 
   drawScopeBase(context, width, height);
-  drawHistogram(context, histogram, width, height, {
-    red: 213,
-    green: 177,
-    blue: 79,
-    alphaScale: 0.82
-  });
-  drawWaveformGrid(context, width, height);
+  drawWaveformBackplane(context, width, height);
+  drawWaveformGrid(context, width, height, "underlay");
+  drawWaveformTrace(context, histogram, width, height);
+  drawWaveformGrid(context, width, height, "overlay");
   drawWaveformLabels(context, width, height);
+}
+
+export function drawRgbParadeScope(canvas: HTMLCanvasElement, histogram: RgbParadeHistogram): void {
+  const context = prepareCanvas(canvas);
+  const { width, height } = getCanvasSize(canvas);
+  const segmentWidth = Math.floor(width / 3);
+
+  drawScopeBase(context, width, height);
+
+  const redHistogram: ScopeHistogram = { width: histogram.width, height: histogram.height, bins: histogram.redBins, peak: histogram.peak, samples: histogram.samples };
+  const greenHistogram: ScopeHistogram = { width: histogram.width, height: histogram.height, bins: histogram.greenBins, peak: histogram.peak, samples: histogram.samples };
+  const blueHistogram: ScopeHistogram = { width: histogram.width, height: histogram.height, bins: histogram.blueBins, peak: histogram.peak, samples: histogram.samples };
+
+  drawParadeChannel(context, redHistogram, 0, segmentWidth, height);
+  drawParadeChannel(context, greenHistogram, segmentWidth, segmentWidth * 2, height);
+  drawParadeChannel(context, blueHistogram, segmentWidth * 2, width, height);
+
+  drawParadeLabels(context, width, height, segmentWidth);
+}
+
+export function drawRgbHistogram(canvas: HTMLCanvasElement, histogram: RgbHistogram): void {
+  const context = prepareCanvas(canvas);
+  const { width, height } = getCanvasSize(canvas);
+
+  drawScopeBase(context, width, height);
+  drawRgbHistogramBars(context, histogram, width, height);
 }
 
 export function drawVectorscope(
@@ -77,16 +100,46 @@ function getCanvasSize(canvas: HTMLCanvasElement): { width: number; height: numb
 
 function drawScopeBase(context: CanvasRenderingContext2D, width: number, height: number): void {
   context.clearRect(0, 0, width, height);
-  context.fillStyle = "#0b0c09";
+  context.fillStyle = "#05070b";
   context.fillRect(0, 0, width, height);
 }
 
-function drawWaveformGrid(context: CanvasRenderingContext2D, width: number, height: number): void {
+function drawWaveformBackplane(context: CanvasRenderingContext2D, width: number, height: number): void {
   context.save();
-  context.strokeStyle = "rgba(238, 233, 216, 0.12)";
+
+  const topLegal = Math.round(height * 0.1);
+  const bottomLegal = Math.round(height * 0.9);
+
+  context.fillStyle = "rgba(225, 178, 94, 0.045)";
+  context.fillRect(0, 0, width, topLegal);
+  context.fillRect(0, bottomLegal, width, height - bottomLegal);
+
+  const gradient = context.createLinearGradient(0, 0, 0, height);
+  gradient.addColorStop(0, "rgba(103, 124, 150, 0.035)");
+  gradient.addColorStop(0.5, "rgba(103, 124, 150, 0)");
+  gradient.addColorStop(1, "rgba(103, 124, 150, 0.035)");
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, width, height);
+
+  context.restore();
+}
+
+function drawWaveformGrid(
+  context: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  layer: "underlay" | "overlay"
+): void {
+  context.save();
+
+  const majorAlpha = layer === "overlay" ? 0.28 : 0.16;
+  const minorAlpha = layer === "overlay" ? 0.12 : 0.07;
+  const verticalAlpha = layer === "overlay" ? 0.1 : 0.06;
+
   context.lineWidth = 1;
 
-  for (const ire of [0, 25, 50, 75, 100]) {
+  context.strokeStyle = `rgba(192, 205, 221, ${minorAlpha})`;
+  for (const ire of [10, 20, 30, 40, 60, 70, 80, 90]) {
     const y = height - (ire / 100) * height;
     context.beginPath();
     context.moveTo(0, Math.round(y) + 0.5);
@@ -94,7 +147,21 @@ function drawWaveformGrid(context: CanvasRenderingContext2D, width: number, heig
     context.stroke();
   }
 
-  for (const x of [0.25, 0.5, 0.75]) {
+  for (const ire of [0, 25, 50, 75, 100]) {
+    const y = height - (ire / 100) * height;
+    context.strokeStyle = ire === 50
+      ? `rgba(241, 219, 177, ${Math.min(majorAlpha + 0.12, 0.42)})`
+      : `rgba(215, 224, 237, ${majorAlpha})`;
+    context.lineWidth = ire === 50 ? 1.5 : 1;
+    context.beginPath();
+    context.moveTo(0, Math.round(y) + 0.5);
+    context.lineTo(width, Math.round(y) + 0.5);
+    context.stroke();
+  }
+
+  context.strokeStyle = `rgba(192, 205, 221, ${verticalAlpha})`;
+  context.lineWidth = 1;
+  for (const x of [0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875]) {
     const position = Math.round(width * x) + 0.5;
     context.beginPath();
     context.moveTo(position, 0);
@@ -106,18 +173,136 @@ function drawWaveformGrid(context: CanvasRenderingContext2D, width: number, heig
 }
 
 function drawWaveformLabels(context: CanvasRenderingContext2D, width: number, height: number): void {
+  const pixelRatio = getPixelRatio();
+  const gutterWidth = Math.round(38 * pixelRatio);
+  const labelPadding = Math.round(7 * pixelRatio);
+
   context.save();
-  context.fillStyle = "rgba(236, 232, 220, 0.56)";
-  context.font = "700 10px system-ui, sans-serif";
+
+  const labelGradient = context.createLinearGradient(width - gutterWidth, 0, width, 0);
+  labelGradient.addColorStop(0, "rgba(5, 7, 11, 0)");
+  labelGradient.addColorStop(0.35, "rgba(5, 7, 11, 0.66)");
+  labelGradient.addColorStop(1, "rgba(5, 7, 11, 0.9)");
+  context.fillStyle = labelGradient;
+  context.fillRect(width - gutterWidth, 0, gutterWidth, height);
+
+  context.fillStyle = "rgba(233, 239, 248, 0.82)";
+  context.font = `700 ${Math.round(10 * pixelRatio)}px system-ui, sans-serif`;
   context.textAlign = "right";
   context.textBaseline = "middle";
 
-  for (const ire of [0, 50, 100]) {
+  for (const ire of [0, 25, 50, 75, 100]) {
     const y = height - (ire / 100) * height;
-    context.fillText(String(ire), width - 6, Math.max(8, Math.min(height - 8, y)));
+    context.fillText(String(ire), width - labelPadding, Math.max(labelPadding, Math.min(height - labelPadding, y)));
   }
 
   context.restore();
+}
+
+function drawWaveformTrace(
+  context: CanvasRenderingContext2D,
+  histogram: ScopeHistogram,
+  canvasWidth: number,
+  canvasHeight: number
+): void {
+  if (histogram.peak <= 0) {
+    return;
+  }
+
+  const tonePeak = calculateTonePeak(histogram.bins, histogram.peak);
+  const core = context.createImageData(canvasWidth, canvasHeight);
+  const halo = context.createImageData(canvasWidth, canvasHeight);
+  const xScale = histogram.width / canvasWidth;
+  const yScale = histogram.height / canvasHeight;
+  const toneDenominator = Math.log1p(tonePeak);
+
+  for (let y = 0; y < canvasHeight; y += 1) {
+    const sourceY = Math.min(histogram.height - 1, Math.floor(y * yScale));
+    for (let x = 0; x < canvasWidth; x += 1) {
+      const sourceX = Math.min(histogram.width - 1, Math.floor(x * xScale));
+      const density = histogram.bins[sourceY * histogram.width + sourceX];
+      if (density <= 0) {
+        continue;
+      }
+
+      const normalized = Math.min(1, Math.log1p(density) / toneDenominator);
+      const coreStrength = Math.pow(normalized, 0.58);
+      const haloStrength = Math.pow(normalized, 1.15);
+      const imageIndex = (y * canvasWidth + x) * 4;
+      const warmth = Math.pow(normalized, 0.85);
+
+      core.data[imageIndex] = mixChannel(145, 255, warmth);
+      core.data[imageIndex + 1] = mixChannel(155, 226, warmth);
+      core.data[imageIndex + 2] = mixChannel(117, 154, warmth);
+      core.data[imageIndex + 3] = Math.round(42 + coreStrength * 198);
+
+      halo.data[imageIndex] = 215;
+      halo.data[imageIndex + 1] = 171;
+      halo.data[imageIndex + 2] = 82;
+      halo.data[imageIndex + 3] = Math.round(haloStrength * 76);
+    }
+  }
+
+  const traceCanvas = document.createElement("canvas");
+  traceCanvas.width = canvasWidth;
+  traceCanvas.height = canvasHeight;
+
+  const traceContext = traceCanvas.getContext("2d");
+  if (!traceContext) {
+    return;
+  }
+
+  traceContext.putImageData(halo, 0, 0);
+
+  context.save();
+  context.globalCompositeOperation = "screen";
+  context.filter = `blur(${Math.max(1, getPixelRatio() * 0.65)}px)`;
+  context.drawImage(traceCanvas, 0, 0);
+
+  context.filter = "none";
+  traceContext.clearRect(0, 0, canvasWidth, canvasHeight);
+  traceContext.putImageData(core, 0, 0);
+  context.drawImage(traceCanvas, 0, 0);
+  context.restore();
+}
+
+function calculateTonePeak(bins: Float32Array, absolutePeak: number): number {
+  const peakBucket = Math.max(1, Math.ceil(absolutePeak));
+  const buckets = new Uint32Array(peakBucket + 1);
+  let occupied = 0;
+
+  for (let index = 0; index < bins.length; index += 1) {
+    const density = bins[index];
+    if (density > 0) {
+      const bucket = Math.min(peakBucket, Math.max(1, Math.round(density)));
+      buckets[bucket] += 1;
+      occupied += 1;
+    }
+  }
+
+  if (occupied === 0) {
+    return Math.max(1, absolutePeak);
+  }
+
+  const percentileRank = Math.max(1, Math.floor(occupied * 0.985));
+  let cumulative = 0;
+
+  for (let bucket = 1; bucket < buckets.length; bucket += 1) {
+    cumulative += buckets[bucket];
+    if (cumulative >= percentileRank) {
+      return bucket;
+    }
+  }
+
+  return Math.max(1, absolutePeak);
+}
+
+function mixChannel(start: number, end: number, amount: number): number {
+  return Math.round(start + (end - start) * amount);
+}
+
+function getPixelRatio(): number {
+  return window.devicePixelRatio || 1;
 }
 
 function drawVectorGrid(context: CanvasRenderingContext2D, centerX: number, centerY: number, radius: number): void {
@@ -211,4 +396,83 @@ function drawHistogram(
   }
 
   context.putImageData(imageData, 0, 0);
+}
+
+function drawParadeChannel(
+  context: CanvasRenderingContext2D,
+  histogram: ScopeHistogram,
+  xStart: number,
+  xEnd: number,
+  height: number
+): void {
+  const channelWidth = xEnd - xStart;
+  const imageData = context.createImageData(channelWidth, height);
+  const xScale = histogram.width / channelWidth;
+  const yScale = histogram.height / height;
+
+  for (let y = 0; y < height; y += 1) {
+    const sourceY = Math.min(histogram.height - 1, Math.floor(y * yScale));
+    for (let x = 0; x < channelWidth; x += 1) {
+      const sourceX = Math.min(histogram.width - 1, Math.floor(x * xScale));
+      const density = histogram.bins[sourceY * histogram.width + sourceX];
+      if (density <= 0) {
+        continue;
+      }
+
+      const alpha = Math.min(255, Math.round(Math.sqrt(density / histogram.peak) * 255 * 0.85));
+      const imageIndex = (y * channelWidth + x) * 4;
+      imageData.data[imageIndex] = 255;
+      imageData.data[imageIndex + 1] = 255;
+      imageData.data[imageIndex + 2] = 255;
+      imageData.data[imageIndex + 3] = alpha;
+    }
+  }
+
+  context.putImageData(imageData, xStart, 0);
+}
+
+function drawParadeLabels(context: CanvasRenderingContext2D, width: number, height: number, segmentWidth: number): void {
+  context.save();
+  context.fillStyle = "rgba(236, 232, 220, 0.56)";
+  context.font = "700 10px system-ui, sans-serif";
+  context.textAlign = "center";
+  context.textBaseline = "top";
+  context.fillText("R", segmentWidth / 2, height - 14);
+  context.fillText("G", segmentWidth * 1.5, height - 14);
+  context.fillText("B", segmentWidth * 2.5, height - 14);
+  context.restore();
+}
+
+function drawRgbHistogramBars(
+  context: CanvasRenderingContext2D,
+  histogram: RgbHistogram,
+  width: number,
+  height: number
+): void {
+  if (histogram.peak <= 0) {
+    return;
+  }
+
+  const barWidth = Math.floor(width / 256);
+  const maxBarHeight = height - 20;
+
+  context.save();
+
+  const channels = [
+    { bins: histogram.redBins, color: "rgba(220, 80, 80, 0.7)" },
+    { bins: histogram.greenBins, color: "rgba(80, 200, 80, 0.7)" },
+    { bins: histogram.blueBins, color: "rgba(80, 120, 220, 0.7)" },
+    { bins: histogram.lumaBins, color: "rgba(200, 200, 200, 0.5)" }
+  ];
+
+  for (const channel of channels) {
+    context.fillStyle = channel.color;
+    for (let i = 0; i < 256; i += 1) {
+      const barHeight = (channel.bins[i] / histogram.peak) * maxBarHeight;
+      const x = i * barWidth;
+      context.fillRect(x, height - 10 - barHeight, barWidth - 1, barHeight);
+    }
+  }
+
+  context.restore();
 }

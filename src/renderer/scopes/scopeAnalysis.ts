@@ -99,6 +99,112 @@ export function createWaveformHistogram(frame: RgbaFrame, width: number, height:
   };
 }
 
+export interface RgbParadeHistogram {
+  width: number;
+  height: number;
+  redBins: Float32Array;
+  greenBins: Float32Array;
+  blueBins: Float32Array;
+  peak: number;
+  samples: number;
+}
+
+export function createRgbParadeHistogram(frame: RgbaFrame, width: number, height: number): RgbParadeHistogram {
+  const scopeWidth = sanitizeDimension(width);
+  const scopeHeight = sanitizeDimension(height);
+  const redBins = new Float32Array(scopeWidth * scopeHeight);
+  const greenBins = new Float32Array(scopeWidth * scopeHeight);
+  const blueBins = new Float32Array(scopeWidth * scopeHeight);
+  const maxSourceX = Math.max(1, frame.width - 1);
+  let peak = 0;
+  let samples = 0;
+
+  for (let y = 0; y < frame.height; y += 1) {
+    for (let x = 0; x < frame.width; x += 1) {
+      const index = (y * frame.width + x) * 4;
+      const binX = Math.round((x / maxSourceX) * (scopeWidth - 1));
+
+      const r = frame.data[index] / 255;
+      const g = frame.data[index + 1] / 255;
+      const b = frame.data[index + 2] / 255;
+
+      const rBinY = Math.round((1 - r) * (scopeHeight - 1));
+      const gBinY = Math.round((1 - g) * (scopeHeight - 1));
+      const bBinY = Math.round((1 - b) * (scopeHeight - 1));
+
+      const rBinIndex = rBinY * scopeWidth + binX;
+      const gBinIndex = gBinY * scopeWidth + binX;
+      const bBinIndex = bBinY * scopeWidth + binX;
+
+      redBins[rBinIndex] += 1;
+      greenBins[gBinIndex] += 1;
+      blueBins[bBinIndex] += 1;
+
+      peak = Math.max(peak, redBins[rBinIndex], greenBins[gBinIndex], blueBins[bBinIndex]);
+      samples += 1;
+    }
+  }
+
+  return {
+    width: scopeWidth,
+    height: scopeHeight,
+    redBins,
+    greenBins,
+    blueBins,
+    peak,
+    samples
+  };
+}
+
+export interface RgbHistogram {
+  redBins: Uint32Array;
+  greenBins: Uint32Array;
+  blueBins: Uint32Array;
+  lumaBins: Uint32Array;
+  peak: number;
+  samples: number;
+}
+
+export function createRgbHistogram(frame: RgbaFrame, binCount: number = 256): RgbHistogram {
+  const bins = sanitizeDimension(binCount);
+  const redBins = new Uint32Array(bins);
+  const greenBins = new Uint32Array(bins);
+  const blueBins = new Uint32Array(bins);
+  const lumaBins = new Uint32Array(bins);
+  let peak = 0;
+  let samples = 0;
+
+  for (let i = 0; i < frame.data.length; i += 4) {
+    const r = frame.data[i];
+    const g = frame.data[i + 1];
+    const b = frame.data[i + 2];
+
+    const luma = calculateRec709Luma(r, g, b);
+
+    const rBin = Math.min(bins - 1, Math.floor(r * (bins / 256)));
+    const gBin = Math.min(bins - 1, Math.floor(g * (bins / 256)));
+    const bBin = Math.min(bins - 1, Math.floor(b * (bins / 256)));
+    const lumaBin = Math.min(bins - 1, Math.floor(luma * (bins - 1)));
+
+    redBins[rBin] += 1;
+    greenBins[gBin] += 1;
+    blueBins[bBin] += 1;
+    lumaBins[lumaBin] += 1;
+
+    peak = Math.max(peak, redBins[rBin], greenBins[gBin], blueBins[bBin], lumaBins[lumaBin]);
+    samples += 1;
+  }
+
+  return {
+    redBins,
+    greenBins,
+    blueBins,
+    lumaBins,
+    peak,
+    samples
+  };
+}
+
 export function createVectorscopeHistogram(frame: RgbaFrame, size: number): ScopeHistogram {
   const scopeSize = sanitizeDimension(size);
   const bins = new Float32Array(scopeSize * scopeSize);
