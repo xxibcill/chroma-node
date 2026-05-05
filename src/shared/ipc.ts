@@ -51,7 +51,39 @@ export const IpcChannel = {
   FeedbackResolve: "review:feedback-resolve",
   HandoffExport: "review:handoff-export",
   HandoffImport: "review:handoff-import",
-  HandoffValidate: "review:handoff-validate"
+  HandoffValidate: "review:handoff-validate",
+  // Phase 22: Licensing and Entitlements
+  LicenseValidate: "license:validate",
+  LicenseCheckFeature: "license:check-feature",
+  LicenseStartTrial: "license:start-trial",
+  LicenseActivate: "license:activate",
+  LicenseDeactivate: "license:deactivate",
+  LicenseGetState: "license:get-state",
+  LicenseClear: "license:clear",
+  // Phase 22: Telemetry
+  TelemetryGetConsent: "telemetry:get-consent",
+  TelemetrySetConsent: "telemetry:set-consent",
+  TelemetryTrack: "telemetry:track",
+  TelemetryFlush: "telemetry:flush",
+  TelemetryDeleteAll: "telemetry:delete-all",
+  TelemetryGetQueueSize: "telemetry:get-queue-size",
+  // Phase 22: Support and Diagnostics
+  CrashCapture: "support:capture-crash",
+  GetAppDiagnostics: "app:get-diagnostics",
+  CreateSupportBundle: "support:create-bundle",
+  SubmitFeedback: "support:submit-feedback",
+  // Phase 22: Updates
+  UpdateCheck: "update:check",
+  UpdateGetStatus: "update:get-status",
+  UpdateGetConfig: "update:get-config",
+  UpdateSetChannel: "update:set-channel",
+  UpdateSetAutoCheck: "update:set-auto-check",
+  UpdateGetChannels: "update:get-channels",
+  // Phase 22: Launch
+  LaunchGetPricingTiers: "launch:get-pricing-tiers",
+  LaunchGetExperiments: "launch:get-experiments",
+  LaunchGetMetrics: "launch:get-metrics",
+  LaunchSetExperiment: "launch:set-experiment"
 } as const;
 
 export type IpcChannelName = (typeof IpcChannel)[keyof typeof IpcChannel];
@@ -479,6 +511,63 @@ export interface HandoffPackageValidateRequest {
   packagePath: string;
 }
 
+// Phase 22: Licensing and Entitlements
+import type { EntitlementState, EntitlementFlags, LicenseTier } from "./entitlement.js";
+import type { LicenseValidationResult, EntitlementCheckResult } from "./entitlement.js";
+
+export type { EntitlementState, EntitlementFlags, LicenseTier, LicenseValidationResult, EntitlementCheckResult };
+
+// Phase 22: Telemetry
+import type { TelemetryConsent, TelemetryEvent, TelemetryConsentState } from "./telemetry.js";
+
+export type { TelemetryConsent, TelemetryEvent, TelemetryConsentState };
+
+// Phase 22: Support and Diagnostics
+import type { CrashReport, DiagnosticEntry, SupportBundleManifest, FeedbackSubmission, FeedbackSubmissionResult } from "./support.js";
+
+export type { CrashReport, DiagnosticEntry, SupportBundleManifest, FeedbackSubmission, FeedbackSubmissionResult };
+
+// Phase 22: Updates
+import type { UpdateChannel, UpdateStatus, UpdateCheckResult, UpdateProgress, ReleaseChannelConfig } from "./update.js";
+
+export type { UpdateChannel, UpdateStatus, UpdateCheckResult, UpdateProgress, ReleaseChannelConfig };
+
+// Phase 22: Launch
+import type { PricingTier, OnboardingExperiment, LaunchMetrics } from "./launchConfig.js";
+
+export type { PricingTier, OnboardingExperiment, LaunchMetrics };
+
+export interface UpdateStoreConfig {
+  currentVersion: string;
+  channel: UpdateChannel;
+  channels: ReleaseChannelConfig[];
+  autoCheck: boolean;
+  checkIntervalMs: number;
+  lastCheckAt?: number;
+}
+
+export interface TelemetryTrackRequest {
+  type: TelemetryEvent["type"];
+  payload: Record<string, unknown>;
+}
+
+export interface TelemetryFlushResult {
+  sent: number;
+  failed: number;
+}
+
+export interface LicenseActivationRequest {
+  licenseKey: string;
+}
+
+export interface LicenseActivationResponse {
+  success: boolean;
+  activationId?: string;
+  tier?: LicenseTier;
+  expiresAt?: number;
+  errorMessage?: string;
+}
+
 export interface ChromaNodeApi {
   selectMedia(): Promise<VersionedResponse<SelectMediaResponse>>;
   saveProject(request: SaveProjectRequest): Promise<VersionedResponse<SaveProjectResult>>;
@@ -528,6 +617,38 @@ export interface ChromaNodeApi {
   exportHandoffPackage(request: HandoffPackageExportRequest): Promise<VersionedResponse<{ path: string; manifest: HandoffPackageManifest }>>;
   importHandoffPackage(request: HandoffPackageImportRequest): Promise<VersionedResponse<void>>;
   validateHandoffPackage(request: HandoffPackageValidateRequest): Promise<VersionedResponse<HandoffPackageManifest>>;
+  // Phase 22: Licensing
+  validateLicense(): Promise<VersionedResponse<LicenseValidationResult>>;
+  checkFeatureEntitlement(feature: keyof EntitlementFlags): Promise<VersionedResponse<EntitlementCheckResult>>;
+  startTrial(): Promise<VersionedResponse<EntitlementState>>;
+  activateLicense(request: LicenseActivationRequest): Promise<VersionedResponse<LicenseActivationResponse>>;
+  deactivateLicense(): Promise<VersionedResponse<void>>;
+  getLicenseState(): Promise<VersionedResponse<EntitlementState>>;
+  clearLicense(): Promise<VersionedResponse<void>>;
+  // Phase 22: Telemetry
+  getTelemetryConsent(): Promise<VersionedResponse<TelemetryConsentState>>;
+  setTelemetryConsent(consent: TelemetryConsent): Promise<VersionedResponse<TelemetryConsentState>>;
+  trackTelemetry(request: TelemetryTrackRequest): Promise<VersionedResponse<void>>;
+  flushTelemetry(): Promise<VersionedResponse<TelemetryFlushResult>>;
+  deleteAllTelemetry(): Promise<VersionedResponse<void>>;
+  getTelemetryQueueSize(): Promise<VersionedResponse<number>>;
+  // Phase 22: Support and Diagnostics
+  captureCrash(request: { crashType: string; message: string; stackTrace?: string; projectId?: string }): Promise<VersionedResponse<CrashReport>>;
+  getAppDiagnostics(): Promise<VersionedResponse<DiagnosticEntry[]>>;
+  createSupportBundle(request: { includeLogs?: boolean; includeProjectDiagnostics?: boolean; includeMediaMetadata?: boolean; redactPaths?: boolean; contactInfo?: string }): Promise<VersionedResponse<{ path: string; manifest: SupportBundleManifest }>>;
+  submitFeedback(request: FeedbackSubmission): Promise<VersionedResponse<FeedbackSubmissionResult>>;
+  // Phase 22: Updates
+  checkForUpdate(): Promise<VersionedResponse<UpdateCheckResult>>;
+  getUpdateStatus(): Promise<VersionedResponse<UpdateStatus>>;
+  getUpdateConfig(): Promise<VersionedResponse<UpdateStoreConfig>>;
+  setUpdateChannel(channel: UpdateChannel): Promise<VersionedResponse<void>>;
+  setUpdateAutoCheck(autoCheck: boolean): Promise<VersionedResponse<void>>;
+  getUpdateChannels(): Promise<VersionedResponse<ReleaseChannelConfig[]>>;
+  // Phase 22: Launch
+  getPricingTiers(): Promise<VersionedResponse<PricingTier[]>>;
+  getOnboardingExperiments(): Promise<VersionedResponse<OnboardingExperiment[]>>;
+  getLaunchMetrics(): Promise<VersionedResponse<LaunchMetrics>>;
+  setOnboardingExperiment(id: string, enabled: boolean): Promise<VersionedResponse<void>>;
 }
 
 declare global {

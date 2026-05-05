@@ -101,6 +101,47 @@ import {
 } from "./handoffStore.js";
 import { loadProgress, resetProgress, saveProgress } from "./progressStore.js";
 import { openProjectFile, saveProjectFile } from "./projectFile.js";
+import {
+  validateLicense,
+  checkFeatureEntitlement as checkFeatureEntitlementFn,
+  startTrial,
+  activateLicense,
+  deactivateLicense,
+  getEntitlementState,
+  clearLicense
+} from "./licenseStore.js";
+import {
+  getConsent,
+  setConsent,
+  trackEvent,
+  flushQueue,
+  deleteAllTelemetryData,
+  getQueueSize
+} from "./telemetryStore.js";
+import {
+  captureCrash,
+  getDiagnostics,
+  createSupportBundle,
+  submitFeedback
+} from "./supportStore.js";
+import {
+  checkForUpdate as checkForUpdateFn,
+  getUpdateStatus,
+  getUpdateProgress,
+  loadUpdateConfig,
+  setUpdateChannel,
+  setAutoCheck,
+  getAutoCheck,
+  getAvailableChannels,
+  type UpdateStoreConfig
+} from "./updateStore.js";
+import type { LicenseActivationRequest, EntitlementFlags, TelemetryConsent } from "../shared/ipc.js";
+import type { EntitlementState } from "../shared/entitlement.js";
+import type { LicenseValidationResult, EntitlementCheckResult } from "../shared/entitlement.js";
+import type { CrashReport, DiagnosticEntry, SupportBundleManifest, FeedbackSubmission, FeedbackSubmissionResult } from "../shared/support.js";
+import type { UpdateChannel } from "../shared/update.js";
+import type { UpdateCheckResult, UpdateStatus, ReleaseChannelConfig } from "../shared/update.js";
+import type { PricingTier, OnboardingExperiment, LaunchMetrics } from "../shared/launchConfig.js";
 
 export function registerIpcHandlers(): void {
   ipcMain.handle(IpcChannel.SelectMedia, async (): Promise<VersionedResponse<SelectMediaResponse>> => {
@@ -594,6 +635,329 @@ export function registerIpcHandlers(): void {
     async (_event, request: HandoffPackageValidateRequest): Promise<VersionedResponse<import("../shared/project.js").HandoffPackageManifest>> => {
       try {
         return ok(await validateHandoffPackage(request));
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  // Phase 22: Licensing and Entitlements
+  ipcMain.handle(
+    IpcChannel.LicenseValidate,
+    async (): Promise<VersionedResponse<LicenseValidationResult>> => {
+      try {
+        return ok(await validateLicense());
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.LicenseCheckFeature,
+    async (_event, feature: keyof EntitlementFlags): Promise<VersionedResponse<EntitlementCheckResult>> => {
+      try {
+        return ok(await checkFeatureEntitlementFn(feature));
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.LicenseStartTrial,
+    async (): Promise<VersionedResponse<EntitlementState>> => {
+      try {
+        return ok(await startTrial());
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.LicenseActivate,
+    async (_event, request: LicenseActivationRequest): Promise<VersionedResponse<{ success: boolean; activationId?: string; tier?: string; expiresAt?: number; errorMessage?: string }>> => {
+      try {
+        // In a real implementation, this would validate with a license server
+        // For now, we create a local activation with a placeholder activationId
+        const activationId = `activation-${Date.now().toString(36)}`;
+        const tier = "paid";
+        const state = await activateLicense(activationId, tier);
+        return ok({
+          success: true,
+          activationId: state.activationId,
+          tier: state.tier,
+          expiresAt: state.expiresAt
+        });
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.LicenseDeactivate,
+    async (): Promise<VersionedResponse<void>> => {
+      try {
+        await deactivateLicense();
+        return ok(undefined);
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.LicenseGetState,
+    async (): Promise<VersionedResponse<EntitlementState>> => {
+      try {
+        return ok(await getEntitlementState());
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.LicenseClear,
+    async (): Promise<VersionedResponse<void>> => {
+      try {
+        await clearLicense();
+        return ok(undefined);
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  // Phase 22: Telemetry
+  ipcMain.handle(
+    IpcChannel.TelemetryGetConsent,
+    async (): Promise<VersionedResponse<import("../shared/telemetry.js").TelemetryConsentState>> => {
+      try {
+        return ok(await getConsent());
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.TelemetrySetConsent,
+    async (_event, consent: TelemetryConsent): Promise<VersionedResponse<import("../shared/telemetry.js").TelemetryConsentState>> => {
+      try {
+        return ok(await setConsent(consent));
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.TelemetryTrack,
+    async (_event, request: { type: string; payload: Record<string, unknown> }): Promise<VersionedResponse<void>> => {
+      try {
+        trackEvent(request.type as import("../shared/telemetry.js").TelemetryEvent["type"], request.payload);
+        return ok(undefined);
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.TelemetryFlush,
+    async (): Promise<VersionedResponse<{ sent: number; failed: number }>> => {
+      try {
+        return ok(await flushQueue());
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.TelemetryDeleteAll,
+    async (): Promise<VersionedResponse<void>> => {
+      try {
+        await deleteAllTelemetryData();
+        return ok(undefined);
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.TelemetryGetQueueSize,
+    async (): Promise<VersionedResponse<number>> => {
+      try {
+        return ok(await getQueueSize());
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  // Phase 22: Support and Diagnostics
+  ipcMain.handle(
+    IpcChannel.CrashCapture,
+    async (_event, request: { crashType: string; message: string; stackTrace?: string; projectId?: string }): Promise<VersionedResponse<CrashReport>> => {
+      try {
+        return ok(await captureCrash(request));
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.GetAppDiagnostics,
+    async (): Promise<VersionedResponse<DiagnosticEntry[]>> => {
+      try {
+        return ok(await getDiagnostics());
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.CreateSupportBundle,
+    async (_event, request: { includeLogs?: boolean; includeProjectDiagnostics?: boolean; includeMediaMetadata?: boolean; redactPaths?: boolean; contactInfo?: string }): Promise<VersionedResponse<{ path: string; manifest: SupportBundleManifest }>> => {
+      try {
+        return ok(await createSupportBundle(request));
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.SubmitFeedback,
+    async (_event, request: FeedbackSubmission): Promise<VersionedResponse<FeedbackSubmissionResult>> => {
+      try {
+        return ok(await submitFeedback(request));
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  // Phase 22: Updates
+  ipcMain.handle(
+    IpcChannel.UpdateCheck,
+    async (): Promise<VersionedResponse<UpdateCheckResult>> => {
+      try {
+        return ok(await checkForUpdateFn());
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.UpdateGetStatus,
+    async (): Promise<VersionedResponse<UpdateStatus>> => {
+      try {
+        return ok(getUpdateStatus());
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.UpdateGetConfig,
+    async (): Promise<VersionedResponse<UpdateStoreConfig>> => {
+      try {
+        return ok(await loadUpdateConfig());
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.UpdateSetChannel,
+    async (_event, channel: UpdateChannel): Promise<VersionedResponse<void>> => {
+      try {
+        await setUpdateChannel(channel);
+        return ok(undefined);
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.UpdateSetAutoCheck,
+    async (_event, autoCheck: boolean): Promise<VersionedResponse<void>> => {
+      try {
+        await setAutoCheck(autoCheck);
+        return ok(undefined);
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.UpdateGetChannels,
+    async (): Promise<VersionedResponse<ReleaseChannelConfig[]>> => {
+      try {
+        return ok(await getAvailableChannels());
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  // Phase 22: Launch
+  ipcMain.handle(
+    IpcChannel.LaunchGetPricingTiers,
+    async (): Promise<VersionedResponse<PricingTier[]>> => {
+      try {
+        const { PRICING_TIERS } = await import("../shared/launchConfig.js");
+        return ok(PRICING_TIERS);
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.LaunchGetExperiments,
+    async (): Promise<VersionedResponse<OnboardingExperiment[]>> => {
+      try {
+        const { ONBOARDING_EXPERIMENTS } = await import("../shared/launchConfig.js");
+        return ok(ONBOARDING_EXPERIMENTS);
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.LaunchGetMetrics,
+    async (): Promise<VersionedResponse<LaunchMetrics>> => {
+      try {
+        const { DEFAULT_LAUNCH_METRICS } = await import("../shared/launchConfig.js");
+        return ok(DEFAULT_LAUNCH_METRICS);
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.LaunchSetExperiment,
+    async (_event, request: { id: string; enabled: boolean }): Promise<VersionedResponse<void>> => {
+      try {
+        // Experiments are read-only for now - stored in launchConfig
+        // In a full implementation, this would persist user experiment assignments
+        return ok(undefined);
       } catch (error) {
         return fail(toAppError(error));
       }

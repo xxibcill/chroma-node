@@ -38,6 +38,11 @@ import type {
   HandoffPackageValidateRequest
 } from "../shared/ipc.js";
 import type { PackImportResult } from "../shared/pack.js";
+import type { EntitlementFlags } from "../shared/entitlement.js";
+import type { TelemetryConsent } from "../shared/telemetry.js";
+import type { FeedbackSubmission } from "../shared/support.js";
+import type { UpdateChannel, ReleaseChannelConfig } from "../shared/update.js";
+import type { PricingTier, OnboardingExperiment, LaunchMetrics } from "../shared/launchConfig.js";
 
 const IpcChannel = {
   SelectMedia: "dialog:select-media",
@@ -83,7 +88,34 @@ const IpcChannel = {
   FeedbackResolve: "review:feedback-resolve",
   HandoffExport: "review:handoff-export",
   HandoffImport: "review:handoff-import",
-  HandoffValidate: "review:handoff-validate"
+  HandoffValidate: "review:handoff-validate",
+  LicenseValidate: "license:validate",
+  LicenseCheckFeature: "license:check-feature",
+  LicenseStartTrial: "license:start-trial",
+  LicenseActivate: "license:activate",
+  LicenseDeactivate: "license:deactivate",
+  LicenseGetState: "license:get-state",
+  LicenseClear: "license:clear",
+  TelemetryGetConsent: "telemetry:get-consent",
+  TelemetrySetConsent: "telemetry:set-consent",
+  TelemetryTrack: "telemetry:track",
+  TelemetryFlush: "telemetry:flush",
+  TelemetryDeleteAll: "telemetry:delete-all",
+  TelemetryGetQueueSize: "telemetry:get-queue-size",
+  CrashCapture: "support:capture-crash",
+  GetAppDiagnostics: "app:get-diagnostics",
+  CreateSupportBundle: "support:create-bundle",
+  SubmitFeedback: "support:submit-feedback",
+  UpdateCheck: "update:check",
+  UpdateGetStatus: "update:get-status",
+  UpdateGetConfig: "update:get-config",
+  UpdateSetChannel: "update:set-channel",
+  UpdateSetAutoCheck: "update:set-auto-check",
+  UpdateGetChannels: "update:get-channels",
+  LaunchGetPricingTiers: "launch:get-pricing-tiers",
+  LaunchGetExperiments: "launch:get-experiments",
+  LaunchGetMetrics: "launch:get-metrics",
+  LaunchSetExperiment: "launch:set-experiment"
 } as const;
 
 const api: ChromaNodeApi = {
@@ -133,7 +165,34 @@ const api: ChromaNodeApi = {
   resolveFeedback: (request: FeedbackResolveRequest) => ipcRenderer.invoke(IpcChannel.FeedbackResolve, request),
   exportHandoffPackage: (request: HandoffPackageExportRequest) => ipcRenderer.invoke(IpcChannel.HandoffExport, request),
   importHandoffPackage: (request: HandoffPackageImportRequest) => ipcRenderer.invoke(IpcChannel.HandoffImport, request),
-  validateHandoffPackage: (request: HandoffPackageValidateRequest) => ipcRenderer.invoke(IpcChannel.HandoffValidate, request)
+  validateHandoffPackage: (request: HandoffPackageValidateRequest) => ipcRenderer.invoke(IpcChannel.HandoffValidate, request),
+  validateLicense: () => ipcRenderer.invoke(IpcChannel.LicenseValidate),
+  checkFeatureEntitlement: (feature: keyof EntitlementFlags) => ipcRenderer.invoke(IpcChannel.LicenseCheckFeature, { feature }),
+  startTrial: () => ipcRenderer.invoke(IpcChannel.LicenseStartTrial),
+  activateLicense: (request: { licenseKey: string }) => ipcRenderer.invoke(IpcChannel.LicenseActivate, request),
+  deactivateLicense: () => ipcRenderer.invoke(IpcChannel.LicenseDeactivate),
+  getLicenseState: () => ipcRenderer.invoke(IpcChannel.LicenseGetState),
+  clearLicense: () => ipcRenderer.invoke(IpcChannel.LicenseClear),
+  getTelemetryConsent: () => ipcRenderer.invoke(IpcChannel.TelemetryGetConsent),
+  setTelemetryConsent: (consent: TelemetryConsent) => ipcRenderer.invoke(IpcChannel.TelemetrySetConsent, consent),
+  trackTelemetry: (request: { type: string; payload: Record<string, unknown> }) => ipcRenderer.invoke(IpcChannel.TelemetryTrack, request),
+  flushTelemetry: () => ipcRenderer.invoke(IpcChannel.TelemetryFlush),
+  deleteAllTelemetry: () => ipcRenderer.invoke(IpcChannel.TelemetryDeleteAll),
+  getTelemetryQueueSize: () => ipcRenderer.invoke(IpcChannel.TelemetryGetQueueSize),
+  captureCrash: (request: { crashType: string; message: string; stackTrace?: string; projectId?: string }) => ipcRenderer.invoke(IpcChannel.CrashCapture, request),
+  getAppDiagnostics: () => ipcRenderer.invoke(IpcChannel.GetAppDiagnostics),
+  createSupportBundle: (request: { includeLogs?: boolean; includeProjectDiagnostics?: boolean; includeMediaMetadata?: boolean; redactPaths?: boolean; contactInfo?: string }) => ipcRenderer.invoke(IpcChannel.CreateSupportBundle, request),
+  submitFeedback: (request: FeedbackSubmission) => ipcRenderer.invoke(IpcChannel.SubmitFeedback, request),
+  checkForUpdate: () => ipcRenderer.invoke(IpcChannel.UpdateCheck),
+  getUpdateStatus: () => ipcRenderer.invoke(IpcChannel.UpdateGetStatus),
+  getUpdateConfig: () => ipcRenderer.invoke(IpcChannel.UpdateGetConfig),
+  setUpdateChannel: (channel: UpdateChannel) => ipcRenderer.invoke(IpcChannel.UpdateSetChannel, channel),
+  setUpdateAutoCheck: (autoCheck: boolean) => ipcRenderer.invoke(IpcChannel.UpdateSetAutoCheck, autoCheck),
+  getUpdateChannels: () => ipcRenderer.invoke(IpcChannel.UpdateGetChannels),
+  getPricingTiers: () => ipcRenderer.invoke(IpcChannel.LaunchGetPricingTiers),
+  getOnboardingExperiments: () => ipcRenderer.invoke(IpcChannel.LaunchGetExperiments),
+  getLaunchMetrics: () => ipcRenderer.invoke(IpcChannel.LaunchGetMetrics),
+  setOnboardingExperiment: (id: string, enabled: boolean) => ipcRenderer.invoke(IpcChannel.LaunchSetExperiment, { id, enabled })
 };
 
 contextBridge.exposeInMainWorld("chromaNode", api);
