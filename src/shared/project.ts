@@ -6,8 +6,14 @@ import {
   normalizeNodeGraph,
   sanitizeColorNode,
   createDefaultColorManagementSettings,
+  COLORSPACES,
+  PRIMARIES,
+  TRANSFER_FUNCTIONS,
   type ColorNode,
-  type ColorManagementSettings
+  type ColorManagementSettings,
+  type ColorMetadata,
+  type ColorMatrixType,
+  type ColorRangeType
 } from "./colorEngine.js";
 
 export const PROJECT_SCHEMA_VERSION = "1.0.0";
@@ -425,9 +431,64 @@ function readMedia(
     frameRate: clampNumber(readNumber(input.frameRate, "media.frameRate", 24, warnings), 1, 240, "media.frameRate", warnings),
     totalFrames: input.totalFrames === undefined ? undefined : clampInteger(readNumber(input.totalFrames, "media.totalFrames", 0, warnings), 0, Number.MAX_SAFE_INTEGER),
     hasAudio: typeof input.hasAudio === "boolean" ? input.hasAudio : false,
+    audioStreamIndex: input.audioStreamIndex === undefined ? undefined : clampInteger(readNumber(input.audioStreamIndex, "media.audioStreamIndex", 0, warnings), 0, Number.MAX_SAFE_INTEGER),
     rotation,
-    videoStreamIndex: clampInteger(readNumber(input.videoStreamIndex, "media.videoStreamIndex", 0, warnings), 0, Number.MAX_SAFE_INTEGER)
+    videoStreamIndex: clampInteger(readNumber(input.videoStreamIndex, "media.videoStreamIndex", 0, warnings), 0, Number.MAX_SAFE_INTEGER),
+    colorMetadata: readColorMetadata(input.colorMetadata, warnings),
+    detectedColorProfile: readDetectedColorProfile(input.detectedColorProfile, warnings)
   };
+}
+
+function readColorMetadata(input: unknown, warnings: ProjectValidationIssue[]): ColorMetadata | undefined {
+  if (input === undefined) {
+    return undefined;
+  }
+  if (!isRecord(input)) {
+    warnings.push(issue("media.colorMetadata", "DEFAULTED", "Invalid color metadata was removed.", input));
+    return undefined;
+  }
+
+  const primariesType = isRecord(input.primaries) && typeof input.primaries.type === "string" && input.primaries.type in PRIMARIES
+    ? input.primaries.type as keyof typeof PRIMARIES
+    : "rec709";
+  const transferType = isRecord(input.transfer) && typeof input.transfer.type === "string" && input.transfer.type in TRANSFER_FUNCTIONS
+    ? input.transfer.type as keyof typeof TRANSFER_FUNCTIONS
+    : "bt1886";
+  const matrixType = isRecord(input.matrix) && isColorMatrixType(input.matrix.type) ? input.matrix.type : "bt709";
+  const rangeType = isRecord(input.range) && isColorRangeType(input.range.type) ? input.range.type : "limited";
+
+  return {
+    primaries: PRIMARIES[primariesType],
+    transfer: TRANSFER_FUNCTIONS[transferType],
+    matrix: { type: matrixType },
+    range: { type: rangeType },
+    bitDepth: readBitDepth(input.bitDepth),
+    profileLabel: typeof input.profileLabel === "string" && input.profileLabel.trim() ? input.profileLabel.trim().slice(0, 80) : "Unknown"
+  };
+}
+
+function readDetectedColorProfile(input: unknown, warnings: ProjectValidationIssue[]): MediaRef["detectedColorProfile"] | undefined {
+  if (input === undefined) {
+    return undefined;
+  }
+  if (typeof input === "string" && input in COLORSPACES) {
+    return input;
+  }
+
+  warnings.push(issue("media.detectedColorProfile", "DEFAULTED", "Invalid detected color profile was removed.", input));
+  return undefined;
+}
+
+function readBitDepth(input: unknown): 8 | 10 | 12 | 16 {
+  return input === 10 || input === 12 || input === 16 ? input : 8;
+}
+
+function isColorMatrixType(input: unknown): input is ColorMatrixType {
+  return input === "bt601" || input === "bt709" || input === "bt2020nc" || input === "bt2020c" || input === "identity" || input === "unknown";
+}
+
+function isColorRangeType(input: unknown): input is ColorRangeType {
+  return input === "full" || input === "limited";
 }
 
 function collectNodeClampWarnings(

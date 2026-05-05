@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createColorNode, invalidateTrackingForWindow } from "./colorEngine";
+import { createColorNode, createDefaultColorMetadata, invalidateTrackingForWindow } from "./colorEngine";
 import { PROJECT_SCHEMA_VERSION, createDefaultProject, serializeProject, validateProject } from "./project";
 
 describe("project schema", () => {
@@ -95,6 +95,49 @@ describe("project schema", () => {
     expect(parsed.ok).toBe(true);
     if (parsed.ok) {
       expect(parsed.project.media?.sourcePath).toBe("/clips/source.mp4");
+    }
+  });
+
+  it("preserves probed audio and color metadata in media JSON", () => {
+    const project = {
+      ...createDefaultProject(),
+      media: {
+        id: "clip",
+        sourcePath: "/clips/source.mov",
+        fileName: "source.mov",
+        container: "mov,mp4",
+        codec: "hevc",
+        width: 3840,
+        height: 2160,
+        displayWidth: 3840,
+        displayHeight: 2160,
+        durationSeconds: 2,
+        frameRate: 24,
+        totalFrames: 48,
+        hasAudio: true,
+        audioStreamIndex: 2,
+        rotation: 0,
+        videoStreamIndex: 0,
+        colorMetadata: {
+          ...createDefaultColorMetadata(),
+          transfer: { type: "appleLog" as const },
+          primaries: { ...createDefaultColorMetadata().primaries, type: "rec2020" as const },
+          bitDepth: 10 as const,
+          profileLabel: "Apple Log"
+        },
+        detectedColorProfile: "appleLog"
+      }
+    };
+
+    const parsed = validateProject(JSON.parse(serializeProject(project)));
+
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.project.media?.audioStreamIndex).toBe(2);
+      expect(parsed.project.media?.colorMetadata?.transfer.type).toBe("appleLog");
+      expect(parsed.project.media?.colorMetadata?.primaries.type).toBe("rec2020");
+      expect(parsed.project.media?.colorMetadata?.bitDepth).toBe(10);
+      expect(parsed.project.media?.detectedColorProfile).toBe("appleLog");
     }
   });
 
