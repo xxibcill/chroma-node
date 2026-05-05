@@ -109,6 +109,110 @@ export interface LutSettings {
   intensity: number;
 }
 
+// Technical LUT types (separate from creative node LUTs)
+
+export type LutInterpolation = "trilinear" | "tetrahedral";
+export type LutSlot = "input" | "display" | "output" | "calibration" | "viewing";
+
+export interface TechnicalLutDescriptor {
+  id: string;
+  name: string;
+  slot: LutSlot;
+  size: number;
+  interpolation: LutInterpolation;
+  lut: LutData | null; // actual LUT data
+  inputProfile: string; // expected input color space
+  outputProfile: string; // expected output color space
+  isValid: boolean;
+  validationErrors: string[];
+  filePath: string | null;
+  provenance: string | null;
+}
+
+export interface TechnicalLutRegistry {
+  inputLut: TechnicalLutDescriptor | null;
+  displayLut: TechnicalLutDescriptor | null;
+  outputLut: TechnicalLutDescriptor | null;
+  calibrationLut: TechnicalLutDescriptor | null;
+  viewingLut: TechnicalLutDescriptor | null;
+}
+
+export function createTechnicalLutDescriptor(
+  id: string,
+  name: string,
+  slot: LutSlot,
+  lutData: LutData | null,
+  inputProfile: string,
+  outputProfile: string,
+  filePath: string | null = null
+): TechnicalLutDescriptor {
+  const errors: string[] = [];
+
+  if (!lutData) {
+    errors.push("No LUT data provided");
+  } else {
+    // Validate LUT dimensions
+    if (lutData.size < 2) {
+      errors.push(`LUT size ${lutData.size} is too small (minimum 2)`);
+    }
+    if (lutData.size > 65) {
+      errors.push(`LUT size ${lutData.size} is too large (maximum 65)`);
+    }
+
+    // Validate LUT data is finite
+    const data = lutData.data;
+    for (let i = 0; i < data.length; i++) {
+      if (!Number.isFinite(data[i])) {
+        errors.push(`LUT data contains non-finite value at index ${i}`);
+        break;
+      }
+    }
+
+    // Validate expected count
+    const expectedCount = lutData.size * lutData.size * lutData.size * 3;
+    if (data.length !== expectedCount) {
+      errors.push(
+        `LUT data length ${data.length} does not match expected ${expectedCount} for size ${lutData.size}`
+      );
+    }
+  }
+
+  return {
+    id,
+    name,
+    slot,
+    size: lutData?.size ?? 0,
+    interpolation: "trilinear",
+    lut: lutData,
+    inputProfile,
+    outputProfile,
+    isValid: errors.length === 0,
+    validationErrors: errors,
+    filePath,
+    provenance: null
+  };
+}
+
+export function validateTechnicalLut(lut: TechnicalLutDescriptor): TechnicalLutDescriptor {
+  const validated = { ...lut };
+
+  if (lut.size < 2) {
+    validated.isValid = false;
+    if (!validated.validationErrors.includes(`LUT size ${lut.size} is too small`)) {
+      validated.validationErrors.push(`LUT size ${lut.size} is too small (minimum 2)`);
+    }
+  }
+
+  if (lut.size > 65) {
+    validated.isValid = false;
+    if (!validated.validationErrors.includes(`LUT size ${lut.size} is too large`)) {
+      validated.validationErrors.push(`LUT size ${lut.size} is too large (maximum 65)`);
+    }
+  }
+
+  return validated;
+}
+
 export interface ColorManagementSettings {
   inputColorSpace: ColorSpace;
   outputColorSpace: ColorSpace;
@@ -1038,6 +1142,274 @@ export function parseCubeLut(content: string): LutData | null {
   };
 }
 
+// Parse and validate technical LUT with full metadata
+export interface ParseTechnicalLutResult {
+  lut: LutData | null;
+  size: number;
+  isValid: boolean;
+  errors: string[];
+  hasShaper: boolean;
+  shaperSize: number;
+}
+
+export function parseTechnicalLut(content: string): ParseTechnicalLutResult {
+  const result: ParseTechnicalLutResult = {
+    lut: null,
+    size: 0,
+    isValid: false,
+    errors: [],
+    hasShaper: false,
+    shaperSize: 0
+  };
+
+  const lines = content.split("\n");
+  let size = 0;
+  let shaperSize = 0;
+  let inData = false;
+  let inShaperData = false;
+  const values: number[] = [];
+  const shaperValues: number[] = [];
+  let name = "Imported Technical LUT";
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (trimmed === "" || trimmed.startsWith("#")) {
+      continue;
+    }
+
+    if (trimmed.startsWith("TITLE")) {
+      const match = trimmed.match(/TITLE\s+"(.+)"/);
+      if (match) {
+        name = match[1];
+      }
+      continue;
+    }
+
+    if (trimmed.startsWith("LUT_3D_SIZE")) {
+      const match = trimmed.match(/LUT_3D_SIZE\s+(\d+)/);
+      if (match) {
+        size = parseInt(match[1], 10);
+      }
+      continue;
+    }
+
+    if (trimmed.startsWith("LUT_1D_SIZE")) {
+      const match = trimmed.match(/LUT_1D_SIZE\s+(\d+)/);
+      if (match) {
+        shaperSize = parseInt(match[1], 10);
+        result.hasShaper = shaperSize > 0;
+        result.shaperSize = shaperSize;
+      }
+      continue;
+    }
+
+    if (trimmed === "BEGIN_DATA" || trimmed === "DATA") {
+      inData = true;
+      inShaperData = false;
+      continue;
+    }
+
+    if (trimmed.startsWith("DOMAIN_MIN")) {
+      continue; // Ignore domain for now
+    }
+
+    if (trimmed.startsWith("DOMAIN_MAX")) {
+      continue; // Ignore domain for now
+    }
+
+    // 1D shaper LUT data
+    if (shaperSize > 0 && !inData) {
+      const parts = trimmed.split(/\s+/);
+      if (parts.length >= 3) {
+        const r = parseFloat(parts[0]);
+        const g = parseFloat(parts[1]);
+        const b = parseFloat(parts[2]);
+        if (Number.isFinite(r) && Number.isFinite(g) && Number.isFinite(b)) {
+          shaperValues.push(r, g, b);
+        }
+      }
+      if (shaperValues.length >= shaperSize * 3) {
+        inShaperData = true;
+      }
+      continue;
+    }
+
+    // 3D LUT data
+    if ((inData || size > 0) && !inShaperData) {
+      const parts = trimmed.split(/\s+/);
+      if (parts.length >= 3) {
+        const r = parseFloat(parts[0]);
+        const g = parseFloat(parts[1]);
+        const b = parseFloat(parts[2]);
+        if (Number.isFinite(r) && Number.isFinite(g) && Number.isFinite(b)) {
+          values.push(clamp01(r));
+          values.push(clamp01(g));
+          values.push(clamp01(b));
+        }
+      }
+    }
+  }
+
+  // Validate
+  if (size === 0 && shaperSize === 0) {
+    result.errors.push("No LUT size found (expected LUT_3D_SIZE or LUT_1D_SIZE)");
+    return result;
+  }
+
+  if (size > 65) {
+    result.errors.push(`LUT size ${size} exceeds maximum of 65`);
+    return result;
+  }
+
+  const expected3DCount = size * size * size * 3;
+  if (size > 0 && values.length !== expected3DCount) {
+    result.errors.push(
+      `3D LUT data length ${values.length} does not match expected ${expected3DCount} for size ${size}`
+    );
+    return result;
+  }
+
+  // Check for finite values
+  for (let i = 0; i < values.length; i++) {
+    if (!Number.isFinite(values[i])) {
+      result.errors.push(`Non-finite value at LUT index ${i}`);
+      return result;
+    }
+  }
+
+  result.lut = {
+    name,
+    size,
+    data: new Float32Array(values)
+  };
+  result.size = size;
+  result.isValid = result.errors.length === 0;
+
+  return result;
+}
+
+// Technical LUT ordering - apply in pipeline order
+export const TECHNICAL_LUT_SLOT_ORDER: LutSlot[] = [
+  "input",
+  "calibration",
+  "viewing",
+  "display",
+  "output"
+];
+
+export function applyTechnicalLutInOrder(
+  pixel: Pixel,
+  luts: TechnicalLutRegistry
+): Pixel {
+  let result = pixel;
+
+  for (const slot of TECHNICAL_LUT_SLOT_ORDER) {
+    const lut = luts[slot === "calibration" ? "calibrationLut" : slot === "viewing" ? "viewingLut" : `${slot}Lut` as keyof TechnicalLutRegistry];
+    if (lut && lut.isValid && lut.lut) {
+      // For now, apply as 3D LUT with trilinear interpolation
+      result = applyLutTrilinear(result, lut.lut);
+    }
+  }
+
+  return result;
+}
+
+// Apply 3D LUT with tetrahedral interpolation (higher quality)
+function applyLutTrilinear(pixel: Pixel, lutData: LutData): Pixel {
+  const size = lutData.size;
+  const data = lutData.data;
+
+  const rScaled = clamp01(pixel.r) * (size - 1);
+  const gScaled = clamp01(pixel.g) * (size - 1);
+  const bScaled = clamp01(pixel.b) * (size - 1);
+
+  const r0 = Math.floor(rScaled);
+  const g0 = Math.floor(gScaled);
+  const b0 = Math.floor(bScaled);
+  const r1 = Math.min(r0 + 1, size - 1);
+  const g1 = Math.min(g0 + 1, size - 1);
+  const b1 = Math.min(b0 + 1, size - 1);
+
+  const rFrac = rScaled - r0;
+  const gFrac = gScaled - g0;
+  const bFrac = bScaled - b0;
+
+  const getLutValue = (r: number, g: number, b: number) => {
+    const index = ((b * size + g) * size + r) * 3;
+    return { r: data[index], g: data[index + 1], b: data[index + 2] };
+  };
+
+  // Trilinear interpolation
+  const c000 = getLutValue(r0, g0, b0);
+  const c001 = getLutValue(r1, g0, b0);
+  const c010 = getLutValue(r0, g1, b0);
+  const c011 = getLutValue(r1, g1, b0);
+  const c100 = getLutValue(r0, g0, b1);
+  const c101 = getLutValue(r1, g0, b1);
+  const c110 = getLutValue(r0, g1, b1);
+  const c111 = getLutValue(r1, g1, b1);
+
+  const tr = c000.r * (1 - rFrac) * (1 - gFrac) * (1 - bFrac) +
+             c001.r * rFrac * (1 - gFrac) * (1 - bFrac) +
+             c010.r * (1 - rFrac) * gFrac * (1 - bFrac) +
+             c011.r * rFrac * gFrac * (1 - bFrac) +
+             c100.r * (1 - rFrac) * (1 - gFrac) * bFrac +
+             c101.r * rFrac * (1 - gFrac) * bFrac +
+             c110.r * (1 - rFrac) * gFrac * bFrac +
+             c111.r * rFrac * gFrac * bFrac;
+
+  const tg = c000.g * (1 - rFrac) * (1 - gFrac) * (1 - bFrac) +
+             c001.g * rFrac * (1 - gFrac) * (1 - bFrac) +
+             c010.g * (1 - rFrac) * gFrac * (1 - bFrac) +
+             c011.g * rFrac * gFrac * (1 - bFrac) +
+             c100.g * (1 - rFrac) * (1 - gFrac) * bFrac +
+             c101.g * rFrac * (1 - gFrac) * bFrac +
+             c110.g * (1 - rFrac) * gFrac * bFrac +
+             c111.g * rFrac * gFrac * bFrac;
+
+  const tb = c000.b * (1 - rFrac) * (1 - gFrac) * (1 - bFrac) +
+             c001.b * rFrac * (1 - gFrac) * (1 - bFrac) +
+             c010.b * (1 - rFrac) * gFrac * (1 - bFrac) +
+             c011.b * rFrac * gFrac * (1 - bFrac) +
+             c100.b * (1 - rFrac) * (1 - gFrac) * bFrac +
+             c101.b * rFrac * (1 - gFrac) * bFrac +
+             c110.b * (1 - rFrac) * gFrac * bFrac +
+             c111.b * rFrac * gFrac * bFrac;
+
+  return {
+    r: clamp01(tr),
+    g: clamp01(tg),
+    b: clamp01(tb),
+    a: pixel.a
+  };
+}
+
+// Recovery flow for missing technical LUTs
+export function recoverFromMissingTechnicalLut(
+  slot: LutSlot,
+  missingLutId: string
+): { action: "warn" | "skip" | "use_alternative"; message: string } {
+  if (slot === "input" || slot === "output") {
+    return {
+      action: "warn",
+      message: `Technical ${slot} LUT '${missingLutId}' is missing. Output may not match intended transform.`
+    };
+  }
+
+  if (slot === "display" || slot === "calibration") {
+    return {
+      action: "skip",
+      message: `Display/Calibration LUT '${missingLutId}' not found. Skipping this stage.`
+    };
+  }
+
+  return {
+    action: "skip",
+    message: `Technical LUT '${missingLutId}' not found in slot '${slot}'.`
+  };
+}
+
 export function generateColorFragmentShader(nodeCount: number): string {
   const count = Math.max(1, Math.min(MAX_SERIAL_NODES, Math.floor(nodeCount)));
   const curveCount = count * 4;
@@ -1614,6 +1986,1143 @@ function normalizeSignedDegrees(value: number): number {
   return degrees === -180 ? 180 : degrees;
 }
 
+// Profile registry and transform graph types
+
+export type ProfileCategory = "input" | "working" | "display" | "delivery";
+export type TransformCapability = "cpu" | "glsl" | "lut" | "ocio";
+
+export interface HdrMetadata {
+  peakLuminance: number; // in nits
+  referenceWhite: number; // in nits
+  diffuseWhite: number; // in nits
+  blackLevel: number; // in nits
+  maxLuminance: number; // mastering display peak
+  minLuminance: number; // mastering display black
+  primaries: ColorPrimariesType;
+}
+
+export interface ProfileCapabilities {
+  cpu: boolean;
+  glsl: boolean;
+  lut: boolean;
+  ocio: boolean;
+}
+
+export interface ProfileEntry {
+  id: string;
+  label: string;
+  category: ProfileCategory;
+  primaries: ColorPrimariesType;
+  transfer: TransferFunctionType;
+  matrix: ColorMatrixType;
+  range: ColorRange;
+  bitDepths: number[];
+  isHdr: boolean;
+  isWideGamut: boolean;
+  capabilities: ProfileCapabilities;
+  hdrMetadata?: HdrMetadata;
+  provenance?: string; // reference document or formula source
+}
+
+export interface TransformStage {
+  stageId: string;
+  label: string;
+  fromProfile: string;
+  toProfile: string;
+  transferDecode?: TransferFunctionType;
+  transferEncode?: TransferFunctionType;
+  primariesMatrix?: number[];
+  toneMapMode?: ToneMappingMode;
+  gamutMapMode?: GamutMappingMode;
+  isInvertible: boolean;
+}
+
+export interface TransformGraph {
+  nodes: ProfileEntry[];
+  edges: TransformStage[];
+}
+
+// Camera log input transform library
+// Each transform has decode/encode functions, primaries, and provenance
+
+export type CameraLogType =
+  | "appleLog"
+  | "arriLogC3"
+  | "arriLogC4"
+  | "sonySLog2"
+  | "sonySLog3"
+  | "canonCLog"
+  | "canonCLog2"
+  | "canonCLog3"
+  | "panasonicVLog"
+  | "redLog3G10"
+  | "bmdfFilmGen5"
+  | "djiDLog"
+  | "goproProtune";
+
+export interface CameraLogProfile {
+  id: CameraLogType;
+  label: string;
+  decodeTransfer: TransferFunctionType;
+  encodeTransfer: TransferFunctionType;
+  primaries: ColorPrimariesType;
+  matrix: ColorMatrixType;
+  range: ColorRange;
+  isHdr: boolean;
+  isWideGamut: boolean;
+  provenance: string;
+}
+
+export const CAMERA_LOG_PROFILES: Record<CameraLogType, CameraLogProfile> = {
+  appleLog: {
+    id: "appleLog",
+    label: "Apple Log",
+    decodeTransfer: "appleLog",
+    encodeTransfer: "appleLog",
+    primaries: "rec2020",
+    matrix: "bt2020nc",
+    range: { type: "limited" },
+    isHdr: true,
+    isWideGamut: true,
+    provenance: "Apple ProRes White Paper / AFImaging"
+  },
+  arriLogC3: {
+    id: "arriLogC3",
+    label: "ARRI LogC3",
+    decodeTransfer: "log25",
+    encodeTransfer: "log25",
+    primaries: "rec709",
+    matrix: "bt709",
+    range: { type: "limited" },
+    isHdr: true,
+    isWideGamut: false,
+    provenance: "ARRI Alexa Log C Curve Documentation"
+  },
+  arriLogC4: {
+    id: "arriLogC4",
+    label: "ARRI LogC4",
+    decodeTransfer: "log25",
+    encodeTransfer: "log25",
+    primaries: "rec2020",
+    matrix: "bt2020nc",
+    range: { type: "limited" },
+    isHdr: true,
+    isWideGamut: true,
+    provenance: "ARRI Alexa 35 LogC4 Documentation"
+  },
+  sonySLog2: {
+    id: "sonySLog2",
+    label: "Sony S-Log2",
+    decodeTransfer: "log25",
+    encodeTransfer: "log25",
+    primaries: "rec709",
+    matrix: "bt709",
+    range: { type: "limited" },
+    isHdr: true,
+    isWideGamut: false,
+    provenance: "Sony S-Log2 Technical Documentation"
+  },
+  sonySLog3: {
+    id: "sonySLog3",
+    label: "Sony S-Log3",
+    decodeTransfer: "log25",
+    encodeTransfer: "log25",
+    primaries: "rec2020",
+    matrix: "bt2020nc",
+    range: { type: "limited" },
+    isHdr: true,
+    isWideGamut: true,
+    provenance: "Sony S-Log3 Technical Documentation"
+  },
+  canonCLog: {
+    id: "canonCLog",
+    label: "Canon C-Log",
+    decodeTransfer: "log25",
+    encodeTransfer: "log25",
+    primaries: "rec709",
+    matrix: "bt709",
+    range: { type: "limited" },
+    isHdr: true,
+    isWideGamut: false,
+    provenance: "Canon C-Log Technical Documentation"
+  },
+  canonCLog2: {
+    id: "canonCLog2",
+    label: "Canon C-Log2",
+    decodeTransfer: "log25",
+    encodeTransfer: "log25",
+    primaries: "rec2020",
+    matrix: "bt2020nc",
+    range: { type: "limited" },
+    isHdr: true,
+    isWideGamut: true,
+    provenance: "Canon C-Log2 Technical Documentation"
+  },
+  canonCLog3: {
+    id: "canonCLog3",
+    label: "Canon C-Log3",
+    decodeTransfer: "log25",
+    encodeTransfer: "log25",
+    primaries: "rec2020",
+    matrix: "bt2020nc",
+    range: { type: "limited" },
+    isHdr: true,
+    isWideGamut: true,
+    provenance: "Canon C-Log3 Technical Documentation"
+  },
+  panasonicVLog: {
+    id: "panasonicVLog",
+    label: "Panasonic V-Log",
+    decodeTransfer: "log25",
+    encodeTransfer: "log25",
+    primaries: "rec709",
+    matrix: "bt709",
+    range: { type: "limited" },
+    isHdr: true,
+    isWideGamut: false,
+    provenance: "Panasonic V-Log Technical Documentation"
+  },
+  redLog3G10: {
+    id: "redLog3G10",
+    label: "RED Log3G10",
+    decodeTransfer: "log25",
+    encodeTransfer: "log25",
+    primaries: "rec2020",
+    matrix: "bt2020nc",
+    range: { type: "full" },
+    isHdr: true,
+    isWideGamut: true,
+    provenance: "RED Log3G10 Technical Documentation"
+  },
+  bmdfFilmGen5: {
+    id: "bmdfFilmGen5",
+    label: "Blackmagic Film Gen 5",
+    decodeTransfer: "log25",
+    encodeTransfer: "log25",
+    primaries: "rec709",
+    matrix: "bt709",
+    range: { type: "limited" },
+    isHdr: true,
+    isWideGamut: false,
+    provenance: "Blackmagic Film Gen 5 Technical Documentation"
+  },
+  djiDLog: {
+    id: "djiDLog",
+    label: "DJI D-Log",
+    decodeTransfer: "log25",
+    encodeTransfer: "log25",
+    primaries: "rec2020",
+    matrix: "bt2020nc",
+    range: { type: "limited" },
+    isHdr: true,
+    isWideGamut: true,
+    provenance: "DJI D-Log Technical Documentation"
+  },
+  goproProtune: {
+    id: "goproProtune",
+    label: "GoPro Protune",
+    decodeTransfer: "log25",
+    encodeTransfer: "log25",
+    primaries: "rec709",
+    matrix: "bt709",
+    range: { type: "limited" },
+    isHdr: true,
+    isWideGamut: false,
+    provenance: "GoPro Protune Technical Documentation"
+  }
+};
+
+// Generic log transfer placeholder (reserved for future validated camera log curves)
+
+export function getCameraLogProfile(type: CameraLogType): CameraLogProfile | undefined {
+  return CAMERA_LOG_PROFILES[type];
+}
+
+export function detectCameraLog(codecName: string, tags: Record<string, string>): CameraLogType | undefined {
+  const codecLC = codecName.toLowerCase();
+  const transferStr = (tags.transfer_characteristics || tags.gamma || tags.color_space || "").toLowerCase();
+
+  if (codecLC === "dvi" || codecLC === "ap4n" || transferStr.includes("apple")) {
+    return "appleLog";
+  }
+
+  if (codecLC.includes("prores") && tags.vendor && tags.vendor.toLowerCase().includes("arri")) {
+    if (transferStr.includes("logc4") || transferStr.includes("arri")) {
+      return "arriLogC4";
+    }
+    return "arriLogC3";
+  }
+
+  if (codecLC.includes("xavc") || codecLC.includes("fx3") || codecLC.includes("fx6") || codecLC.includes("a7")) {
+    if (transferStr.includes("slog3") || transferStr.includes("sony slog3")) {
+      return "sonySLog3";
+    }
+    if (transferStr.includes("slog2") || transferStr.includes("sony slog2")) {
+      return "sonySLog2";
+    }
+  }
+
+  if (codecLC.includes("canon") || codecLC.includes("c500") || codecLC.includes("c300")) {
+    if (transferStr.includes("clog3") || transferStr.includes("canon clog3")) {
+      return "canonCLog3";
+    }
+    if (transferStr.includes("clog2") || transferStr.includes("canon clog2")) {
+      return "canonCLog2";
+    }
+    if (transferStr.includes("clog") || transferStr.includes("canon clog")) {
+      return "canonCLog";
+    }
+  }
+
+  if (codecLC.includes("panasonic") || codecLC.includes("varicam")) {
+    return "panasonicVLog";
+  }
+
+  if (codecLC.includes("red") || codecLC.includes("r3d") || codecLC.includes("redcode")) {
+    return "redLog3G10";
+  }
+
+  if (codecLC.includes("braw") || codecLC.includes("blackmagic") || codecLC.includes("bmdf")) {
+    return "bmdfFilmGen5";
+  }
+
+  if (codecLC.includes("dji") || codecLC.includes("xmp")) {
+    return "djiDLog";
+  }
+
+  if (codecLC.includes("gopro") || codecLC.includes("hevc")) {
+    return "goproProtune";
+  }
+
+  return undefined;
+}
+
+export function resolveCameraLogProfile(
+  inputColorSpace: ColorSpace,
+  sourceInfo: SourceColorInfo,
+  manualOverride?: CameraLogType
+): CameraLogType {
+  if (manualOverride && CAMERA_LOG_PROFILES[manualOverride]) {
+    return manualOverride;
+  }
+
+  if (inputColorSpace === "appleLog") return "appleLog";
+  if (inputColorSpace === "hlg") return "bmdfFilmGen5";
+  if (inputColorSpace === "pq") return "bmdfFilmGen5";
+
+  if (sourceInfo.metadata) {
+    const transfer = sourceInfo.metadata.transfer.type;
+    if (transfer === "appleLog") return "appleLog";
+    if (transfer === "log25") return "bmdfFilmGen5";
+    if (transfer === "hlg") return "bmdfFilmGen5";
+    if (transfer === "pq") return "bmdfFilmGen5";
+  }
+
+  return "bmdfFilmGen5";
+}
+
+// ACES and OCIO-compatible workflow types
+
+export type AcesWorkflowType = "acescct" | "acescg" | "app-managed";
+
+export interface AcesInputDescriptor {
+  idtName: string; // Input Device Transform name
+  cameraProfile: CameraLogType;
+  detectedAutomatically: boolean;
+}
+
+export interface AcesWorkingSpaceDescriptor {
+  type: AcesWorkflowType;
+  label: string;
+  primaries: ColorPrimariesType;
+  transfer: TransferFunctionType;
+  isWideGamut: boolean;
+}
+
+export interface AcesViewTransformDescriptor {
+  label: string;
+  displayP3Path: string; // Path for Display P3 preview
+  rec709Path: string; // Path for Rec.709 preview
+  rec2020PqPath: string; // Path for Rec.2020 PQ preview
+  rec2020HlgPath: string; // Path for Rec.2020 HLG preview
+}
+
+export interface AcesLookDescriptor {
+  label: string;
+  ocioLookPath: string; // Optional OCIO look path
+  isCreative: boolean;
+}
+
+export interface AcesPipelineDescriptor {
+  input: AcesInputDescriptor;
+  working: AcesWorkingSpaceDescriptor;
+  viewTransform: AcesViewTransformDescriptor;
+  look: AcesLookDescriptor | null;
+  output: ProfileEntry;
+  usesOcioConfig: boolean;
+  ocioConfigPath: string | null;
+}
+
+export interface OcioConfigDescriptor {
+  configPath: string | null;
+  configExists: boolean;
+  hasMissingLooks: boolean;
+  availableLooks: string[];
+  availableViews: string[];
+  availableDisplays: string[];
+}
+
+// ACES working space definitions
+export const ACES_WORKING_SPACES: Record<AcesWorkflowType, AcesWorkingSpaceDescriptor> = {
+  "app-managed": {
+    type: "app-managed",
+    label: "App-Managed (Rec.709)",
+    primaries: "rec709",
+    transfer: "linear",
+    isWideGamut: false
+  },
+  acescct: {
+    type: "acescct",
+    label: "ACEScct",
+    primaries: "rec2020",
+    transfer: "linear",
+    isWideGamut: true
+  },
+  acescg: {
+    type: "acescg",
+    label: "ACEScg",
+    primaries: "rec2020",
+    transfer: "linear",
+    isWideGamut: true
+  }
+};
+
+// Check if OCIO config is available (optional - doesn't make OCIO required)
+let _ocioConfigCache: OcioConfigDescriptor | null = null;
+
+export function getOcioConfigStatus(): OcioConfigDescriptor {
+  if (_ocioConfigCache) {
+    return _ocioConfigCache;
+  }
+
+  const configPath = process.env.OCIO_CONFIG_PATH || "";
+  const configExists = !!configPath;
+
+  _ocioConfigCache = {
+    configPath: configExists ? configPath : null,
+    configExists,
+    hasMissingLooks: false,
+    availableLooks: [],
+    availableViews: [],
+    availableDisplays: []
+  };
+
+  return _ocioConfigCache;
+}
+
+export function isOcioAvailable(): boolean {
+  return getOcioConfigStatus().configExists;
+}
+
+// Build ACES pipeline descriptor from settings
+export function buildAcesPipelineDescriptor(
+  inputProfile: CameraLogType,
+  workingType: AcesWorkflowType,
+  displayProfile: ProfileEntry,
+  lookName: string | null
+): AcesPipelineDescriptor {
+  const input = CAMERA_LOG_PROFILES[inputProfile];
+  const working = ACES_WORKING_SPACES[workingType];
+  const ocioStatus = getOcioConfigStatus();
+
+  return {
+    input: {
+      idtName: input?.label ?? "Unknown IDT",
+      cameraProfile: inputProfile,
+      detectedAutomatically: true
+    },
+    working,
+    viewTransform: {
+      label: "Default View Transform",
+      displayP3Path: "Display P3",
+      rec709Path: "Rec.709",
+      rec2020PqPath: "Rec.2020 PQ",
+      rec2020HlgPath: "Rec.2020 HLG"
+    },
+    look: lookName ? {
+      label: lookName,
+      ocioLookPath: lookName,
+      isCreative: true
+    } : null,
+    output: displayProfile,
+    usesOcioConfig: ocioStatus.configExists,
+    ocioConfigPath: ocioStatus.configPath
+  };
+}
+
+// Validate project portability when using external OCIO config
+export interface PortabilityValidation {
+  isPortable: boolean;
+  warnings: string[];
+  missingResources: string[];
+}
+
+export function validateProjectPortability(
+  pipeline: AcesPipelineDescriptor
+): PortabilityValidation {
+  const warnings: string[] = [];
+  const missingResources: string[] = [];
+
+  if (pipeline.usesOcioConfig && !pipeline.ocioConfigPath) {
+    warnings.push("Project uses OCIO config but config path is not set");
+    missingResources.push("OCIO Configuration File");
+  }
+
+  if (pipeline.look && pipeline.usesOcioConfig) {
+    const ocioStatus = getOcioConfigStatus();
+    if (!ocioStatus.availableLooks.includes(pipeline.look.label)) {
+      warnings.push(`Look '${pipeline.look.label}' may not be available in current OCIO config`);
+      missingResources.push(`Look: ${pipeline.look.label}`);
+    }
+  }
+
+  return {
+    isPortable: missingResources.length === 0,
+    warnings,
+    missingResources
+  };
+}
+
+// Profile registry
+
+export const PROFILE_REGISTRY: Record<string, ProfileEntry> = {
+  // === INPUT PROFILES ===
+  rec709_in: {
+    id: "rec709_in",
+    label: "Rec.709 SDR (Input)",
+    category: "input",
+    primaries: "rec709",
+    transfer: "bt1886",
+    matrix: "bt709",
+    range: { type: "limited" },
+    bitDepths: [8, 10],
+    isHdr: false,
+    isWideGamut: false,
+    capabilities: { cpu: true, glsl: true, lut: false, ocio: true }
+  },
+  rec2020_in: {
+    id: "rec2020_in",
+    label: "Rec.2020 SDR (Input)",
+    category: "input",
+    primaries: "rec2020",
+    transfer: "bt1886",
+    matrix: "bt2020nc",
+    range: { type: "limited" },
+    bitDepths: [8, 10, 12],
+    isHdr: false,
+    isWideGamut: true,
+    capabilities: { cpu: true, glsl: true, lut: false, ocio: true }
+  },
+  p3_in: {
+    id: "p3_in",
+    label: "Display P3 (Input)",
+    category: "input",
+    primaries: "p3",
+    transfer: "srgb",
+    matrix: "bt709",
+    range: { type: "full" },
+    bitDepths: [8, 10],
+    isHdr: false,
+    isWideGamut: true,
+    capabilities: { cpu: true, glsl: true, lut: false, ocio: true }
+  },
+  srgb_in: {
+    id: "srgb_in",
+    label: "sRGB (Input)",
+    category: "input",
+    primaries: "rec709",
+    transfer: "srgb",
+    matrix: "bt709",
+    range: { type: "full" },
+    bitDepths: [8],
+    isHdr: false,
+    isWideGamut: false,
+    capabilities: { cpu: true, glsl: true, lut: false, ocio: true }
+  },
+  appleLog_in: {
+    id: "appleLog_in",
+    label: "Apple Log (Input)",
+    category: "input",
+    primaries: "rec2020",
+    transfer: "appleLog",
+    matrix: "bt2020nc",
+    range: { type: "limited" },
+    bitDepths: [8, 10],
+    isHdr: true,
+    isWideGamut: true,
+    capabilities: { cpu: true, glsl: true, lut: true, ocio: true },
+    provenance: "Apple ProRes White Paper / AFImaging"
+  },
+  hlg_in: {
+    id: "hlg_in",
+    label: "Rec.2020 HLG (Input)",
+    category: "input",
+    primaries: "rec2020",
+    transfer: "hlg",
+    matrix: "bt2020nc",
+    range: { type: "limited" },
+    bitDepths: [10, 12],
+    isHdr: true,
+    isWideGamut: true,
+    capabilities: { cpu: true, glsl: true, lut: true, ocio: true },
+    provenance: "ITU-R BT.2100",
+    hdrMetadata: {
+      peakLuminance: 1000,
+      referenceWhite: 203,
+      diffuseWhite: 1000,
+      blackLevel: 0.001,
+      maxLuminance: 1000,
+      minLuminance: 0.001,
+      primaries: "rec2020"
+    }
+  },
+  pq_in: {
+    id: "pq_in",
+    label: "Rec.2020 PQ (Input)",
+    category: "input",
+    primaries: "rec2020",
+    transfer: "pq",
+    matrix: "bt2020nc",
+    range: { type: "limited" },
+    bitDepths: [10, 12],
+    isHdr: true,
+    isWideGamut: true,
+    capabilities: { cpu: true, glsl: true, lut: true, ocio: true },
+    provenance: "SMPTE ST 2084 / ITU-R BT.2100",
+    hdrMetadata: {
+      peakLuminance: 1000,
+      referenceWhite: 203,
+      diffuseWhite: 1000,
+      blackLevel: 0.0001,
+      maxLuminance: 4000,
+      minLuminance: 0.0001,
+      primaries: "rec2020"
+    }
+  },
+  linear_in: {
+    id: "linear_in",
+    label: "Linear (Input)",
+    category: "input",
+    primaries: "rec709",
+    transfer: "linear",
+    matrix: "bt709",
+    range: { type: "full" },
+    bitDepths: [8, 10, 12, 16],
+    isHdr: false,
+    isWideGamut: false,
+    capabilities: { cpu: true, glsl: true, lut: false, ocio: true }
+  },
+
+  // === WORKING PROFILES ===
+  rec709_wk: {
+    id: "rec709_wk",
+    label: "Rec.709 SDR (Working)",
+    category: "working",
+    primaries: "rec709",
+    transfer: "linear",
+    matrix: "bt709",
+    range: { type: "full" },
+    bitDepths: [16, 32],
+    isHdr: false,
+    isWideGamut: false,
+    capabilities: { cpu: true, glsl: true, lut: false, ocio: true }
+  },
+  rec2020_wk: {
+    id: "rec2020_wk",
+    label: "Rec.2020 Wide Gamut (Working)",
+    category: "working",
+    primaries: "rec2020",
+    transfer: "linear",
+    matrix: "bt2020nc",
+    range: { type: "full" },
+    bitDepths: [16, 32],
+    isHdr: false,
+    isWideGamut: true,
+    capabilities: { cpu: true, glsl: true, lut: false, ocio: true }
+  },
+  p3_wk: {
+    id: "p3_wk",
+    label: "Display P3 (Working)",
+    category: "working",
+    primaries: "p3",
+    transfer: "linear",
+    matrix: "bt709",
+    range: { type: "full" },
+    bitDepths: [16, 32],
+    isHdr: false,
+    isWideGamut: true,
+    capabilities: { cpu: true, glsl: true, lut: false, ocio: true }
+  },
+  acescg_wk: {
+    id: "acescg_wk",
+    label: "ACEScg (Working)",
+    category: "working",
+    primaries: "rec2020",
+    transfer: "linear",
+    matrix: "bt2020nc",
+    range: { type: "full" },
+    bitDepths: [16, 32],
+    isHdr: false,
+    isWideGamut: true,
+    capabilities: { cpu: true, glsl: true, lut: false, ocio: true },
+    provenance: "AMPAS S-2014-001"
+  },
+
+  // === DISPLAY PROFILES ===
+  rec709_disp: {
+    id: "rec709_disp",
+    label: "Rec.709 SDR (Display)",
+    category: "display",
+    primaries: "rec709",
+    transfer: "bt1886",
+    matrix: "bt709",
+    range: { type: "limited" },
+    bitDepths: [8, 10],
+    isHdr: false,
+    isWideGamut: false,
+    capabilities: { cpu: true, glsl: true, lut: true, ocio: true }
+  },
+  srgb_disp: {
+    id: "srgb_disp",
+    label: "sRGB (Display)",
+    category: "display",
+    primaries: "rec709",
+    transfer: "srgb",
+    matrix: "bt709",
+    range: { type: "full" },
+    bitDepths: [8],
+    isHdr: false,
+    isWideGamut: false,
+    capabilities: { cpu: true, glsl: true, lut: true, ocio: true }
+  },
+  p3_disp: {
+    id: "p3_disp",
+    label: "Display P3 (Display)",
+    category: "display",
+    primaries: "p3",
+    transfer: "srgb",
+    matrix: "bt709",
+    range: { type: "full" },
+    bitDepths: [10],
+    isHdr: false,
+    isWideGamut: true,
+    capabilities: { cpu: true, glsl: true, lut: true, ocio: true }
+  },
+  rec2020_pq_disp: {
+    id: "rec2020_pq_disp",
+    label: "Rec.2020 PQ (Display)",
+    category: "display",
+    primaries: "rec2020",
+    transfer: "pq",
+    matrix: "bt2020nc",
+    range: { type: "limited" },
+    bitDepths: [10, 12],
+    isHdr: true,
+    isWideGamut: true,
+    capabilities: { cpu: true, glsl: true, lut: true, ocio: true },
+    hdrMetadata: {
+      peakLuminance: 1000,
+      referenceWhite: 203,
+      diffuseWhite: 1000,
+      blackLevel: 0.0001,
+      maxLuminance: 1000,
+      minLuminance: 0.0001,
+      primaries: "rec2020"
+    }
+  },
+  rec2020_hlg_disp: {
+    id: "rec2020_hlg_disp",
+    label: "Rec.2020 HLG (Display)",
+    category: "display",
+    primaries: "rec2020",
+    transfer: "hlg",
+    matrix: "bt2020nc",
+    range: { type: "limited" },
+    bitDepths: [10],
+    isHdr: true,
+    isWideGamut: true,
+    capabilities: { cpu: true, glsl: true, lut: true, ocio: true },
+    hdrMetadata: {
+      peakLuminance: 1000,
+      referenceWhite: 203,
+      diffuseWhite: 1000,
+      blackLevel: 0.001,
+      maxLuminance: 1000,
+      minLuminance: 0.001,
+      primaries: "rec2020"
+    }
+  },
+
+  // === DELIVERY PROFILES ===
+  rec709_del: {
+    id: "rec709_del",
+    label: "Rec.709 SDR (Delivery)",
+    category: "delivery",
+    primaries: "rec709",
+    transfer: "bt1886",
+    matrix: "bt709",
+    range: { type: "limited" },
+    bitDepths: [8, 10],
+    isHdr: false,
+    isWideGamut: false,
+    capabilities: { cpu: true, glsl: false, lut: false, ocio: false }
+  },
+  websrgb_del: {
+    id: "websrgb_del",
+    label: "Web sRGB (Delivery)",
+    category: "delivery",
+    primaries: "rec709",
+    transfer: "srgb",
+    matrix: "bt709",
+    range: { type: "full" },
+    bitDepths: [8],
+    isHdr: false,
+    isWideGamut: false,
+    capabilities: { cpu: true, glsl: false, lut: false, ocio: false }
+  },
+  rec2020_hlg_del: {
+    id: "rec2020_hlg_del",
+    label: "Rec.2020 HLG (Delivery)",
+    category: "delivery",
+    primaries: "rec2020",
+    transfer: "hlg",
+    matrix: "bt2020nc",
+    range: { type: "limited" },
+    bitDepths: [10, 12],
+    isHdr: true,
+    isWideGamut: true,
+    capabilities: { cpu: true, glsl: false, lut: false, ocio: false },
+    hdrMetadata: {
+      peakLuminance: 1000,
+      referenceWhite: 203,
+      diffuseWhite: 1000,
+      blackLevel: 0.001,
+      maxLuminance: 1000,
+      minLuminance: 0.001,
+      primaries: "rec2020"
+    }
+  },
+  rec2020_pq_del: {
+    id: "rec2020_pq_del",
+    label: "Rec.2020 PQ (Delivery)",
+    category: "delivery",
+    primaries: "rec2020",
+    transfer: "pq",
+    matrix: "bt2020nc",
+    range: { type: "limited" },
+    bitDepths: [10, 12],
+    isHdr: true,
+    isWideGamut: true,
+    capabilities: { cpu: true, glsl: false, lut: false, ocio: false },
+    hdrMetadata: {
+      peakLuminance: 1000,
+      referenceWhite: 203,
+      diffuseWhite: 1000,
+      blackLevel: 0.0001,
+      maxLuminance: 4000,
+      minLuminance: 0.0001,
+      primaries: "rec2020"
+    }
+  },
+  mezzanine_del: {
+    id: "mezzanine_del",
+    label: "Archival Mezzanine (Delivery)",
+    category: "delivery",
+    primaries: "rec2020",
+    transfer: "linear",
+    matrix: "bt2020nc",
+    range: { type: "full" },
+    bitDepths: [16],
+    isHdr: false,
+    isWideGamut: true,
+    capabilities: { cpu: true, glsl: false, lut: false, ocio: false }
+  }
+};
+
+export function getProfile(id: string): ProfileEntry | undefined {
+  return PROFILE_REGISTRY[id];
+}
+
+export function getProfilesByCategory(category: ProfileCategory): ProfileEntry[] {
+  return Object.values(PROFILE_REGISTRY).filter(p => p.category === category);
+}
+
+export function getInputProfiles(): ProfileEntry[] {
+  return getProfilesByCategory("input");
+}
+
+export function getWorkingProfiles(): ProfileEntry[] {
+  return getProfilesByCategory("working");
+}
+
+export function getDisplayProfiles(): ProfileEntry[] {
+  return getProfilesByCategory("display");
+}
+
+export function getDeliveryProfiles(): ProfileEntry[] {
+  return getProfilesByCategory("delivery");
+}
+
+// Transform graph construction
+
+export function buildTransformGraph(
+  sourceProfileId: string,
+  workingProfileId: string,
+  displayProfileId: string,
+  deliveryProfileId: string,
+  toneMapping: ToneMappingMode,
+  gamutMapping: GamutMappingMode
+): { graph: TransformGraph; warnings: string[] } {
+  const warnings: string[] = [];
+  const edges: TransformStage[] = [];
+
+  const source = getProfile(sourceProfileId);
+  const working = getProfile(workingProfileId);
+  const display = getProfile(displayProfileId);
+  const delivery = getProfile(deliveryProfileId);
+
+  // Validate profiles exist
+  if (!source) {
+    warnings.push(`Source profile '${sourceProfileId}' not found in registry`);
+    return { graph: { nodes: [], edges: [] }, warnings };
+  }
+  if (!working) {
+    warnings.push(`Working profile '${workingProfileId}' not found in registry`);
+    return { graph: { nodes: [], edges: [] }, warnings };
+  }
+  if (!display) {
+    warnings.push(`Display profile '${displayProfileId}' not found in registry`);
+    return { graph: { nodes: [], edges: [] }, warnings };
+  }
+  if (!delivery) {
+    warnings.push(`Delivery profile '${deliveryProfileId}' not found in registry`);
+    return { graph: { nodes: [], edges: [] }, warnings };
+  }
+
+  const nodes = [source, working, display, delivery];
+
+  // Stage 1: Source to Working (input transform)
+  const srcToWk = buildInputTransformStage(source, working);
+  edges.push(srcToWk);
+
+  // Stage 2: Working to Display (view transform with optional tone/gamut mapping)
+  const wkToDisp = buildViewTransformStage(working, display, toneMapping, gamutMapping);
+  edges.push(wkToDisp);
+
+  // Stage 3: Display to Delivery (output transform)
+  const dispToDel = buildOutputTransformStage(display, delivery);
+  edges.push(dispToDel);
+
+  return { graph: { nodes, edges }, warnings };
+}
+
+function buildInputTransformStage(source: ProfileEntry, working: ProfileEntry): TransformStage {
+  const primariesMatrix = source.primaries !== working.primaries
+    ? buildPrimariesConversionMatrix(PRIMARIES[source.primaries], PRIMARIES[working.primaries])
+    : undefined;
+
+  return {
+    stageId: "input-transform",
+    label: "Input Transform",
+    fromProfile: source.id,
+    toProfile: working.id,
+    transferDecode: source.transfer,
+    primariesMatrix,
+    isInvertible: true
+  };
+}
+
+function buildViewTransformStage(
+  working: ProfileEntry,
+  display: ProfileEntry,
+  toneMapping: ToneMappingMode,
+  gamutMapping: GamutMappingMode
+): TransformStage {
+  const primariesMatrix = working.primaries !== display.primaries
+    ? buildPrimariesConversionMatrix(PRIMARIES[working.primaries], PRIMARIES[display.primaries])
+    : undefined;
+
+  const needsToneMap = working.isHdr && !display.isHdr && toneMapping !== "none";
+  const needsGamutMap = gamutMapping !== "none" && working.primaries !== display.primaries;
+
+  return {
+    stageId: "view-transform",
+    label: "View Transform",
+    fromProfile: working.id,
+    toProfile: display.id,
+    primariesMatrix,
+    toneMapMode: needsToneMap ? toneMapping : undefined,
+    gamutMapMode: needsGamutMap ? gamutMapping : undefined,
+    isInvertible: !needsToneMap
+  };
+}
+
+function buildOutputTransformStage(display: ProfileEntry, delivery: ProfileEntry): TransformStage {
+  const primariesMatrix = display.primaries !== delivery.primaries
+    ? buildPrimariesConversionMatrix(PRIMARIES[display.primaries], PRIMARIES[delivery.primaries])
+    : undefined;
+
+  return {
+    stageId: "output-transform",
+    label: "Output Transform",
+    fromProfile: display.id,
+    toProfile: delivery.id,
+    transferEncode: delivery.transfer,
+    primariesMatrix,
+    isInvertible: true
+  };
+}
+
+// Validate transform path
+
+export interface TransformValidationResult {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+}
+
+export function validateTransformPath(
+  sourceProfileId: string,
+  workingProfileId: string,
+  displayProfileId: string,
+  deliveryProfileId: string,
+  requiredCapabilities: TransformCapability[]
+): TransformValidationResult {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  const profiles = [
+    { id: sourceProfileId, role: "source" },
+    { id: workingProfileId, role: "working" },
+    { id: displayProfileId, role: "display" },
+    { id: deliveryProfileId, role: "delivery" }
+  ];
+
+  // Check each profile exists
+  for (const { id, role } of profiles) {
+    const profile = getProfile(id);
+    if (!profile) {
+      errors.push(`${role} profile '${id}' not found in registry`);
+    }
+  }
+
+  // If any profile missing, can't validate further
+  if (errors.length > 0) {
+    return { valid: false, errors, warnings };
+  }
+
+  const source = getProfile(sourceProfileId)!;
+  const working = getProfile(workingProfileId)!;
+  const display = getProfile(displayProfileId)!;
+  const delivery = getProfile(deliveryProfileId)!;
+
+  // Check capability requirements
+  for (const capability of requiredCapabilities) {
+    for (const profile of [source, working, display, delivery]) {
+      if (!profile.capabilities[capability]) {
+        warnings.push(
+          `${profile.category} profile '${profile.id}' does not support ${capability} transforms`
+        );
+      }
+    }
+  }
+
+  // Check bit depth compatibility
+  const srcBitDepths = new Set(source.bitDepths);
+  if (srcBitDepths.size > 0 && !srcBitDepths.has(8) && !srcBitDepths.has(10)) {
+    warnings.push(`Source profile '${source.id}' may require transcoding for common delivery formats`);
+  }
+
+  // Check HDR to SDR without tone mapping
+  if (source.isHdr && !display.isHdr && delivery.isHdr) {
+    warnings.push("Delivery target is HDR but source is SDR — verify this is intentional");
+  }
+
+  // Check gamut compatibility warning
+  if (source.isWideGamut && !working.isWideGamut) {
+    warnings.push("Source is wide gamut but working space is not — gamut may be clipped during input transform");
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    warnings
+  };
+}
+
+// Resolve color space to registry profile ID
+
+export function resolveColorSpaceToProfileId(colorSpace: ColorSpace, category: ProfileCategory): string {
+  const colorSpaceToProfileMap: Record<ColorSpace, Record<ProfileCategory, string>> = {
+    auto: {
+      input: "rec709_in",
+      working: "rec709_wk",
+      display: "rec709_disp",
+      delivery: "rec709_del"
+    },
+    rec709: {
+      input: "rec709_in",
+      working: "rec709_wk",
+      display: "rec709_disp",
+      delivery: "rec709_del"
+    },
+    rec2020: {
+      input: "rec2020_in",
+      working: "rec2020_wk",
+      display: "rec709_disp",
+      delivery: "rec709_del"
+    },
+    srgb: {
+      input: "srgb_in",
+      working: "rec709_wk",
+      display: "srgb_disp",
+      delivery: "websrgb_del"
+    },
+    p3: {
+      input: "p3_in",
+      working: "p3_wk",
+      display: "p3_disp",
+      delivery: "rec709_del"
+    },
+    appleLog: {
+      input: "appleLog_in",
+      working: "rec2020_wk",
+      display: "rec709_disp",
+      delivery: "rec709_del"
+    },
+    hlg: {
+      input: "hlg_in",
+      working: "rec2020_wk",
+      display: "rec2020_hlg_disp",
+      delivery: "rec2020_hlg_del"
+    },
+    pq: {
+      input: "pq_in",
+      working: "rec2020_wk",
+      display: "rec2020_pq_disp",
+      delivery: "rec2020_pq_del"
+    },
+    linear: {
+      input: "linear_in",
+      working: "rec709_wk",
+      display: "rec709_disp",
+      delivery: "mezzanine_del"
+    }
+  };
+
+  return colorSpaceToProfileMap[colorSpace]?.[category] ?? `${colorSpace}_${category.slice(0, 2)}`;
+}
+
 // Color space constants
 
 export const COLORSPACES: Record<ColorSpace, { label: string; primaries: ColorPrimariesType; transfer: TransferFunctionType }> = {
@@ -1944,6 +3453,448 @@ function encodeAppleLog(color: Pixel): Pixel {
   };
 }
 
+// HDR tone mapping operators
+
+export type HdrToneMapOperator = "none" | "sdr" | "hlg" | "pq";
+
+export interface HdrToneMapOptions {
+  operator: HdrToneMapOperator;
+  sourcePeakNits: number;
+  targetPeakNits: number;
+  referenceWhiteNits: number;
+  rollupSustainability: number;
+}
+
+export function toneMapHlgToSdr(color: Pixel, sourcePeakNits: number = 1000): Pixel {
+  // Convert HLG signal to SDR with proper tone mapping
+  const hlgToLinear = (c: number) => {
+    if (c <= 0.0) return 0.0;
+    if (c <= 0.5) return c * c * (1.0 / (3.0 * 1.2));
+    const a = Math.sqrt((3.0 * 1.2 - 0.5) / 3.0);
+    return a * Math.sqrt(c) - (a - 1.0 / (3.0 * 1.2));
+  };
+
+  const linearToSdr = (v: number) => {
+    if (v <= 0.0) return 0.0;
+    if (v >= 1.0) return 1.0;
+    // Scale from source nits to SDR range (assuming source is 0-1 linear representing sourcePeakNits)
+    const scaled = v * (sourcePeakNits / 1000); // normalize to 1000 nit reference
+    return clamp01(scaled);
+  };
+
+  return {
+    r: linearToSdr(hlgToLinear(color.r)),
+    g: linearToSdr(hlgToLinear(color.g)),
+    b: linearToSdr(hlgToLinear(color.b)),
+    a: color.a
+  };
+}
+
+export function toneMapPqToSdr(color: Pixel, sourcePeakNits: number = 1000): Pixel {
+  // Convert PQ signal to SDR with proper tone mapping
+  const c = 0.1593017578125;
+  const m1 = 2610.0 / 16384.0;
+  const m2 = 2523.0 / 4096.0 * 128.0;
+  const y1 = 1.7;
+  const y2 = 1.0 / 1.7;
+
+  const pqToLinear = (x: number) => {
+    if (x <= 0.0) return 0.0;
+    const xn = Math.pow(x / 10000.0, m1);
+    const xn2 = xn * xn;
+    const xn3 = xn2 * xn;
+    const xn_y2 = Math.pow(xn, y2);
+    const n = xn3 + xn_y2;
+    const n_m2 = Math.pow(n, m2 / m1);
+    return Math.pow(n_m2 + Math.pow(c, m2 / m1), y1);
+  };
+
+  const linearToSdr = (v: number) => {
+    if (v <= 0.0) return 0.0;
+    if (v >= 1.0) return 1.0;
+    const scaled = v * (sourcePeakNits / 1000);
+    return clamp01(scaled);
+  };
+
+  return {
+    r: linearToSdr(pqToLinear(color.r)),
+    g: linearToSdr(pqToLinear(color.g)),
+    b: linearToSdr(pqToLinear(color.b)),
+    a: color.a
+  };
+}
+
+export function toneMapPqToHlg(color: Pixel): Pixel {
+  // Convert PQ to HLG (scene-referred to display-referred)
+  const c = 0.1593017578125;
+  const m1 = 2610.0 / 16384.0;
+  const m2 = 2523.0 / 4096.0 * 128.0;
+  const y1 = 1.7;
+  const y2 = 1.0 / 1.7;
+
+  const pqToLinear = (x: number) => {
+    if (x <= 0.0) return 0.0;
+    const xn = Math.pow(x / 10000.0, m1);
+    const xn2 = xn * xn;
+    const xn3 = xn2 * xn;
+    const xn_y2 = Math.pow(xn, y2);
+    const n = xn3 + xn_y2;
+    const n_m2 = Math.pow(n, m2 / m1);
+    return Math.pow(n_m2 + Math.pow(c, m2 / m1), y1);
+  };
+
+  const HLG_E = 1.2;
+  const linearToHlg = (v: number) => {
+    if (v <= 0.0) return 0.0;
+    if (v <= 1.0 / (3.0 * HLG_E)) return Math.sqrt(3.0 * HLG_E * v);
+    return ((3.0 * HLG_E - 0.5) / 3.0) + (2.0 * Math.sqrt(v - (1.0 / (3.0 * HLG_E))));
+  };
+
+  return {
+    r: linearToHlg(pqToLinear(color.r)),
+    g: linearToHlg(pqToLinear(color.g)),
+    b: linearToHlg(pqToLinear(color.b)),
+    a: color.a
+  };
+}
+
+// Apply tone mapping based on operator
+export function applyHdrToneMap(
+  color: Pixel,
+  operator: HdrToneMapOperator,
+  sourcePeakNits: number = 1000
+): Pixel {
+  switch (operator) {
+    case "sdr":
+      return toneMapSdr(color, true);
+    case "hlg":
+      return toneMapHlgToSdr(color, sourcePeakNits);
+    case "pq":
+      return toneMapPqToSdr(color, sourcePeakNits);
+    default:
+      return color;
+  }
+}
+
+// Gamut compression operators
+
+export type GamutCompressionMode = "none" | "clip" | "compress";
+
+export interface GamutCompressionResult {
+  color: Pixel;
+  amountClipped: number;
+  channelClipped: "none" | "r" | "g" | "b" | "all";
+}
+
+export function compressGamutAdaptive(
+  color: Pixel,
+  sourcePrimaries: ColorPrimaries,
+  targetPrimaries: ColorPrimaries,
+  threshold: number = 0.95
+): GamutCompressionResult {
+  if (sourcePrimaries.type === targetPrimaries.type) {
+    return { color, amountClipped: 0, channelClipped: "none" };
+  }
+
+  const conversion = buildPrimariesConversionMatrix(PRIMARIES[sourcePrimaries.type], PRIMARIES[targetPrimaries.type]);
+  const mapped = multiplyMatrixVector(conversion, [color.r, color.g, color.b]);
+
+  let [r, g, b] = mapped;
+  let amountClipped = 0;
+  let channelClipped: "none" | "r" | "g" | "b" | "all" = "none";
+
+  const maxComp = Math.max(r, g, b, 0);
+  if (maxComp > threshold) {
+    if (maxComp > 1.0) {
+      const scale = 1.0 / maxComp;
+      r *= scale;
+      g *= scale;
+      b *= scale;
+      amountClipped = maxComp - (r * threshold);
+      channelClipped = "all";
+    } else {
+      const scale = threshold / maxComp;
+      r *= scale;
+      g *= scale;
+      b *= scale;
+      amountClipped = maxComp - threshold;
+      channelClipped = "all";
+    }
+  }
+
+  return {
+    color: { r: clamp01(r), g: clamp01(g), b: clamp01(b), a: color.a },
+    amountClipped,
+    channelClipped
+  };
+}
+
+// HDR display rendering
+
+export interface DisplayRenderingOptions {
+  displayPeakNits: number;
+  displayBlackNits: number;
+  displayContrast: number;
+  ambientLuminance: number;
+  isWideGamut: boolean;
+}
+
+export const DEFAULT_DISPLAY_RENDERING: DisplayRenderingOptions = {
+  displayPeakNits: 100,
+  displayBlackNits: 0.1,
+  displayContrast: 1000,
+  ambientLuminance: 10,
+  isWideGamut: false
+};
+
+export function renderToDisplay(
+  color: Pixel,
+  sourcePeakNits: number,
+  displayOptions: DisplayRenderingOptions
+): Pixel {
+  const { displayPeakNits, displayBlackNits, displayContrast } = displayOptions;
+
+  // Scale linear values from source to display range
+  const scale = displayPeakNits / sourcePeakNits;
+  let r = color.r * scale;
+  let g = color.g * scale;
+  let b = color.b * scale;
+
+  // Apply display contrast curve (simple EOTF approximation)
+  const blackOffset = displayBlackNits / displayPeakNits;
+  r = r * displayContrast + blackOffset;
+  g = g * displayContrast + blackOffset;
+  b = b * displayContrast + blackOffset;
+
+  return {
+    r: clamp01(r),
+    g: clamp01(g),
+    b: clamp01(b),
+    a: color.a
+  };
+}
+
+// Check if display can represent target HDR format
+// Display simulation and calibration awareness
+
+export type DisplaySimulationPreset =
+  | "rec709_gamma24"
+  | "srgb"
+  | "displayP3"
+  | "rec2020_pq"
+  | "rec2020_hlg";
+
+export interface DisplaySimulationDescriptor {
+  id: DisplaySimulationPreset;
+  label: string;
+  primaries: ColorPrimariesType;
+  transfer: TransferFunctionType;
+  peakNits: number;
+  blackNits: number;
+  isHdr: boolean;
+}
+
+export const DISPLAY_SIMULATION_PRESETS: Record<DisplaySimulationPreset, DisplaySimulationDescriptor> = {
+  rec709_gamma24: {
+    id: "rec709_gamma24",
+    label: "Rec.709 Gamma 2.4",
+    primaries: "rec709",
+    transfer: "bt1886",
+    peakNits: 100,
+    blackNits: 0.1,
+    isHdr: false
+  },
+  srgb: {
+    id: "srgb",
+    label: "sRGB",
+    primaries: "rec709",
+    transfer: "srgb",
+    peakNits: 100,
+    blackNits: 0.1,
+    isHdr: false
+  },
+  displayP3: {
+    id: "displayP3",
+    label: "Display P3",
+    primaries: "p3",
+    transfer: "srgb",
+    peakNits: 160,
+    blackNits: 0.02,
+    isHdr: false
+  },
+  rec2020_pq: {
+    id: "rec2020_pq",
+    label: "Rec.2020 PQ",
+    primaries: "rec2020",
+    transfer: "pq",
+    peakNits: 1000,
+    blackNits: 0.0001,
+    isHdr: true
+  },
+  rec2020_hlg: {
+    id: "rec2020_hlg",
+    label: "Rec.2020 HLG",
+    primaries: "rec2020",
+    transfer: "hlg",
+    peakNits: 1000,
+    blackNits: 0.001,
+    isHdr: true
+  }
+};
+
+export interface DisplaySimulationState {
+  activePreset: DisplaySimulationPreset;
+  isActive: boolean;
+  previewHdrOnSdr: boolean;
+  gamutWarningEnabled: boolean;
+  rangeWarningEnabled: boolean;
+  outputLimitWarningEnabled: boolean;
+}
+
+export const DEFAULT_DISPLAY_SIMULATION_STATE: DisplaySimulationState = {
+  activePreset: "srgb",
+  isActive: false,
+  previewHdrOnSdr: false,
+  gamutWarningEnabled: true,
+  rangeWarningEnabled: true,
+  outputLimitWarningEnabled: true
+};
+
+// Soft-proof overlay types for warnings
+export type SoftProofWarningType = "gamut_clip" | "range_clip" | "output_limit" | "hdr_unsupported";
+
+export interface SoftProofOverlay {
+  type: SoftProofWarningType;
+  severity: "info" | "warning" | "error";
+  message: string;
+  affectedArea?: string; // e.g., "reds", "greens", "highlights"
+}
+
+export function generateSoftProofOverlays(
+  color: Pixel,
+  simulationPreset: DisplaySimulationPreset,
+  exportTargetPreset: DisplaySimulationPreset
+): SoftProofOverlay[] {
+  const overlays: SoftProofOverlay[] = [];
+
+  const simulation = DISPLAY_SIMULATION_PRESETS[simulationPreset];
+  const target = DISPLAY_SIMULATION_PRESETS[exportTargetPreset];
+
+  // Check for gamut clipping
+  if (color.r > 0.9 || color.g > 0.9 || color.b > 0.9) {
+    const channel = color.r > 0.9 ? "reds" : color.g > 0.9 ? "greens" : "blues";
+    overlays.push({
+      type: "gamut_clip",
+      severity: "warning",
+      message: `High saturation ${channel} may clip on target display`,
+      affectedArea: channel
+    });
+  }
+
+  // Check for range clipping
+  if (color.r > 1.0 || color.g > 1.0 || color.b > 1.0 || color.r < 0.0 || color.g < 0.0 || color.b < 0.0) {
+    overlays.push({
+      type: "range_clip",
+      severity: "warning",
+      message: "Values exceed displayable range"
+    });
+  }
+
+  // Check HDR on SDR simulation
+  if (simulation.isHdr && !target.isHdr) {
+    overlays.push({
+      type: "hdr_unsupported",
+      severity: "info",
+      message: "Simulating HDR on SDR display - limited preview fidelity"
+    });
+  }
+
+  // Check output limit
+  if (target.peakNits < simulation.peakNits) {
+    overlays.push({
+      type: "output_limit",
+      severity: "info",
+      message: `Output target (${target.peakNits} nits) is lower than simulation (${simulation.peakNits} nits)`
+    });
+  }
+
+  return overlays;
+}
+
+// Validate display simulation state matches export target
+export interface DisplaySimulationValidation {
+  isMatch: boolean;
+  mismatches: string[];
+  warnings: string[];
+}
+
+export function validateDisplaySimulationState(
+  simulation: DisplaySimulationState,
+  exportTarget: DisplaySimulationPreset
+): DisplaySimulationValidation {
+  const mismatches: string[] = [];
+  const warnings: string[] = [];
+
+  const simPreset = DISPLAY_SIMULATION_PRESETS[simulation.activePreset];
+  const tgtPreset = DISPLAY_SIMULATION_PRESETS[exportTarget];
+
+  if (simPreset.primaries !== tgtPreset.primaries) {
+    mismatches.push(
+      `Simulation primaries (${simPreset.primaries}) differ from export target (${tgtPreset.primaries})`
+    );
+  }
+
+  if (simPreset.transfer !== tgtPreset.transfer) {
+    mismatches.push(
+      `Simulation transfer (${simPreset.transfer}) differs from export target (${tgtPreset.transfer})`
+    );
+  }
+
+  if (simPreset.isHdr && !tgtPreset.isHdr && !simulation.previewHdrOnSdr) {
+    warnings.push("Simulating HDR on SDR display - enable previewHdrOnSdr for accurate preview");
+  }
+
+  return {
+    isMatch: mismatches.length === 0,
+    mismatches,
+    warnings
+  };
+}
+
+export interface DisplayCapabilityCheck {
+  canRepresent: boolean;
+  warning: string | null;
+  suggestedAlternative: string | null;
+}
+
+export function checkDisplayCapability(
+  displayPeakNits: number,
+  targetPeakNits: number,
+  targetTransfer: TransferFunctionType
+): DisplayCapabilityCheck {
+  if (targetTransfer === "pq" && targetPeakNits > displayPeakNits * 4) {
+    return {
+      canRepresent: false,
+      warning: `Target requires ${targetPeakNits} nits but display only supports ${displayPeakNits} nits. HDR highlights will be clipped.`,
+      suggestedAlternative: "Rec.709 SDR or Display P3 with tone mapping"
+    };
+  }
+
+  if (targetTransfer === "hlg" && targetPeakNits > displayPeakNits * 2) {
+    return {
+      canRepresent: false,
+      warning: `HLG target requires ${targetPeakNits} nits but display may not faithfully represent highlights.`,
+      suggestedAlternative: "Enable tone mapping for HDR-to-SDR conversion"
+    };
+  }
+
+  return {
+    canRepresent: true,
+    warning: null,
+    suggestedAlternative: null
+  };
+}
+
 // Tone mapping for HDR to SDR
 
 export function toneMapSdr(color: Pixel, sourceIsHdr: boolean): Pixel {
@@ -2164,4 +4115,250 @@ export function resolveEffectiveOutputTransform(settings: ColorManagementSetting
   const outputTransform = settings.outputTransform;
   if (outputTransform === "none") return "bt1886";
   return COLORSPACES[outputTransform as ColorSpace]?.transfer ?? "bt1886";
+}
+
+// Delivery conformance and metadata validation
+
+export type DeliveryProfile =
+  | "rec709_sdr"
+  | "websrgb"
+  | "rec2020_hlg"
+  | "rec2020_pq"
+  | "mezzanine";
+
+export interface DeliveryConformanceCheck {
+  profile: DeliveryProfile;
+  label: string;
+  primaries: ColorPrimariesType;
+  transfer: TransferFunctionType;
+  range: ColorRange;
+  peakLuminance?: number;
+  isHdr: boolean;
+  codecRequirements: string[];
+  containerRequirements: string[];
+}
+
+export const DELIVERY_PROFILES: Record<DeliveryProfile, DeliveryConformanceCheck> = {
+  rec709_sdr: {
+    profile: "rec709_sdr",
+    label: "Rec.709 SDR",
+    primaries: "rec709",
+    transfer: "bt1886",
+    range: { type: "limited" },
+    isHdr: false,
+    codecRequirements: ["h264", "hevc", "prores"],
+    containerRequirements: ["mp4", "mov"]
+  },
+  websrgb: {
+    profile: "websrgb",
+    label: "Web sRGB",
+    primaries: "rec709",
+    transfer: "srgb",
+    range: { type: "full" },
+    isHdr: false,
+    codecRequirements: ["h264", "vp9"],
+    containerRequirements: ["mp4", "webm"]
+  },
+  rec2020_hlg: {
+    profile: "rec2020_hlg",
+    label: "Rec.2020 HLG",
+    primaries: "rec2020",
+    transfer: "hlg",
+    range: { type: "limited" },
+    peakLuminance: 1000,
+    isHdr: true,
+    codecRequirements: ["h264", "hevc"],
+    containerRequirements: ["mp4", "mov"]
+  },
+  rec2020_pq: {
+    profile: "rec2020_pq",
+    label: "Rec.2020 PQ",
+    primaries: "rec2020",
+    transfer: "pq",
+    range: { type: "limited" },
+    peakLuminance: 1000,
+    isHdr: true,
+    codecRequirements: ["hevc"],
+    containerRequirements: ["mp4", "mov"]
+  },
+  mezzanine: {
+    profile: "mezzanine",
+    label: "Archival Mezzanine",
+    primaries: "rec2020",
+    transfer: "linear",
+    range: { type: "full" },
+    isHdr: false,
+    codecRequirements: ["prores"],
+    containerRequirements: ["mov"]
+  }
+};
+
+export interface ExportedFileMetadata {
+  width: number;
+  height: number;
+  codec: string;
+  container: string;
+  colorPrimaries: string;
+  colorTransfer: string;
+  colorSpace: string;
+  range: ColorRange;
+  bitDepth: number;
+  hasAudio: boolean;
+  frameCount?: number;
+  fps: number;
+  durationSeconds: number;
+}
+
+export interface ConformanceValidationResult {
+  isCompliant: boolean;
+  matchedFields: string[];
+  mismatchedFields: { field: string; expected: string; actual: string }[];
+  warnings: string[];
+  errors: string[];
+}
+
+export function validateDeliveryConformance(
+  exportedMetadata: ExportedFileMetadata,
+  deliveryProfile: DeliveryProfile
+): ConformanceValidationResult {
+  const profile = DELIVERY_PROFILES[deliveryProfile];
+  const mismatchedFields: { field: string; expected: string; actual: string }[] = [];
+  const warnings: string[] = [];
+  const errors: string[] = [];
+
+  // Check codec compatibility
+  if (!profile.codecRequirements.includes(exportedMetadata.codec)) {
+    errors.push(
+      `Codec '${exportedMetadata.codec}' is not supported for ${profile.label}. ` +
+      `Supported: ${profile.codecRequirements.join(", ")}`
+    );
+  }
+
+  // Check container compatibility
+  if (!profile.containerRequirements.includes(exportedMetadata.container)) {
+    warnings.push(
+      `Container '${exportedMetadata.container}' may not fully support ${profile.label} metadata. ` +
+      `Recommended: ${profile.containerRequirements.join(", ")}`
+    );
+  }
+
+  // Check primaries
+  if (exportedMetadata.colorPrimaries !== profile.primaries) {
+    if (exportedMetadata.colorPrimaries === "unknown" || exportedMetadata.colorPrimaries === "") {
+      warnings.push(`Color primaries not detected in export - expected ${profile.primaries}`);
+    } else {
+      mismatchedFields.push({
+        field: "color_primaries",
+        expected: profile.primaries,
+        actual: exportedMetadata.colorPrimaries
+      });
+    }
+  }
+
+  // Check transfer function
+  if (exportedMetadata.colorTransfer !== profile.transfer) {
+    if (exportedMetadata.colorTransfer === "unknown" || exportedMetadata.colorTransfer === "") {
+      warnings.push(`Color transfer not detected in export - expected ${profile.transfer}`);
+    } else {
+      mismatchedFields.push({
+        field: "color_transfer",
+        expected: profile.transfer,
+        actual: exportedMetadata.colorTransfer
+      });
+    }
+  }
+
+  // Check range
+  if (exportedMetadata.range.type !== profile.range.type) {
+    warnings.push(
+      `Color range '${exportedMetadata.range.type}' differs from expected '${profile.range.type}' for ${profile.label}`
+    );
+  }
+
+  return {
+    isCompliant: errors.length === 0 && mismatchedFields.length === 0,
+    matchedFields: ["codec", "container", "primaries", "transfer", "range"].filter(f => {
+      if (f === "codec") return profile.codecRequirements.includes(exportedMetadata.codec);
+      if (f === "container") return profile.containerRequirements.includes(exportedMetadata.container);
+      return true;
+    }),
+    mismatchedFields,
+    warnings,
+    errors
+  };
+}
+
+// Build export summary describing color management decisions
+export interface ExportColorSummary {
+  sourceProfile: string;
+  workingSpace: string;
+  displayRendering: string;
+  outputTransform: string;
+  deliveryProfile: string;
+  activeTechnicalLuts: string[];
+  activeCreativeLuts: string[];
+  toneMappingApplied: boolean;
+  gamutMappingApplied: boolean;
+  pipelineWarnings: string[];
+}
+
+export function buildExportColorSummary(
+  sourceProfile: string,
+  workingProfile: string,
+  displayProfile: string,
+  deliveryProfile: string,
+  technicalLuts: string[],
+  creativeLuts: string[],
+  toneMappingMode: ToneMappingMode,
+  gamutMappingMode: GamutMappingMode,
+  pipelineWarnings: string[]
+): ExportColorSummary {
+  return {
+    sourceProfile,
+    workingSpace: workingProfile,
+    displayRendering: displayProfile,
+    outputTransform: deliveryProfile,
+    deliveryProfile,
+    activeTechnicalLuts: technicalLuts,
+    activeCreativeLuts: creativeLuts,
+    toneMappingApplied: toneMappingMode !== "none",
+    gamutMappingApplied: gamutMappingMode !== "none",
+    pipelineWarnings
+  };
+}
+
+// FFmpeg color metadata tag mapping
+export const FFMPEG_COLOR_TAGS: Record<string, string> = {
+  "bt709": "color_primaries=bt709",
+  "rec709": "color_primaries=bt709",
+  "bt2020": "color_primaries=bt2020nc",
+  "rec2020": "color_primaries=bt2020nc",
+  "p3": "color_primaries=displayp3",
+  "bt1886": "color_transfer=bt1886",
+  "srgb": "color_transfer=ieee61966-2-1",
+  "hlg": "color_transfer=bt2020hlg",
+  "pq": "color_transfer=bt2020pq",
+  "linear": "color_transfer=linear",
+  "limited": "color_range=limited",
+  "full": "color_range=full"
+};
+
+export function buildFFmpegColorArgs(
+  deliveryProfile: DeliveryProfile
+): string[] {
+  const profile = DELIVERY_PROFILES[deliveryProfile];
+  const args: string[] = [];
+
+  if (profile.primaries !== "rec709") {
+    args.push("-colorspace", FFMPEG_COLOR_TAGS[profile.primaries] ?? `primaries=${profile.primaries}`);
+  }
+  if (profile.transfer !== "bt1886") {
+    args.push("-color_trc", FFMPEG_COLOR_TAGS[profile.transfer] ?? `transfer=${profile.transfer}`);
+  }
+  if (profile.primaries !== "rec709") {
+    args.push("-color_primaries", FFMPEG_COLOR_TAGS[profile.primaries] ?? `primaries=${profile.primaries}`);
+  }
+  args.push("-color_range", profile.range.type);
+
+  return args;
 }
