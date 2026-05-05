@@ -6,7 +6,7 @@ import { appError } from "./errors.js";
 import { requireFfmpeg, requireFfprobe } from "./ffmpeg.js";
 import { runProcess } from "./process.js";
 import { computeExportGeometry, computeExportFps } from "./exportPlanning.js";
-import { renderRgbaFrame } from "./exportProject.js";
+import { renderRgbaFrame, transformRgbaFrame } from "./exportProject.js";
 import { sanitizeProject } from "../shared/project.js";
 
 export async function exportSequence(request: ExportSequenceRequest): Promise<ExportJobResult> {
@@ -16,6 +16,9 @@ export async function exportSequence(request: ExportSequenceRequest): Promise<Ex
   const media = project.media;
   if (!media) {
     throw appError("EXPORT_FAILED", "Export sequence requires imported media.");
+  }
+  if (!outputPath?.trim()) {
+    throw appError("EXPORT_FAILED", "Export sequence output path is required.");
   }
 
   const sanitizedProject = sanitizeProject(project);
@@ -29,9 +32,8 @@ export async function exportSequence(request: ExportSequenceRequest): Promise<Ex
     throw appError("EXPORT_FAILED", "Export sequence requires at least one frame.", `start=${startFrame}, end=${end}`);
   }
 
-  // Use %04d pattern for sequential output
-  const outputPattern = outputPath!.replace("%04d", "%04d").replace(/\.png$/, "-%04d.png");
-  const outputDir = path.dirname(outputPath!);
+  const outputPattern = toSequenceOutputPattern(outputPath);
+  const outputDir = path.dirname(outputPattern);
 
   await fs.mkdir(outputDir, { recursive: true });
 
@@ -93,11 +95,19 @@ export async function exportSequence(request: ExportSequenceRequest): Promise<Ex
                      media.colorMetadata?.transfer.type === "appleLog")
             }
           );
+          const resized = transformRgbaFrame(
+            graded,
+            sourceWidth,
+            sourceHeight,
+            width,
+            height,
+            sanitizedProject.exportSettings.resizePolicy
+          );
 
           // Write this frame to PNG file
           const frameOutputPath = outputPattern.replace("%04d", String(frameIndex).padStart(4, "0"));
           const tempRaw = `${frameOutputPath}.raw`;
-          await fs.writeFile(tempRaw, graded);
+          await fs.writeFile(tempRaw, resized);
 
           try {
             const result = await runProcess(ffmpegPath, [
@@ -108,7 +118,7 @@ export async function exportSequence(request: ExportSequenceRequest): Promise<Ex
               "-pix_fmt",
               "rgba",
               "-s",
-              `${sourceWidth}x${sourceHeight}`,
+              `${width}x${height}`,
               "-i",
               tempRaw,
               "-frames:v",
@@ -198,4 +208,13 @@ async function probeImage(imagePath: string): Promise<{ width: number; height: n
 
 function spawnFfmpeg(executable: string, args: string[]): ChildProcessWithoutNullStreams {
   return spawn(executable, args, { stdio: ["pipe", "pipe", "pipe"] });
+}
+
+export function toSequenceOutputPattern(outputPath: string): string {
+  if (outputPath.includes("%04d")) {
+    return outputPath;
+  }
+
+  const pngPath = outputPath.toLowerCase().endsWith(".png") ? outputPath : `${outputPath}.png`;
+  return pngPath.replace(/\.png$/i, "-%04d.png");
 }
