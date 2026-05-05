@@ -97,7 +97,7 @@ export function validateExportGeometry(settings: ProjectExportSettings, media: M
 }
 
 export function planExportGeometry(media: MediaRef): { width: number; height: number } {
-  const { displayWidth, displayHeight } = clampDisplaySize(media.displayWidth, media.displayHeight);
+  const { width: displayWidth, height: displayHeight } = clampDisplaySize(media.displayWidth, media.displayHeight);
   return { width: displayWidth, height: displayHeight };
 }
 
@@ -106,7 +106,7 @@ export function computeExportGeometry(settings: ProjectExportSettings, media: Me
   const sourceHeight = media.displayHeight;
 
   if (settings.sizeMode === "source") {
-    const { displayWidth, displayHeight } = clampDisplaySize(sourceWidth, sourceHeight);
+    const { width: displayWidth, height: displayHeight } = clampDisplaySize(sourceWidth, sourceHeight);
     return { width: displayWidth, height: displayHeight };
   }
 
@@ -121,7 +121,7 @@ export function computeExportGeometry(settings: ProjectExportSettings, media: Me
     return applyResizePolicy(settings.resizePolicy, settings.customWidth, settings.customHeight, sourceWidth, sourceHeight);
   }
 
-  const { displayWidth, displayHeight } = clampDisplaySize(sourceWidth, sourceHeight);
+  const { width: displayWidth, height: displayHeight } = clampDisplaySize(sourceWidth, sourceHeight);
   return { width: displayWidth, height: displayHeight };
 }
 

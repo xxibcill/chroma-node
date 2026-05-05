@@ -109,7 +109,7 @@ export function mapProbeOutput(sourcePath: string, parsed: FfprobeJson): MediaRe
   }
 
   const rotation = readRotation(videoStream);
-  const { displayWidth, displayHeight } = getDisplaySize(videoStream.width, videoStream.height, rotation);
+  const { width: displayWidth, height: displayHeight } = getDisplaySize(videoStream.width, videoStream.height, rotation);
   if (!isSupportedDisplayRaster(displayWidth, displayHeight)) {
     throw appError(
       "UNSUPPORTED_MEDIA",
