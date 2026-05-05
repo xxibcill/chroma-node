@@ -43,6 +43,12 @@ import {
   getTrackingMaxWidth,
   getScopeMaxWidth
 } from "../shared/previewPolicy";
+import {
+  DEFAULT_AI_SETTINGS,
+  type AiSettings,
+  type RgbFrame
+} from "../shared/aiGrading";
+import { AiPanel } from "./components/AiPanel";
 
 type Status = "idle" | "busy" | "ready" | "error";
 type RgbPrimaryKey = "lift" | "gamma" | "gain" | "offset";
@@ -140,6 +146,8 @@ export function App() {
   const [commandSearchOpen, setCommandSearchOpen] = useState(false);
   const [commandSearchQuery, setCommandSearchQuery] = useState("");
   const [workspacePreset, setWorkspacePreset] = useState<"grade" | "scopes" | "color" | "compare" | "export" | "debug">("grade");
+  const [aiSettings, setAiSettings] = useState<AiSettings>(DEFAULT_AI_SETTINGS);
+  const [currentFrameForAi, setCurrentFrameForAi] = useState<RgbFrame | undefined>(undefined);
 
   const mediaUrl = useMemo(() => (state.media ? filePathToUrl(state.media.sourcePath) : undefined), [state.media]);
   const proxyIndicator = useMemo(() => {
@@ -258,6 +266,9 @@ export function App() {
 
       const startedAt = performance.now();
       const gradedFrame = createGradedScopeFrame(sourceFrame, project.nodes);
+      if (aiSettings.enabled) {
+        setCurrentFrameForAi(gradedFrame);
+      }
       const waveform = createWaveformHistogram(gradedFrame, waveformHistogramSize.width, waveformHistogramSize.height);
       const vectorscope = createVectorscopeHistogram(gradedFrame, vectorscopeHistogramSize);
       const guides = createVectorscopeGuides(vectorscopeHistogramSize);
@@ -278,7 +289,7 @@ export function App() {
       clearScopeCanvas(vectorscopeCanvas, "Scope error");
       setScopeInfo(error instanceof Error ? error.message : "Scope analysis failed.");
     }
-  }, [loadScopeImage, project.nodes, state.frame, state.media]);
+  }, [loadScopeImage, project.nodes, state.frame, state.media, aiSettings]);
 
   const scheduleScopeAnalysis = useCallback((isPlaybackSample: boolean) => {
     if (scopeDebounceTimer.current !== undefined) {
@@ -1330,6 +1341,14 @@ export function App() {
     commitProject((current) => ({ ...current, nodes: [...current.nodes, newNode] }));
   }, [activeNode, galleryStills, project.nodes.length, commitProject]);
 
+  const applyAiSuggestion = useCallback((suggestedNodes: ColorNode[]) => {
+    if (suggestedNodes.length === 0) return;
+    commitProject((current) => ({
+      ...current,
+      nodes: [...current.nodes, ...suggestedNodes].slice(-MAX_SERIAL_NODES)
+    }));
+  }, [commitProject]);
+
   const setTrackingTarget = useCallback((targetShape: PowerWindowShape) => {
     if (trackingOperation) {
       return;
@@ -1750,6 +1769,19 @@ export function App() {
                 <p className="muted">No export run yet.</p>
               )}
             </section>
+
+            {aiSettings.enabled && (
+              <section className="side-card">
+                <div className="panel-title">AI Assist</div>
+                <AiPanel
+                  settings={aiSettings}
+                  onSettingsChange={setAiSettings}
+                  onApplySuggestion={applyAiSuggestion}
+                  currentNodes={project.nodes}
+                  currentFrame={currentFrameForAi}
+                />
+              </section>
+            )}
           </section>
         </aside>
 
