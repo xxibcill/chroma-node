@@ -2,8 +2,8 @@
 
 ## Current Phase
 
-- Phase: Phase 08 - Media Geometry and Vertical Video
-- Status: In progress (2 partial tasks: P8-T3 viewer/overlay layout, P8-T4 tracking geometry parity)
+- Phase: Phase 18 - Guided Learning and Creator Workflows
+- Status: Complete (5 tasks implemented: P18-T1 First Run Sample Projects, P18-T2 Interactive Color Lessons, P18-T3 Grade Recipes and Node Starters, P18-T4 Practice Targets and Scope Goals, P18-T5 Learning Progress and Review)
 - Last updated: 2026-05-05
 
 ## Active Decisions
@@ -33,6 +33,10 @@
 | Which camera log profiles should be supported first after Apple Log? | TBD | Open |
 | Which scope families should be visible in the default workspace versus advanced presets? | TBD | Open |
 | Which Color page layout presets should ship by default? | TBD | Open |
+| What exact launch audience should the product optimize for first: color learners, solo creators, small studios, or educators? | TBD | Planned for Phase 22 |
+| Which AI features should run fully local versus require cloud provider configuration? | TBD | Planned for Phase 19 |
+| Should marketplace-style asset distribution start as first-party packs only before third-party creator packs? | TBD | Planned for Phase 20 |
+| Which paid model should launch first: one-time license, subscription, paid packs, or hybrid? | TBD | Planned for Phase 22 |
 
 ## Cross-Phase Risks
 
@@ -46,6 +50,10 @@
 | Color-managed preview/export mismatch | Keep input, working, output, tone, and gamut transforms in shared CPU/GLSL-parity code. | Planned for Phase 13 |
 | Advanced color management overload | Separate beginner defaults from expert controls through profile presets, validation, and progressive disclosure. | Planned for Phases 14 and 16 |
 | Scope suite performance and clutter | Centralize scope sampling/cache policy and expose scopes through workspace presets instead of one crowded panel. | Planned for Phase 15 |
+| Strong features without activation | Add first-run samples, lessons, recipes, and practice targets so users reach value quickly. | Planned for Phase 18 |
+| AI opacity and privacy concerns | Keep AI suggestions editable, explainable, opt-in, and functional in degraded/offline mode. | Planned for Phase 19 |
+| Asset-pack trust and compatibility | Validate library packs, profile compatibility, schema versions, and trust labels before apply. | Planned for Phase 20 |
+| Commercial launch without support loop | Add licensing, signed updates, telemetry consent, support bundles, crash diagnostics, and launch metrics. | Planned for Phase 22 |
 
 ## CI Policy
 
@@ -84,3 +92,4 @@ Optional checks (log in verification log when run): `npm run test:e2e`, `npm run
 | 2026-04-26 | Phase 09 | All 5 tasks COMPLETE. Export schema/presets, fit/crop/pad pipeline, UI, validation, tests. | Passed |
 | 2026-05-04 | Roadmap extension | Added Phase 13 and task breakdown for Apple Log and advanced color management. | Planned |
 | 2026-05-05 | Roadmap extension | Added Phases 14-16 for ultimate color management, professional scopes, and Color page usability. | Planned |
+| 2026-05-05 | Roadmap extension | Added Phases 18-22 for guided learning, AI assistance, look library and marketplace foundation, professional review, and commercial readiness. | Planned |

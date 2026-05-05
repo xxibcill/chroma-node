@@ -1503,6 +1503,227 @@ h2 {
   margin-bottom: 8px;
 }
 
+.learning-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: linear-gradient(180deg, var(--bg-panel), rgba(12, 16, 23, 0.98));
+}
+
+.learning-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.learning-tabs button {
+  flex: 1;
+  min-height: 28px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 780;
+}
+
+.learning-tabs button:hover:not(:disabled) {
+  border-color: var(--border);
+  background: var(--bg-control);
+  color: var(--text);
+}
+
+.learning-tabs button.is-active {
+  border-color: rgba(226, 183, 110, 0.38);
+  background: rgba(224, 165, 85, 0.18);
+  color: #f7dfb6;
+}
+
+.learning-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+}
+
+.learning-section h3 {
+  margin: 0 0 4px;
+  color: var(--text-accent);
+  font-size: 0.75rem;
+  font-weight: 820;
+}
+
+.learning-description {
+  margin: 0 0 10px;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+
+.lesson-list,
+.recipe-list,
+.practice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lesson-card,
+.recipe-card,
+.practice-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  width: 100%;
+  min-height: 52px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(12, 16, 23, 0.48);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.lesson-card:hover:not(:disabled),
+.recipe-card:hover:not(:disabled),
+.practice-card:hover:not(:disabled) {
+  border-color: rgba(220, 194, 145, 0.28);
+  background: rgba(224, 165, 85, 0.12);
+}
+
+.lesson-card.is-completed {
+  border-color: rgba(100, 180, 100, 0.3);
+  background: rgba(80, 160, 80, 0.08);
+}
+
+.lesson-title,
+.recipe-name,
+.practice-name {
+  font-size: 0.78rem;
+  font-weight: 780;
+  color: var(--text);
+}
+
+.lesson-description,
+.recipe-description,
+.practice-description {
+  font-size: 0.66rem;
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+
+.lesson-badge {
+  font-size: 0.6rem;
+  font-weight: 820;
+  color: #8fd6a8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.recipe-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.recipe-tag {
+  padding: 1px 5px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background: var(--bg-control);
+  font-size: 0.6rem;
+  color: var(--text-dim);
+}
+
+.lesson-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 10px 0;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+
+.lesson-progress-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-control);
+  overflow: hidden;
+}
+
+.lesson-progress-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #efcf95 0%, #cb9058 100%);
+}
+
+.lesson-step {
+  margin: 12px 0;
+  padding: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: rgba(8, 12, 18, 0.4);
+}
+
+.lesson-instruction {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.lesson-step-result {
+  margin-top: 8px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.lesson-step-result.is-passed {
+  background: rgba(80, 160, 80, 0.15);
+  color: #8fd6a8;
+}
+
+.lesson-step-result.is-failed {
+  background: rgba(200, 100, 80, 0.15);
+  color: #ef9a8f;
+}
+
+.lesson-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.lesson-actions button {
+  min-height: 32px;
+  padding: 0 14px;
+  font-size: 0.72rem;
+}
+
+.lesson-actions button.primary-action {
+  border-color: rgba(226, 183, 110, 0.38);
+  background: rgba(224, 165, 85, 0.18);
+  color: #f7dfb6;
+}
+
+.back-button {
+  margin-bottom: 8px;
+  min-height: 26px;
+  padding: 0 8px;
+  font-size: 0.68rem;
+}
+
 .curves-channels {
   display: flex;
   flex-wrap: wrap;

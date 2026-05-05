@@ -10,6 +10,7 @@ import type {
   ExportSyntheticRequest,
   FfmpegDiagnostics,
   FrameExtractRequest,
+  LearningProgressPayload,
   MediaRef,
   OpenProjectResult,
   ProbeMediaRequest,
@@ -29,6 +30,7 @@ import { extractFrame } from "./frame.js";
 import { getFfmpegDiagnostics } from "./ffmpeg.js";
 import { probeMedia } from "./mediaProbe.js";
 import { relinkMedia } from "./mediaRelink.js";
+import { loadProgress, resetProgress, saveProgress } from "./progressStore.js";
 import { openProjectFile, saveProjectFile } from "./projectFile.js";
 
 export function registerIpcHandlers(): void {
@@ -75,6 +77,35 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IpcChannel.OpenProject, async (): Promise<VersionedResponse<OpenProjectResult>> => {
     try {
       return ok(await openProjectFile());
+    } catch (error) {
+      return fail(toAppError(error));
+    }
+  });
+
+  ipcMain.handle(IpcChannel.LoadProgress, async (): Promise<VersionedResponse<LearningProgressPayload>> => {
+    try {
+      return ok(await loadProgress());
+    } catch (error) {
+      return fail(toAppError(error));
+    }
+  });
+
+  ipcMain.handle(
+    IpcChannel.SaveProgress,
+    async (_event, progress: LearningProgressPayload): Promise<VersionedResponse<void>> => {
+      try {
+        await saveProgress(progress);
+        return ok(undefined);
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(IpcChannel.ResetProgress, async (): Promise<VersionedResponse<void>> => {
+    try {
+      await resetProgress();
+      return ok(undefined);
     } catch (error) {
       return fail(toAppError(error));
     }

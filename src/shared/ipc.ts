@@ -6,6 +6,9 @@ export const IpcChannel = {
   SelectMedia: "dialog:select-media",
   SaveProject: "project:save",
   OpenProject: "project:open",
+  LoadProgress: "progress:load",
+  SaveProgress: "progress:save",
+  ResetProgress: "progress:reset",
   RelinkMedia: "media:relink",
   GetDiagnostics: "ffmpeg:get-diagnostics",
   ProbeMedia: "media:probe",
@@ -19,6 +22,34 @@ export const IpcChannel = {
 } as const;
 
 export type IpcChannelName = (typeof IpcChannel)[keyof typeof IpcChannel];
+
+export interface LearningProgressPayload {
+  schemaVersion: string;
+  lessonsCompleted: string[];
+  lessonAttempts: Array<{
+    lessonId: string;
+    startedAt: number;
+    completedAt?: number;
+    stepResults: Array<{ stepId: string; passed: boolean; actualValue?: number }>;
+    completed: boolean;
+  }>;
+  practiceAttempts: Array<{
+    targetId: string;
+    projectId: string;
+    startedAt: number;
+    completedAt?: number;
+    lumaScore?: number;
+    contrastScore?: number;
+    saturationScore?: number;
+    skinToneScore?: number;
+    overallScore?: number;
+    completed: boolean;
+  }>;
+  savedLooks: Array<{ id: string; name: string; nodes: unknown[]; createdAt: number }>;
+  lastActiveLesson?: string;
+  createdAt: number;
+  updatedAt: number;
+}
 
 export type AppErrorCode =
   | "FFMPEG_MISSING"
@@ -221,6 +252,9 @@ export interface ChromaNodeApi {
   selectMedia(): Promise<VersionedResponse<SelectMediaResponse>>;
   saveProject(request: SaveProjectRequest): Promise<VersionedResponse<SaveProjectResult>>;
   openProject(): Promise<VersionedResponse<OpenProjectResult>>;
+  loadProgress(): Promise<VersionedResponse<LearningProgressPayload>>;
+  saveProgress(progress: LearningProgressPayload): Promise<VersionedResponse<void>>;
+  resetProgress(): Promise<VersionedResponse<void>>;
   relinkMedia(request: RelinkMediaRequest): Promise<RelinkMediaResult>;
   getDiagnostics(): Promise<VersionedResponse<FfmpegDiagnostics>>;
   probeMedia(request: ProbeMediaRequest): Promise<VersionedResponse<MediaRef>>;
