@@ -9,6 +9,11 @@ import { computeExportGeometry, computeExportFps } from "./exportPlanning.js";
 import { renderRgbaFrame, transformRgbaFrame } from "./exportProject.js";
 import { sanitizeProject } from "../shared/project.js";
 
+interface ProcessExit {
+  code: number | null;
+  signal: NodeJS.Signals | null;
+}
+
 export async function exportSequence(request: ExportSequenceRequest): Promise<ExportJobResult> {
   const ffmpegPath = requireFfmpeg();
   const { project, outputPath, startFrame = 0, endFrame } = request;
@@ -63,12 +68,14 @@ export async function exportSequence(request: ExportSequenceRequest): Promise<Ex
   // Collect stderr for error reporting
   const stderrChunks: Buffer[] = [];
   decoder.stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+  const decoderClosed = waitForClose(decoder);
   decoder.stdin.end();
 
   let pending = Buffer.alloc(0);
   let frameIndex = 0;
   let exportedCount = 0;
 
+  let shouldKillDecoder = true;
   try {
     for await (const chunk of decoder.stdout) {
       const chunkBuffer = Buffer.from(chunk);
@@ -144,14 +151,28 @@ export async function exportSequence(request: ExportSequenceRequest): Promise<Ex
         }
       }
     }
+    shouldKillDecoder = false;
   } finally {
-    if (decoder.exitCode === null) {
+    if (shouldKillDecoder && decoder.exitCode === null && decoder.signalCode === null) {
       decoder.kill("SIGKILL");
     }
   }
 
   if (pending.length !== 0) {
-    // Incomplete frame - this may be expected at end
+    throw appError("EXPORT_FAILED", "FFmpeg returned an incomplete raw video frame.", `${pending.length} trailing bytes`);
+  }
+
+  const decoderExit = await decoderClosed;
+  if (decoderExit.code !== 0) {
+    throw appError("EXPORT_FAILED", "FFmpeg could not decode the source media.", Buffer.concat(stderrChunks).toString("utf8").trim());
+  }
+
+  if (exportedCount !== frameCount) {
+    throw appError(
+      "EXPORT_FAILED",
+      "Export sequence wrote fewer frames than requested.",
+      `wrote=${exportedCount}, expected=${frameCount}, start=${startFrame}, end=${end}`
+    );
   }
 
   // Validate output
@@ -208,6 +229,13 @@ async function probeImage(imagePath: string): Promise<{ width: number; height: n
 
 function spawnFfmpeg(executable: string, args: string[]): ChildProcessWithoutNullStreams {
   return spawn(executable, args, { stdio: ["pipe", "pipe", "pipe"] });
+}
+
+function waitForClose(child: ChildProcessWithoutNullStreams): Promise<ProcessExit> {
+  return new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (code, signal) => resolve({ code, signal }));
+  });
 }
 
 export function toSequenceOutputPattern(outputPath: string): string {
