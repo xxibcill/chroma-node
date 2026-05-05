@@ -667,7 +667,7 @@ function buildEncodeArgs(snapshot: ExportJobSnapshot): string[] {
         "-c:v",
         "prores_ks",
         "-pix_fmt",
-        "yuv420p10le"
+        "yuv422p10le"
       );
       break;
     case "vp9":
