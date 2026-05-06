@@ -1,6 +1,6 @@
 import { app } from "electron";
 import { existsSync } from "fs";
-import { readFile, writeFile, mkdir } from "fs/promises";
+import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 import {
   type CrashReport,
@@ -10,7 +10,6 @@ import {
   type FeedbackSubmissionResult,
   createCrashReport,
   createDiagnosticEntry,
-  redactSensitivePath,
   SUPPORT_SCHEMA_VERSION
 } from "../shared/support.js";
 import { getFfmpegDiagnostics } from "./ffmpeg.js";

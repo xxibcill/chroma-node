@@ -106,7 +106,10 @@ export async function loadQueue(): Promise<TelemetryQueueEntry[]> {
     if (Array.isArray(parsed)) {
       eventQueue = parsed.filter(
         (entry): entry is TelemetryQueueEntry =>
-          entry && typeof entry.retryCount === "number" && typeof entry.enqueuedAt === "number"
+          entry &&
+          validateTelemetryEvent(entry.event) &&
+          typeof entry.retryCount === "number" &&
+          typeof entry.enqueuedAt === "number"
       );
     }
   } catch {

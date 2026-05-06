@@ -127,11 +127,9 @@ import {
 import {
   checkForUpdate as checkForUpdateFn,
   getUpdateStatus,
-  getUpdateProgress,
   loadUpdateConfig,
   setUpdateChannel,
   setAutoCheck,
-  getAutoCheck,
   getAvailableChannels,
   type UpdateStoreConfig
 } from "./updateStore.js";
@@ -681,6 +679,10 @@ export function registerIpcHandlers(): void {
       try {
         // In a real implementation, this would validate with a license server
         // For now, we create a local activation with a placeholder activationId
+        if (!request.licenseKey.trim()) {
+          return ok({ success: false, errorMessage: "License key is required." });
+        }
+
         const activationId = `activation-${Date.now().toString(36)}`;
         const tier = "paid";
         const state = await activateLicense(activationId, tier);
@@ -957,6 +959,11 @@ export function registerIpcHandlers(): void {
       try {
         // Experiments are read-only for now - stored in launchConfig
         // In a full implementation, this would persist user experiment assignments
+        trackEvent("feature:use", {
+          feature: "launch:set-experiment",
+          experimentId: request.id,
+          enabled: request.enabled
+        });
         return ok(undefined);
       } catch (error) {
         return fail(toAppError(error));

@@ -8,8 +8,7 @@ import {
   type UpdateCheckResult,
   type UpdateProgress,
   type ReleaseChannelConfig,
-  DEFAULT_RELEASE_CHANNELS,
-  UPDATE_SCHEMA_VERSION
+  DEFAULT_RELEASE_CHANNELS
 } from "../shared/update.js";
 
 const UPDATE_CONFIG_FILE = "update-config.json";

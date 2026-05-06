@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
   createDefaultEntitlementState,
   createTrialEntitlementState,
@@ -8,8 +8,6 @@ import {
   ENTITLEMENT_SCHEMA_VERSION,
   DEFAULT_ENTITLEMENT_FLAGS,
   TRIAL_ENTITLEMENT_FLAGS,
-  PAID_ENTITLEMENT_FLAGS,
-  PRO_ENTITLEMENT_FLAGS,
   OFFLINE_GRACE_PERIOD_MS,
   TRIAL_DURATION_MS,
   type EntitlementState

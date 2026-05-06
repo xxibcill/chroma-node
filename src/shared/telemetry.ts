@@ -55,7 +55,7 @@ export const DEFAULT_TELEMETRY_CONFIG: TelemetryConfig = {
 };
 
 export const REDACT_PATTERNS: Array<{ pattern: RegExp; replacement: string }> = [
-  { pattern: /\/\Users\/[^\/]+\//g, replacement: "/Users/REDACTED/" },
+  { pattern: /\/Users\/[^/]+\//g, replacement: "/Users/REDACTED/" },
   { pattern: /\/\/[\w.-]+\/[\w.-]+\//g, replacement: "//REMOTE/REDACTED/" },
   { pattern: /\w{8,}-\w{4,}-\w{4,}-\w{4,}-\w{12,}/g, replacement: "[UUID]" },
   { pattern: /[\w.-]+@[\w.-]+\.\w+/g, replacement: "user@REDACTED" }

@@ -91,6 +91,6 @@ export function createDiagnosticEntry(
 
 export function redactSensitivePath(text: string): string {
   return text
-    .replace(/\/Users\/[^\/]+\//g, "/Users/REDACTED/")
+    .replace(/\/Users\/[^/]+\//g, "/Users/REDACTED/")
     .replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, "user@REDACTED");
 }
