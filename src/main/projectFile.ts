@@ -3,8 +3,38 @@ import { readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { dialog } from "electron";
 import type { OpenProjectResult, SaveProjectRequest, SaveProjectResult } from "../shared/ipc.js";
-import { serializeProject, validateProject } from "../shared/project.js";
+import { serializeProject, validateProject, type ChromaProject } from "../shared/project.js";
 import { appError } from "./errors.js";
+
+let currentProject: ChromaProject | null = null;
+let currentProjectPath: string | null = null;
+
+export function getCurrentProject(): ChromaProject | null {
+  return currentProject;
+}
+
+export function setCurrentProject(project: ChromaProject, projectPath: string): void {
+  currentProject = project;
+  currentProjectPath = projectPath;
+}
+
+export async function updateProject(project: ChromaProject): Promise<void> {
+  if (!currentProjectPath) {
+    throw new Error("No project path set");
+  }
+  currentProject = project;
+  const tempPath = `${currentProjectPath}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    await writeFile(tempPath, serializeProject(project), "utf8");
+    await rename(tempPath, currentProjectPath);
+  } catch (error) {
+    throw appError("PROJECT_SAVE_FAILED", "Project could not be updated.", String(error));
+  }
+}
+
+export function getCurrentProjectPath(): string | null {
+  return currentProjectPath;
+}
 
 export async function saveProjectFile(request: SaveProjectRequest): Promise<SaveProjectResult> {
   const validation = validateProject(request.project);
@@ -60,7 +90,7 @@ export async function openProjectFile(): Promise<OpenProjectResult> {
     );
   }
 
-  return {
+  const result: OpenProjectResult = {
     project: validation.project,
     projectPath,
     missingMedia: Boolean(validation.project.media && !existsSync(validation.project.media.sourcePath)),
@@ -68,6 +98,8 @@ export async function openProjectFile(): Promise<OpenProjectResult> {
       ? validation.project.media.sourcePath
       : undefined
   };
+  setCurrentProject(validation.project, projectPath);
+  return result;
 }
 
 async function selectSavePath(projectName: string): Promise<string> {

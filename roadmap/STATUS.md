@@ -2,9 +2,18 @@
 
 ## Current Phase
 
-- Phase: Phase 08 - Media Geometry and Vertical Video
-- Status: In progress (2 partial tasks: P8-T3 viewer/overlay layout, P8-T4 tracking geometry parity)
+- Phase: Phase 22 - Commercial Readiness and Growth Platform
+- Status: Not Started (5 tasks)
 - Last updated: 2026-05-05
+
+## Completed Phases
+
+| Phase | Status | Verified |
+|-------|--------|----------|
+| 00–11 | Complete | 2026-04-26 |
+| 12 | 8/10 complete (P12-T2 wheel UI deferred, P12-T6 handle editing deferred) | 2026-05-04 |
+| 13 | Not Started (0/7) | 2026-05-04 |
+| 14–21 | Complete | 2026-05-05 |
 
 ## Active Decisions
 
@@ -33,6 +42,10 @@
 | Which camera log profiles should be supported first after Apple Log? | TBD | Open |
 | Which scope families should be visible in the default workspace versus advanced presets? | TBD | Open |
 | Which Color page layout presets should ship by default? | TBD | Open |
+| What exact launch audience should the product optimize for first: color learners, solo creators, small studios, or educators? | TBD | Planned for Phase 22 |
+| Which AI features should run fully local versus require cloud provider configuration? | TBD | Planned for Phase 19 |
+| Should marketplace-style asset distribution start as first-party packs only before third-party creator packs? | TBD | Planned for Phase 20 |
+| Which paid model should launch first: one-time license, subscription, paid packs, or hybrid? | TBD | Planned for Phase 22 |
 
 ## Cross-Phase Risks
 
@@ -46,6 +59,23 @@
 | Color-managed preview/export mismatch | Keep input, working, output, tone, and gamut transforms in shared CPU/GLSL-parity code. | Planned for Phase 13 |
 | Advanced color management overload | Separate beginner defaults from expert controls through profile presets, validation, and progressive disclosure. | Planned for Phases 14 and 16 |
 | Scope suite performance and clutter | Centralize scope sampling/cache policy and expose scopes through workspace presets instead of one crowded panel. | Planned for Phase 15 |
+| Strong features without activation | Add first-run samples, lessons, recipes, and practice targets so users reach value quickly. | Planned for Phase 18 |
+| AI opacity and privacy concerns | Keep AI suggestions editable, explainable, opt-in, and functional in degraded/offline mode. | Planned for Phase 19 |
+| Asset-pack trust and compatibility | Validate library packs, profile compatibility, schema versions, and trust labels before apply. | Planned for Phase 20 |
+| Commercial launch without support loop | Add licensing, signed updates, telemetry consent, support bundles, crash diagnostics, and launch metrics. | Planned for Phase 22 |
+
+## CI Policy
+
+CI runs on `main` and all `upgrade/phase-*` branches.
+
+| Job | Required | Trigger |
+| --- | --- | --- |
+| `verify` | Yes | All pushes |
+| `e2e-smoke` | No (optional) | Runs after `verify` passes |
+
+Required checks for phase/task completion: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`.
+
+Optional checks (log in verification log when run): `npm run test:e2e`, `npm run test:phaseXX`.
 
 ## Verification Log
 
@@ -71,3 +101,13 @@
 | 2026-04-26 | Phase 09 | All 5 tasks COMPLETE. Export schema/presets, fit/crop/pad pipeline, UI, validation, tests. | Passed |
 | 2026-05-04 | Roadmap extension | Added Phase 13 and task breakdown for Apple Log and advanced color management. | Planned |
 | 2026-05-05 | Roadmap extension | Added Phases 14-16 for ultimate color management, professional scopes, and Color page usability. | Planned |
+| 2026-05-05 | Roadmap extension | Added Phases 18-22 for guided learning, AI assistance, look library and marketplace foundation, professional review, and commercial readiness. | Planned |
+| 2026-05-05 | Phase 14 | All 8 tasks COMPLETE. Profile registry, camera log transforms, ACES workflows, HDR/gamut, LUT management, display simulation, delivery conformance, color science tests. | Passed |
+| 2026-05-05 | Phase 15 | All 8 tasks COMPLETE. Scope engine, waveform, parade, vectorscope, histogram, CIE gamut, false color, performance validation. | Passed |
+| 2026-05-05 | Phase 16 | All 7 tasks COMPLETE. Workstation shell, workspace presets, grading ergonomics, node navigation, shortcuts, status warnings, accessibility validation. | Passed |
+| 2026-05-05 | Phase 17 | All 6 tasks COMPLETE. Color pipeline contract, split renderer workflows, export boundary, centralized media geometry, e2e repair, CI coverage. | Passed |
+| 2026-05-05 | Phase 18 | All 5 tasks COMPLETE. Sample projects, interactive lessons, grade recipes, practice targets, learning progress. | Passed |
+| 2026-05-05 | Phase 19 | All 5 tasks COMPLETE. Auto balance, reference matching, natural language intent, explainable AI, safety controls. | Passed |
+| 2026-05-05 | Phase 20 | All 5 tasks COMPLETE. Local look library, pack import/export, browser search, compatibility checking, marketplace foundation. | Passed |
+| 2026-05-05 | Phase 21 | All 5 tasks COMPLETE. Grade versions with approval states, frame-accurate annotations, review package export, feedback import, project handoff/archive. | Passed |
+| 2026-05-05 | Phase 22 | All 5 tasks NOT_FOUND. Licensing, packaging, telemetry, support, launch docs not implemented. | Not Started |

@@ -43,6 +43,12 @@ import {
   getTrackingMaxWidth,
   getScopeMaxWidth
 } from "../shared/previewPolicy";
+import {
+  DEFAULT_AI_SETTINGS,
+  type AiSettings,
+  type RgbFrame
+} from "../shared/aiGrading";
+import { AiPanel } from "./components/AiPanel";
 
 type Status = "idle" | "busy" | "ready" | "error";
 type RgbPrimaryKey = "lift" | "gamma" | "gain" | "offset";
@@ -118,7 +124,7 @@ export function App() {
   const [viewerSize, setViewerSize] = useState({ width: 0, height: 0 });
   const [project, setProject] = useState<ChromaProject>(initialProject);
   const [selectedNodeId, setSelectedNodeId] = useState(initialProject.nodes[0].id);
-  const { canUndo, canRedo, pushHistory, undo, redo } = useUndoRedo();
+  const { canUndo, canRedo, pushHistory, undo, redo, undoLabel, redoLabel } = useUndoRedo();
   const [playback, setPlayback] = useState<PlaybackState>({
     isPlaying: false,
     isScrubbing: false,
@@ -137,6 +143,11 @@ export function App() {
 
   const [galleryStills, setGalleryStills] = useState<{ id: string; thumbnail: string; timestamp: number; frameIndex: number; gradeName: string }[]>([]);
   const [compareStillId, setCompareStillId] = useState<string | null>(null);
+  const [commandSearchOpen, setCommandSearchOpen] = useState(false);
+  const [commandSearchQuery, setCommandSearchQuery] = useState("");
+  const [workspacePreset, setWorkspacePreset] = useState<"grade" | "scopes" | "color" | "compare" | "export" | "debug">("grade");
+  const [aiSettings, setAiSettings] = useState<AiSettings>(DEFAULT_AI_SETTINGS);
+  const [currentFrameForAi, setCurrentFrameForAi] = useState<RgbFrame | undefined>(undefined);
 
   const mediaUrl = useMemo(() => (state.media ? filePathToUrl(state.media.sourcePath) : undefined), [state.media]);
   const proxyIndicator = useMemo(() => {
@@ -255,6 +266,9 @@ export function App() {
 
       const startedAt = performance.now();
       const gradedFrame = createGradedScopeFrame(sourceFrame, project.nodes);
+      if (aiSettings.enabled) {
+        setCurrentFrameForAi(gradedFrame);
+      }
       const waveform = createWaveformHistogram(gradedFrame, waveformHistogramSize.width, waveformHistogramSize.height);
       const vectorscope = createVectorscopeHistogram(gradedFrame, vectorscopeHistogramSize);
       const guides = createVectorscopeGuides(vectorscopeHistogramSize);
@@ -275,7 +289,7 @@ export function App() {
       clearScopeCanvas(vectorscopeCanvas, "Scope error");
       setScopeInfo(error instanceof Error ? error.message : "Scope analysis failed.");
     }
-  }, [loadScopeImage, project.nodes, state.frame, state.media]);
+  }, [loadScopeImage, project.nodes, state.frame, state.media, aiSettings]);
 
   const scheduleScopeAnalysis = useCallback((isPlaybackSample: boolean) => {
     if (scopeDebounceTimer.current !== undefined) {
@@ -1327,6 +1341,14 @@ export function App() {
     commitProject((current) => ({ ...current, nodes: [...current.nodes, newNode] }));
   }, [activeNode, galleryStills, project.nodes.length, commitProject]);
 
+  const applyAiSuggestion = useCallback((suggestedNodes: ColorNode[]) => {
+    if (suggestedNodes.length === 0) return;
+    commitProject((current) => ({
+      ...current,
+      nodes: [...current.nodes, ...suggestedNodes].slice(-MAX_SERIAL_NODES)
+    }));
+  }, [commitProject]);
+
   const setTrackingTarget = useCallback((targetShape: PowerWindowShape) => {
     if (trackingOperation) {
       return;
@@ -1535,29 +1557,50 @@ export function App() {
     const handleKeyDown = (event: KeyboardEvent) => {
       const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
       const modifier = isMac ? event.metaKey : event.ctrlKey;
+      const target = event.target as HTMLElement;
+      const isInput = target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT";
+
+      if (modifier && event.key === "k") {
+        event.preventDefault();
+        setCommandSearchOpen(true);
+        setCommandSearchQuery("");
+        return;
+      }
+
+      if (event.key === "Escape") {
+        if (commandSearchOpen) {
+          setCommandSearchOpen(false);
+          setCommandSearchQuery("");
+          return;
+        }
+      }
 
       if (modifier && event.key === "z" && !event.shiftKey) {
+        if (isInput) return;
         event.preventDefault();
         const previous = undo();
         if (previous) {
           setProject(previous);
           setSelectedNodeId(previous.nodes[0]?.id ?? selectedNodeId);
         }
+        return;
       }
 
       if (modifier && event.key === "z" && event.shiftKey) {
+        if (isInput) return;
         event.preventDefault();
         const next = redo();
         if (next) {
           setProject(next);
           setSelectedNodeId(next.nodes[0]?.id ?? selectedNodeId);
         }
+        return;
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [redo, selectedNodeId, undo]);
+  }, [commandSearchOpen, redo, selectedNodeId, undo]);
 
   useEffect(() => {
     if (!mediaUrl || !videoRef.current) {
@@ -1726,6 +1769,19 @@ export function App() {
                 <p className="muted">No export run yet.</p>
               )}
             </section>
+
+            {aiSettings.enabled && (
+              <section className="side-card">
+                <div className="panel-title">AI Assist</div>
+                <AiPanel
+                  settings={aiSettings}
+                  onSettingsChange={setAiSettings}
+                  onApplySuggestion={applyAiSuggestion}
+                  currentNodes={project.nodes}
+                  currentFrame={currentFrameForAi}
+                />
+              </section>
+            )}
           </section>
         </aside>
 
@@ -1930,12 +1986,20 @@ export function App() {
                 </span>
               )}
             </div>
+            <div className="workspace-preset-row">
+              <span className="workspace-label">Workspace:</span>
+              <button type="button" className={workspacePreset === "grade" ? "is-active" : ""} onClick={() => setWorkspacePreset("grade")}>Grade</button>
+              <button type="button" className={workspacePreset === "scopes" ? "is-active" : ""} onClick={() => setWorkspacePreset("scopes")}>Scopes</button>
+              <button type="button" className={workspacePreset === "color" ? "is-active" : ""} onClick={() => setWorkspacePreset("color")}>Color</button>
+              <button type="button" className={workspacePreset === "compare" ? "is-active" : ""} onClick={() => setWorkspacePreset("compare")}>Compare</button>
+              <button type="button" className={workspacePreset === "export" ? "is-active" : ""} onClick={() => setWorkspacePreset("export")}>Export</button>
+            </div>
             <div className="action-row">
-              <button type="button" onClick={() => { const prev = undo(); if (prev) { setProject(prev); setSelectedNodeId(prev.nodes[0]?.id ?? selectedNodeId); } }} disabled={!canUndo}>
-                Undo
+              <button type="button" onClick={() => { const prev = undo(); if (prev) { setProject(prev); setSelectedNodeId(prev.nodes[0]?.id ?? selectedNodeId); } }} disabled={!canUndo} title={undoLabel ? `Undo: ${undoLabel}` : "Undo"}>
+                Undo{undoLabel && undoLabel !== "Change" ? ` ${undoLabel}` : ""}
               </button>
-              <button type="button" onClick={() => { const next = redo(); if (next) { setProject(next); setSelectedNodeId(next.nodes[0]?.id ?? selectedNodeId); } }} disabled={!canRedo}>
-                Redo
+              <button type="button" onClick={() => { const next = redo(); if (next) { setProject(next); setSelectedNodeId(next.nodes[0]?.id ?? selectedNodeId); } }} disabled={!canRedo} title={redoLabel ? `Redo: ${redoLabel}` : "Redo"}>
+                Redo{redoLabel && redoLabel !== "Change" ? ` ${redoLabel}` : ""}
               </button>
               <button type="button" onClick={openProject} disabled={state.status === "busy"}>
                 Open
@@ -2008,8 +2072,41 @@ export function App() {
             onSetCompareStill={setCompareStillId}
             compareStillId={compareStillId}
             copiedNode={copiedNode}
+            canUseMedia={canUseMedia}
           />
       </section>
+
+      {commandSearchOpen ? (
+        <CommandSearch
+          query={commandSearchQuery}
+          onQueryChange={setCommandSearchQuery}
+          onClose={() => { setCommandSearchOpen(false); setCommandSearchQuery(""); }}
+          onAction={(action) => {
+            action();
+            setCommandSearchOpen(false);
+            setCommandSearchQuery("");
+          }}
+          canUseMedia={canUseMedia}
+          hasCopiedNode={Boolean(copiedNode)}
+          hasGalleryStills={galleryStills.length > 0}
+          importMedia={importMedia}
+          openProject={openProject}
+          saveProject={saveProject}
+          runProjectExport={runProjectExport}
+          addNode={addNode}
+          deleteActiveNode={deleteActiveNode}
+          duplicateNode={duplicateNode}
+          toggleNodeBypass={toggleNodeBypass}
+          copyNode={copyNode}
+          pasteNode={pasteNode}
+          captureStill={captureStill}
+          compareStillId={compareStillId}
+          galleryStills={galleryStills}
+          setCompareStillId={setCompareStillId}
+          updateActiveNode={updateActiveNode}
+          commitProject={commitProject}
+        />
+      ) : null}
     </main>
   );
 }
@@ -2055,10 +2152,12 @@ function ColorPanel({
   onSetCompareStill,
   compareStillId,
   copiedNode,
-  showMatte
+  showMatte,
+  canUseMedia
 }: {
   activeNode: ColorNode;
   canUseTracking: boolean;
+  canUseMedia: boolean;
   nodes: ColorNode[];
   trackingOperation?: TrackingOperation;
   selectedNodeId: string;
@@ -2121,21 +2220,31 @@ function ColorPanel({
             <button className="add-node" type="button" onClick={onAddNode} disabled={nodes.length >= MAX_SERIAL_NODES || isTracking}>
               Add
             </button>
-            <button type="button" onClick={onCopyNode} disabled={isTracking}>
+            <button type="button" onClick={onCopyNode} disabled={isTracking} title="Copy node">
               Copy
             </button>
-            <button type="button" onClick={onPasteNode} disabled={!copiedNode || nodes.length >= MAX_SERIAL_NODES || isTracking}>
+            <button type="button" onClick={onPasteNode} disabled={!copiedNode || nodes.length >= MAX_SERIAL_NODES || isTracking} title="Paste copied node">
               Paste
             </button>
-            <button type="button" onClick={onDuplicateNode} disabled={nodes.length >= MAX_SERIAL_NODES || isTracking}>
-              Duplicate
+            <button type="button" onClick={onDuplicateNode} disabled={nodes.length >= MAX_SERIAL_NODES || isTracking} title="Duplicate node with same grade">
+              Dup
             </button>
-            <button type="button" onClick={onToggleNodeBypass}>
+            <button type="button" onClick={onToggleNodeBypass} title={activeNode.enabled ? "Bypass node" : "Enable node"}>
               {activeNode.enabled ? "Bypass" : "Enable"}
             </button>
-            <button type="button" onClick={onDeleteNode} disabled={nodes.length <= 1 || isTracking}>
+            <button type="button" onClick={onDeleteNode} disabled={nodes.length <= 1 || isTracking} title="Delete node">
               Delete
             </button>
+          </div>
+          <div className="node-compare-row">
+            <button type="button" onClick={onCaptureStill} disabled={!canUseMedia} title="Capture still for comparison">
+              Capture Still
+            </button>
+            {galleryStills.length > 0 && (
+              <button type="button" onClick={() => onSetCompareStill(compareStillId ? null : galleryStills[0].id)} className={compareStillId ? "is-active" : ""} title="Toggle still compare">
+                Compare ({galleryStills.length})
+              </button>
+            )}
           </div>
         </section>
 
@@ -2411,33 +2520,61 @@ function RgbControl({
   value: RgbVector;
 }) {
   const range = PRIMARY_RANGES[rangeKey];
+  const neutral = { r: 1, g: 1, b: 1 };
+  const isActive = value.r !== neutral.r || value.g !== neutral.g || value.b !== neutral.b;
+
+  const handleWheel = (e: React.WheelEvent<HTMLInputElement>, channel: RgbChannel) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const step = e.shiftKey ? range.step * 0.1 : range.step;
+    const delta = e.deltaY < 0 ? step : -step;
+    const newValue = clampNumber(value[channel] + delta, range);
+    onChange(rangeKey, channel, newValue);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, channel: RgbChannel) => {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    e.preventDefault();
+    const step = e.shiftKey ? range.step * 0.1 : range.step;
+    const delta = e.key === "ArrowUp" ? step : -step;
+    const newValue = clampNumber(value[channel] + delta, range);
+    onChange(rangeKey, channel, newValue);
+  };
+
   return (
-    <section className="primary-card">
+    <section className={`primary-card ${isActive ? "is-active" : ""}`}>
       <div className="primary-card-header">
         <h2>{label}</h2>
-        <button type="button" onClick={() => onReset(rangeKey)}>Reset</button>
+        <button type="button" onClick={() => onReset(rangeKey)} title={`Reset ${label}`}>Reset</button>
       </div>
-      {(["r", "g", "b"] as const).map((channel) => (
-        <label className={`channel-row channel-${channel}`} key={channel}>
-          <span>{channel.toUpperCase()}</span>
-          <input
-            type="range"
-            min={range.min}
-            max={range.max}
-            step={range.step}
-            value={value[channel]}
-            onChange={(event) => onChange(rangeKey, channel, Number(event.currentTarget.value))}
-          />
-          <input
-            type="number"
-            min={range.min}
-            max={range.max}
-            step={range.step}
-            value={formatControlValue(value[channel])}
-            onChange={(event) => onChange(rangeKey, channel, Number(event.currentTarget.value))}
-          />
-        </label>
-      ))}
+      {(["r", "g", "b"] as const).map((channel) => {
+        const channelActive = value[channel] !== neutral[channel];
+        return (
+          <label className={`channel-row channel-${channel} ${channelActive ? "is-active" : ""}`} key={channel}>
+            <span>{channel.toUpperCase()}</span>
+            <input
+              type="range"
+              min={range.min}
+              max={range.max}
+              step={range.step}
+              value={value[channel]}
+              onChange={(event) => onChange(rangeKey, channel, Number(event.currentTarget.value))}
+              onWheel={(e) => handleWheel(e, channel)}
+              title={channelActive ? `${channel.toUpperCase()}: ${formatControlValue(value[channel])} (shift+wheel for fine)` : undefined}
+            />
+            <input
+              type="number"
+              min={range.min}
+              max={range.max}
+              step={range.step}
+              value={formatControlValue(value[channel])}
+              onChange={(event) => onChange(rangeKey, channel, Number(event.currentTarget.value))}
+              onKeyDown={(e) => handleKeyDown(e, channel)}
+              title="Type value, use arrow keys (shift for fine)"
+            />
+          </label>
+        );
+      })}
     </section>
   );
 }
@@ -2456,13 +2593,34 @@ function ScalarControl({
   value: number;
 }) {
   const range = PRIMARY_RANGES[rangeKey];
+  const neutral = PRIMARY_RANGES[rangeKey].neutral ?? (rangeKey === "temperature" || rangeKey === "tint" ? 0 : 1);
+  const isActive = value !== neutral;
+
+  const handleWheel = (e: React.WheelEvent<HTMLInputElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const step = e.shiftKey ? range.step * 0.1 : range.step;
+    const delta = e.deltaY < 0 ? step : -step;
+    const newValue = clampNumber(value + delta, range);
+    onChange(rangeKey, newValue);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    e.preventDefault();
+    const step = e.shiftKey ? range.step * 0.1 : range.step;
+    const delta = e.key === "ArrowUp" ? step : -step;
+    const newValue = clampNumber(value + delta, range);
+    onChange(rangeKey, newValue);
+  };
+
   return (
-    <section className="scalar-card">
+    <section className={`scalar-card ${isActive ? "is-active" : ""}`}>
       <div className="primary-card-header">
         <h2>{label}</h2>
-        <button type="button" onClick={() => onReset(rangeKey)}>Reset</button>
+        <button type="button" onClick={() => onReset(rangeKey)} title={`Reset ${label}`}>Reset</button>
       </div>
-      <label className="channel-row scalar-row">
+      <label className={`channel-row scalar-row ${isActive ? "is-active" : ""}`}>
         <input
           type="range"
           min={range.min}
@@ -2470,6 +2628,8 @@ function ScalarControl({
           step={range.step}
           value={value}
           onChange={(event) => onChange(rangeKey, Number(event.currentTarget.value))}
+          onWheel={handleWheel}
+          title={isActive ? `${formatControlValue(value)} (shift+wheel for fine)` : undefined}
         />
         <input
           type="number"
@@ -2478,6 +2638,8 @@ function ScalarControl({
           step={range.step}
           value={formatControlValue(value)}
           onChange={(event) => onChange(rangeKey, Number(event.currentTarget.value))}
+          onKeyDown={handleKeyDown}
+          title="Type value, use arrow keys (shift for fine)"
         />
       </label>
     </section>
@@ -2496,8 +2658,29 @@ function QualifierControl({
   value: number;
 }) {
   const range = QUALIFIER_RANGES[rangeKey];
+  const neutral = range.neutral ?? 0;
+  const isActive = value !== neutral;
+
+  const handleWheel = (e: React.WheelEvent<HTMLInputElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const step = e.shiftKey ? range.step * 0.1 : range.step;
+    const delta = e.deltaY < 0 ? step : -step;
+    const newValue = clampNumber(value + delta, range);
+    onChange(rangeKey, newValue);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    e.preventDefault();
+    const step = e.shiftKey ? range.step * 0.1 : range.step;
+    const delta = e.key === "ArrowUp" ? step : -step;
+    const newValue = clampNumber(value + delta, range);
+    onChange(rangeKey, newValue);
+  };
+
   return (
-    <label className="mask-row">
+    <label className={`mask-row ${isActive ? "is-active" : ""}`}>
       <span>{label}</span>
       <input
         type="range"
@@ -2506,6 +2689,8 @@ function QualifierControl({
         step={range.step}
         value={value}
         onChange={(event) => onChange(rangeKey, Number(event.currentTarget.value))}
+        onWheel={handleWheel}
+        title={isActive ? `${formatControlValue(value)} (shift+wheel for fine)` : undefined}
       />
       <input
         type="number"
@@ -2514,6 +2699,7 @@ function QualifierControl({
         step={range.step}
         value={formatControlValue(value)}
         onChange={(event) => onChange(rangeKey, Number(event.currentTarget.value))}
+        onKeyDown={handleKeyDown}
       />
     </label>
   );
@@ -2645,8 +2831,31 @@ function WindowScalarControl({
   value: number;
 }) {
   const range = WINDOW_RANGES[rangeKey];
+  const neutral = range.neutral ?? 0;
+  const isActive = value !== neutral;
+
+  const handleWheel = (e: React.WheelEvent<HTMLInputElement>) => {
+    if (disabled) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const step = e.shiftKey ? range.step * 0.1 : range.step;
+    const delta = e.deltaY < 0 ? step : -step;
+    const newValue = clampNumber(value + delta, range);
+    onChange(shape, rangeKey, newValue);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (disabled) return;
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    e.preventDefault();
+    const step = e.shiftKey ? range.step * 0.1 : range.step;
+    const delta = e.key === "ArrowUp" ? step : -step;
+    const newValue = clampNumber(value + delta, range);
+    onChange(shape, rangeKey, newValue);
+  };
+
   return (
-    <label className="mask-row">
+    <label className={`mask-row ${isActive ? "is-active" : ""}`}>
       <span>{label}</span>
       <input
         type="range"
@@ -2655,6 +2864,7 @@ function WindowScalarControl({
         step={range.step}
         value={value}
         onChange={(event) => onChange(shape, rangeKey, Number(event.currentTarget.value))}
+        onWheel={handleWheel}
         disabled={disabled}
       />
       <input
@@ -2664,6 +2874,7 @@ function WindowScalarControl({
         step={range.step}
         value={formatControlValue(value)}
         onChange={(event) => onChange(shape, rangeKey, Number(event.currentTarget.value))}
+        onKeyDown={handleKeyDown}
         disabled={disabled}
       />
     </label>
@@ -2975,6 +3186,126 @@ function formatTrackingStatus(node: ColorNode): string {
   }
 
   return `${tracking.keyframes.length} keyframes for ${tracking.targetShape}, frames ${frameRange}.`;
+}
+
+interface CommandAction {
+  label: string;
+  shortcut?: string;
+  action: () => void;
+  disabled?: boolean;
+}
+
+interface CommandSearchProps {
+  query: string;
+  onQueryChange: (query: string) => void;
+  onClose: () => void;
+  onAction: (action: () => void) => void;
+  canUseMedia: boolean;
+  hasCopiedNode: boolean;
+  hasGalleryStills: boolean;
+  importMedia: () => void;
+  openProject: () => void;
+  saveProject: () => void;
+  runProjectExport: () => void;
+  addNode: () => void;
+  deleteActiveNode: () => void;
+  duplicateNode: () => void;
+  toggleNodeBypass: () => void;
+  copyNode: () => void;
+  pasteNode: () => void;
+  captureStill: () => void;
+  compareStillId: string | null;
+  galleryStills: { id: string; thumbnail: string; timestamp: number; frameIndex: number; gradeName: string }[];
+  setCompareStillId: (id: string | null) => void;
+  updateActiveNode: (updater: (node: ColorNode) => ColorNode) => void;
+  commitProject: (updater: (current: ChromaProject) => ChromaProject) => void;
+}
+
+function CommandSearch({
+  query,
+  onQueryChange,
+  onClose,
+  onAction,
+  canUseMedia,
+  hasCopiedNode,
+  hasGalleryStills,
+  importMedia,
+  openProject,
+  saveProject,
+  runProjectExport,
+  addNode,
+  deleteActiveNode,
+  duplicateNode,
+  toggleNodeBypass,
+  copyNode,
+  pasteNode,
+  captureStill,
+  compareStillId,
+  galleryStills,
+  setCompareStillId,
+  updateActiveNode,
+  commitProject
+}: CommandSearchProps) {
+  const commands: CommandAction[] = useMemo(() => [
+    { label: "Import Media", shortcut: "Ctrl+O", action: importMedia, disabled: false },
+    { label: "Open Project", shortcut: undefined, action: openProject, disabled: false },
+    { label: "Save Project", shortcut: "Ctrl+S", action: saveProject, disabled: false },
+    { label: "Export MP4", shortcut: "Ctrl+E", action: runProjectExport, disabled: !canUseMedia },
+    { label: "Add Node", shortcut: "Ctrl+N", action: addNode, disabled: !canUseMedia },
+    { label: "Delete Node", shortcut: undefined, action: deleteActiveNode, disabled: !canUseMedia },
+    { label: "Duplicate Node", shortcut: undefined, action: duplicateNode, disabled: !canUseMedia },
+    { label: "Bypass Node", shortcut: undefined, action: toggleNodeBypass, disabled: !canUseMedia },
+    { label: "Copy Node", shortcut: "Ctrl+C", action: copyNode, disabled: !canUseMedia },
+    { label: "Paste Node", shortcut: "Ctrl+V", action: pasteNode, disabled: !hasCopiedNode },
+    { label: "Capture Still", shortcut: undefined, action: captureStill, disabled: !canUseMedia },
+    { label: "Toggle Compare", shortcut: undefined, action: () => setCompareStillId(compareStillId ? null : galleryStills[0]?.id ?? null), disabled: !hasGalleryStills },
+    { label: "Reset Node", shortcut: undefined, action: () => updateActiveNode((node) => ({ ...node, primaries: createNeutralPrimaries() })), disabled: !canUseMedia },
+    { label: "Reset All Nodes", shortcut: undefined, action: () => commitProject((current) => ({ ...current, nodes: current.nodes.map((node) => ({ ...node, primaries: createNeutralPrimaries(), curves: createDefaultNodeCurves() })) })), disabled: !canUseMedia },
+  ], [addNode, canUseMedia, captureStill, compareStillId, commitProject, copyNode, deleteActiveNode, duplicateNode, galleryStills, hasCopiedNode, hasGalleryStills, importMedia, openProject, pasteNode, runProjectExport, saveProject, setCompareStillId, toggleNodeBypass, updateActiveNode]);
+
+  const filtered = useMemo(() => {
+    if (!query.trim()) return commands;
+    const lower = query.toLowerCase();
+    return commands.filter((c) => c.label.toLowerCase().includes(lower));
+  }, [commands, query]);
+
+  return (
+    <div className="command-search-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} role="dialog" aria-label="Command search">
+      <div className="command-search">
+        <input
+          type="text"
+          className="command-search-input"
+          placeholder="Type a command..."
+          value={query}
+          onChange={(e) => onQueryChange(e.currentTarget.value)}
+          autoFocus
+        />
+        <ul className="command-list" role="listbox">
+          {filtered.length === 0 ? (
+            <li className="command-empty">No matching commands</li>
+          ) : (
+            filtered.map((cmd) => (
+              <li key={cmd.label} role="option">
+                <button
+                  type="button"
+                  className="command-item"
+                  onClick={() => cmd.disabled ? undefined : onAction(cmd.action)}
+                  disabled={cmd.disabled}
+                >
+                  <span className="command-label">{cmd.label}</span>
+                  {cmd.shortcut ? <span className="command-shortcut">{cmd.shortcut}</span> : null}
+                </button>
+              </li>
+            ))
+          )}
+        </ul>
+        <div className="command-hint">
+          <span>Press <kbd>Esc</kbd> to close</span>
+          <span>Press <kbd>Enter</kbd> to execute</span>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function ErrorBanner({ error }: { error: AppError }) {

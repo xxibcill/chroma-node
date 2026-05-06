@@ -19,15 +19,16 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] }
+      use: {
+        ...devices["Desktop Chrome"],
+        ...(process.env.CI ? {} : { channel: "chrome" as const })
+      }
     }
   ],
-  webServer: process.env.CI
-    ? undefined
-    : {
-        command: "npm run dev",
-        url: "http://127.0.0.1:5173",
-        reuseExistingServer: !process.env.CI,
-        timeout: 120 * 1000
-      }
+  webServer: {
+    command: process.env.CI ? "npx vite --host 127.0.0.1" : "npm run dev",
+    url: "http://127.0.0.1:5173",
+    reuseExistingServer: !process.env.CI,
+    timeout: 120 * 1000
+  }
 });
