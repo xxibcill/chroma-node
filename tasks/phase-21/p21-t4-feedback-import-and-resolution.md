@@ -2,7 +2,7 @@
 
 ## Status
 
-Not started
+Partial
 
 ## Phase
 
@@ -35,9 +35,26 @@ Import structured feedback and track each note through resolution inside the pro
 ## Progress
 
 - [ ] Not started
-- [ ] In progress
+- [x] In progress
 - [ ] Implemented
 - [ ] Verified
+
+## Implementation Audit - 2026-05-15
+
+Status: Partial.
+
+Evidence:
+- `src/shared/feedbackFile.ts` defines and validates a structured feedback file format.
+- `src/shared/feedbackFile.test.ts` covers creation, validation, defaults, and serialization.
+- IPC and preload contracts expose feedback import and feedback resolution.
+- `src/main/feedbackStore.ts` parses feedback files, converts feedback notes to annotations, resolves imported notes, exports annotations back to feedback, and handles skip/replace/rename duplicate strategies.
+- The IPC import handler now merges feedback into project annotations and returns import counts/conflict actions.
+- `ReviewWorkflowPanel` provides a renderer import path for feedback JSON.
+- `src/main/feedbackStore.test.ts` covers duplicate rename behavior.
+
+Remaining work:
+- Conflict preview/merge behavior is not implemented.
+- Add richer renderer conflict preview before import.
 
 ## Blockers
 

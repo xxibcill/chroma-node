@@ -2,7 +2,7 @@
 
 ## Status
 
-Not started
+Partial
 
 ## Phase
 
@@ -35,9 +35,25 @@ Allow users to add frame-accurate notes and visual annotations for review and re
 ## Progress
 
 - [ ] Not started
-- [ ] In progress
+- [x] In progress
 - [ ] Implemented
 - [ ] Verified
+
+## Implementation Audit - 2026-05-15
+
+Status: Partial.
+
+Evidence:
+- `Annotation`, `AnnotationStatus`, and geometry types are defined in `src/shared/project.ts`.
+- Project validation round-trips annotations and defaults invalid annotation status values.
+- IPC and preload contracts expose create, update, delete, and list annotations.
+- `src/main/annotationStore.ts` implements annotation CRUD, filtering, and basic stats.
+- `ReviewWorkflowPanel` can add frame notes and resolve/reopen notes from the renderer.
+
+Remaining work:
+- Add dedicated annotation edit/delete/filter controls beyond the compact frame-note list.
+- Annotation overlay rendering and normalized display-coordinate interaction are not wired into the viewer.
+- Add tests for annotation store behavior and coordinate mapping through the actual viewer helpers.
 
 ## Blockers
 

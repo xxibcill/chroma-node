@@ -2,7 +2,7 @@
 
 ## Status
 
-Not started
+Partial
 
 ## Phase
 
@@ -35,9 +35,24 @@ Make user support practical through crash diagnostics, feedback capture, redacte
 ## Progress
 
 - [ ] Not started
-- [ ] In progress
+- [x] In progress
 - [ ] Implemented
 - [ ] Verified
+
+## Implementation Audit - 2026-05-15
+
+Status: Partial.
+
+Evidence:
+- `src/shared/support.ts` defines crash reports, diagnostics, support bundles, feedback submissions, and path/email redaction helpers.
+- `src/main/supportStore.ts` can capture crash reports, collect app/system/FFmpeg/media diagnostics, include redacted application logs in support bundles, create support bundle manifests, and persist feedback submissions.
+- IPC and preload contracts expose crash capture, diagnostics, support bundle creation, and feedback submission.
+- `CommercialReadinessPanel` exposes support bundle creation in the renderer.
+
+Remaining work:
+- No crash reporting provider, consent flow, or submit/retry status exists.
+- Redaction is incomplete across diagnostics; project name and some metadata are still collected as-is.
+- Add tests for redaction and support bundle manifest contents.
 
 ## Blockers
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-Not started
+Partial
 
 ## Phase
 
@@ -35,9 +35,26 @@ Collect opt-in product signals that explain activation, retention, feature value
 ## Progress
 
 - [ ] Not started
-- [ ] In progress
+- [x] In progress
 - [ ] Implemented
 - [ ] Verified
+
+## Implementation Audit - 2026-05-15
+
+Status: Partial.
+
+Evidence:
+- `src/shared/telemetry.ts` defines consent state, event types, queue entries, redaction patterns, event creation, and event validation.
+- `src/main/telemetryStore.ts` persists consent and queue data, enforces consent before enqueueing, redacts payloads, supports flush/retry/delete, and exposes queue size.
+- IPC and preload contracts expose get/set consent, track, flush, delete all, and queue size operations.
+- Export, license, and launch experiment flows emit telemetry events through the consent-gated telemetry store.
+- `src/main/telemetryStore.test.ts` covers disabled-mode and redaction behavior.
+- `CommercialReadinessPanel` exposes telemetry consent and flush controls.
+
+Remaining work:
+- No analytics provider or dashboard/export review workflow is configured.
+- Expand event emission coverage beyond export/license/launch flows.
+- Add tests for consent, queue retry, and local deletion behavior.
 
 ## Blockers
 

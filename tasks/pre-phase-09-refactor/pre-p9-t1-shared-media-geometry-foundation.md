@@ -2,7 +2,7 @@
 
 ## Status
 
-Not started
+Partial
 
 ## Phase
 
@@ -32,9 +32,23 @@ Create a shared geometry foundation so media probe, project loading, viewer layo
 ## Progress
 
 - [ ] Not started
-- [ ] In progress
+- [x] In progress
 - [ ] Implemented
 - [ ] Verified
+
+## Implementation Audit - 2026-05-15
+
+Status: Partial.
+
+Evidence:
+- Shared geometry foundation exists in `src/shared/mediaGeometry.ts` with coded/display raster types, rotation normalization, display-size derivation, aspect ratio helpers, raster limits, containment, resize, and overlay mapping helpers.
+- `src/main/mediaProbe.ts` and `src/main/mediaRelink.ts` consume shared geometry helpers for display raster and validation.
+- Existing project loading derives legacy display dimensions in `src/shared/project.ts`.
+
+Remaining work:
+- Remove duplicated `getDisplaySize()` logic from `src/shared/ipc.ts`.
+- Remove duplicated viewer containment and overlay geometry helpers still embedded in `src/renderer/App.tsx`.
+- Consolidate renderer geometry consumers onto the shared/testable helpers before marking verified.
 
 ## Blockers
 
