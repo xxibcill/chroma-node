@@ -1,3 +1,5 @@
+import { getContainedRect as getSharedContainedRect, type ContainedRect } from "../../shared/mediaGeometry";
+
 export interface SourceRect {
   left: number;
   top: number;
@@ -15,30 +17,8 @@ export function getContainedRect(
   containerHeight: number,
   sourceWidth: number,
   sourceHeight: number
-): SourceRect {
-  if (containerWidth <= 0 || containerHeight <= 0 || sourceWidth <= 0 || sourceHeight <= 0) {
-    return { left: 0, top: 0, width: 0, height: 0 };
-  }
-
-  const containerAspect = containerWidth / containerHeight;
-  const sourceAspect = sourceWidth / sourceHeight;
-  if (containerAspect > sourceAspect) {
-    const width = containerHeight * sourceAspect;
-    return {
-      left: (containerWidth - width) / 2,
-      top: 0,
-      width,
-      height: containerHeight
-    };
-  }
-
-  const height = containerWidth / sourceAspect;
-  return {
-    left: 0,
-    top: (containerHeight - height) / 2,
-    width: containerWidth,
-    height
-  };
+): ContainedRect {
+  return getSharedContainedRect(containerWidth, containerHeight, sourceWidth, sourceHeight);
 }
 
 export function readSvgPoint(
