@@ -8,7 +8,8 @@ import {
   type UpdateCheckResult,
   type UpdateProgress,
   type ReleaseChannelConfig,
-  DEFAULT_RELEASE_CHANNELS
+  DEFAULT_RELEASE_CHANNELS,
+  isUpdateAvailable
 } from "../shared/update.js";
 
 const UPDATE_CONFIG_FILE = "update-config.json";
@@ -101,20 +102,69 @@ export async function checkForUpdate(): Promise<UpdateCheckResult> {
   config.lastCheckAt = Date.now();
   await saveUpdateConfig(config);
 
-  // Simulate update check - in production this would call an update server
-  // For now, we just report no update available
-  lastCheckResult = {
-    available: false,
-    version: config.currentVersion,
-    channel: config.channel,
-    releaseNotes: undefined,
-    publishedAt: undefined
-  };
+  const channel = config.channels.find((item) => item.channel === config.channel);
+  if (!channel?.enabled) {
+    updateStatus = "failed";
+    updateProgress = { status: "failed", percent: 0, bytesDownloaded: 0, totalBytes: 0 };
+    lastCheckResult = { available: false, version: config.currentVersion, channel: config.channel };
+    return lastCheckResult;
+  }
 
-  updateStatus = "idle";
-  updateProgress = { status: "idle", percent: 0, bytesDownloaded: 0, totalBytes: 0 };
+  if (!channel.checkUrl) {
+    updateStatus = "idle";
+    updateProgress = { status: "idle", percent: 0, bytesDownloaded: 0, totalBytes: 0 };
+    lastCheckResult = { available: false, version: config.currentVersion, channel: config.channel };
+    return lastCheckResult;
+  }
+
+  try {
+    const metadata = await fetchUpdateMetadata(channel.checkUrl);
+    const available = isUpdateAvailable(config.currentVersion, metadata.version);
+    lastCheckResult = {
+      available,
+      version: metadata.version,
+      channel: metadata.channel ?? config.channel,
+      releaseNotes: metadata.releaseNotes,
+      publishedAt: metadata.publishedAt
+    };
+
+    updateStatus = available ? "available" : "idle";
+    updateProgress = { status: updateStatus, percent: available ? 100 : 0, bytesDownloaded: 0, totalBytes: 0 };
+  } catch {
+    updateStatus = "failed";
+    updateProgress = { status: "failed", percent: 0, bytesDownloaded: 0, totalBytes: 0 };
+    lastCheckResult = { available: false, version: config.currentVersion, channel: config.channel };
+  }
 
   return lastCheckResult;
+}
+
+async function fetchUpdateMetadata(checkUrl: string): Promise<Required<Pick<UpdateCheckResult, "version">> & Omit<UpdateCheckResult, "available">> {
+  const response = await fetch(checkUrl, { signal: AbortSignal.timeout(10_000) });
+  if (!response.ok) {
+    throw new Error(`Update metadata returned ${response.status}`);
+  }
+
+  const parsed = await response.json() as unknown;
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("Update metadata must be an object");
+  }
+
+  const metadata = parsed as Record<string, unknown>;
+  if (typeof metadata.version !== "string" || !metadata.version.trim()) {
+    throw new Error("Update metadata is missing a version");
+  }
+
+  return {
+    version: metadata.version,
+    channel: isUpdateChannel(metadata.channel) ? metadata.channel : undefined,
+    releaseNotes: typeof metadata.releaseNotes === "string" ? metadata.releaseNotes : undefined,
+    publishedAt: typeof metadata.publishedAt === "number" ? metadata.publishedAt : undefined
+  };
+}
+
+function isUpdateChannel(value: unknown): value is UpdateChannel {
+  return value === "stable" || value === "beta" || value === "internal";
 }
 
 export function getUpdateStatus(): UpdateStatus {

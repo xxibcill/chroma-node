@@ -52,6 +52,7 @@ export async function saveProjectFile(request: SaveProjectRequest): Promise<Save
   try {
     await writeFile(tempPath, serializeProject(validation.project), "utf8");
     await rename(tempPath, projectPath);
+    setCurrentProject(validation.project, projectPath);
     return { projectPath };
   } catch (error) {
     throw appError("PROJECT_SAVE_FAILED", "Project file could not be saved.", String(error));

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useUndoRedo } from "./state/useUndoRedo";
 import type { PointerEvent as ReactPointerEvent } from "react";
-import type { AppError, DecodedFrame, ExportJobResult, ExportProgress, ExportQuality, FfmpegDiagnostics, MediaRef } from "../shared/ipc";
+import type { AppError, DecodedFrame, ExportJobResult, ExportQuality, FfmpegDiagnostics, MediaRef } from "../shared/ipc";
 import type { ColorNode, CurveChannel, CurvePoint, HslQualifier, PowerWindow, PowerWindowShape, RgbVector, TrackingKeyframe } from "../shared/colorEngine";
 import {
   MAX_SERIAL_NODES,
@@ -38,6 +38,20 @@ import type { LumaFrame } from "./tracking/templateTracker";
 import { TrackingFailure, getScaledSearchRadius, matchTranslation } from "./tracking/templateTracker";
 import { FrameRenderer } from "./webgl/FrameRenderer";
 import { ExportSettingsPanel } from "./components/ExportSettingsPanel";
+import { ExportProgressPanel } from "./components/ExportProgressPanel";
+import { ExportSummary } from "./components/ExportSummary";
+import { ReviewWorkflowPanel } from "./components/ReviewWorkflowPanel";
+import { CommercialReadinessPanel } from "./components/CommercialReadinessPanel";
+import { useExport } from "./hooks/useExport";
+import {
+  clamp01,
+  getContainedRect,
+  getWindowGeometry,
+  normalizeSignedDegrees,
+  readSvgPoint,
+  rotatePixelPoint,
+  type SourceRect
+} from "./viewer/viewerGeometry";
 import {
   getPreviewPolicy,
   getTrackingMaxWidth,
@@ -120,7 +134,6 @@ export function App() {
   const [showMatte, setShowMatte] = useState(false);
   const [scopeInfo, setScopeInfo] = useState("Scopes waiting for a graded frame.");
   const [trackingOperation, setTrackingOperation] = useState<TrackingOperation | undefined>();
-  const [exportOperation, setExportOperation] = useState<ExportProgress | undefined>();
   const [viewerSize, setViewerSize] = useState({ width: 0, height: 0 });
   const [project, setProject] = useState<ChromaProject>(initialProject);
   const [selectedNodeId, setSelectedNodeId] = useState(initialProject.nodes[0].id);
@@ -159,7 +172,6 @@ export function App() {
   const lastFrameIndex = useMemo(() => getLastFrameIndex(state.media), [state.media]);
   const timecode = useMemo(() => formatTimecode(playback.currentFrame, state.media), [playback.currentFrame, state.media]);
   const canUseMedia = Boolean(state.media);
-  const isExporting = exportOperation?.state === "pending" || exportOperation?.state === "running";
   const activeNode = useMemo(
     () => project.nodes.find((node) => node.id === selectedNodeId) ?? project.nodes[0],
     [project.nodes, selectedNodeId]
@@ -201,6 +213,58 @@ export function App() {
       }
     });
   }, [playback.currentFrame, playback.splitPosition, playback.viewerMode, project, state.media]);
+  const exportSnapshot = useMemo(() => buildProjectSnapshot(), [buildProjectSnapshot]);
+  const {
+    cancelExport,
+    exportOperation,
+    exportResult,
+    isExporting,
+    runExport
+  } = useExport({
+    project: exportSnapshot,
+    media: state.media
+  });
+
+  useEffect(() => {
+    if (!exportResult) {
+      return;
+    }
+
+    setState((current) => ({
+      ...current,
+      status: "ready",
+      message: "H.264 export completed.",
+      exportResult,
+      error: undefined
+    }));
+  }, [exportResult]);
+
+  useEffect(() => {
+    if (!exportOperation) {
+      return;
+    }
+
+    if (exportOperation.state === "pending" || exportOperation.state === "running") {
+      setState((current) => ({
+        ...current,
+        status: "busy",
+        message: `${exportOperation.message} ${exportOperation.percent.toFixed(1)}%.`,
+        error: undefined
+      }));
+      return;
+    }
+
+    if (exportOperation.state === "completed") {
+      return;
+    }
+
+    setState((current) => ({
+      ...current,
+      status: exportOperation.state === "failed" ? "error" : current.media ? "ready" : "idle",
+      message: exportOperation.state === "canceled" ? "Export cancelled." : exportOperation.message,
+      error: exportOperation.state === "failed" ? exportOperation.error : undefined
+    }));
+  }, [exportOperation]);
 
   const commitProject = useCallback((updater: (current: ChromaProject) => ChromaProject) => {
     const snapshot = buildProjectSnapshot();
@@ -850,61 +914,30 @@ export function App() {
   }, []);
 
   const runProjectExport = useCallback(async () => {
-    if (!api || !state.media || isExporting) {
+    if (!state.media || isExporting) {
       return;
     }
 
     videoRef.current?.pause();
     rendererRef.current?.setPlaybackActive(false);
     setPlayback((current) => ({ ...current, isPlaying: false }));
-    setExportOperation(undefined);
-    setState((current) => ({ ...current, status: "busy", message: "Exporting graded H.264 MP4...", error: undefined }));
-    const snapshot = buildProjectSnapshot();
-    const exportResponse = await api.startExport({
-      project: snapshot,
-      quality: snapshot.exportSettings.quality
-    });
-    const exportResult = exportResponse.result;
-    if (!exportResult.ok) {
-      const wasCancelled = exportResult.error.code === "EXPORT_CANCELLED" || exportResult.error.code === "USER_CANCELLED";
-      setState((current) => ({
-        ...current,
-        status: current.media ? "ready" : "idle",
-        message: wasCancelled ? "Export cancelled." : exportResult.error.message,
-        error: wasCancelled ? undefined : exportResult.error
-      }));
-      return;
-    }
-
     setState((current) => ({
       ...current,
-      status: "ready",
-      message: "H.264 export completed.",
-      exportResult: exportResult.value,
+      status: "busy",
+      message: "Exporting graded H.264 MP4...",
+      exportResult: undefined,
       error: undefined
     }));
-  }, [buildProjectSnapshot, isExporting, state.media]);
+    await runExport();
+  }, [isExporting, runExport, state.media]);
 
   const cancelProjectExport = useCallback(async () => {
-    if (!api || !exportOperation) {
+    if (!exportOperation) {
       return;
     }
 
-    setExportOperation((current) => current ? { ...current, message: "Cancelling export..." } : current);
-    const response = await api.cancelExport({ jobId: exportOperation.jobId });
-    const result = response.result;
-    if (!result.ok) {
-      setState((current) => ({
-        ...current,
-        status: current.media ? "ready" : "idle",
-        message: result.error.message,
-        error: result.error
-      }));
-      return;
-    }
-
-    setExportOperation(result.value);
-  }, [exportOperation]);
+    await cancelExport();
+  }, [cancelExport, exportOperation]);
 
   const togglePlayback = useCallback(() => {
     const video = videoRef.current;
@@ -1424,40 +1457,6 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!api) {
-      return;
-    }
-
-    return api.onExportProgress((progress) => {
-      setExportOperation(progress);
-      if (progress.state === "running" || progress.state === "pending") {
-        setState((current) => ({
-          ...current,
-          status: "busy",
-          message: `${progress.message} ${progress.percent.toFixed(1)}%.`,
-          error: undefined
-        }));
-      }
-      if (progress.state === "canceled") {
-        setState((current) => ({
-          ...current,
-          status: current.media ? "ready" : "idle",
-          message: "Export cancelled.",
-          error: undefined
-        }));
-      }
-      if (progress.state === "failed") {
-        setState((current) => ({
-          ...current,
-          status: "error",
-          message: progress.error?.message ?? progress.message,
-          error: progress.error
-        }));
-      }
-    });
-  }, []);
-
-  useEffect(() => {
     if (!canvasRef.current || rendererRef.current) {
       return;
     }
@@ -1640,6 +1639,21 @@ export function App() {
               <MetadataRow label="Nodes" value={`${project.nodes.length} / ${MAX_SERIAL_NODES}`} />
               <MetadataRow label="Path" value={state.projectPath ?? "Unsaved"} />
             </dl>
+          </section>
+
+          <section className="side-card">
+            <div className="panel-title">Review</div>
+            <ReviewWorkflowPanel
+              currentFrame={playback.currentFrame}
+              galleryStills={galleryStills}
+              project={project}
+              timecode={timecode}
+            />
+          </section>
+
+          <section className="side-card">
+            <div className="panel-title">Commercial</div>
+            <CommercialReadinessPanel />
           </section>
 
           <section className="side-card side-card-export">
@@ -2923,7 +2937,8 @@ function WindowOverlay({
       return;
     }
 
-    const point = readSvgPoint(event);
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const point = readSvgPoint(event.clientX, event.clientY, bounds);
     const initial = interaction.initialWindow;
     if (interaction.mode === "move") {
       onUpdateWindow(interaction.shape, (window) => ({
@@ -3019,7 +3034,7 @@ function WindowOverlayShape({
   sourceRect: SourceRect;
   window: PowerWindow;
 }) {
-  const geometry = getWindowGeometry(window, sourceRect);
+  const geometry = getWindowGeometry(window.centerX, window.centerY, window.width, window.height, sourceRect);
   const rotate = `rotate(${window.rotationDegrees} ${geometry.center.x} ${geometry.center.y})`;
   const resizePoint = rotatePixelPoint({ x: geometry.width / 2, y: geometry.height / 2 }, window.rotationDegrees);
   const rotationPoint = rotatePixelPoint({ x: 0, y: -geometry.height / 2 - 28 }, window.rotationDegrees);
@@ -3129,42 +3144,6 @@ function MetadataRow({ label, value }: { label: string; value: string }) {
     <div>
       <dt>{label}</dt>
       <dd title={value}>{value}</dd>
-    </div>
-  );
-}
-
-function ExportSummary({ result }: { result: ExportJobResult }) {
-  return (
-    <dl className="metadata-table">
-      <MetadataRow label="Codec" value={result.codec} />
-      <MetadataRow label="Raster" value={`${result.width} x ${result.height}`} />
-      <MetadataRow label="Frames" value={String(result.frameCount)} />
-      <MetadataRow label="Audio" value={result.hasAudio ? "Present" : "None"} />
-      <MetadataRow label="Path" value={result.outputPath} />
-    </dl>
-  );
-}
-
-function ExportProgressPanel({
-  onCancel,
-  progress
-}: {
-  onCancel: () => void;
-  progress: ExportProgress;
-}) {
-  const elapsedSeconds = Math.max(0, progress.elapsedMs / 1000);
-  return (
-    <div className="export-progress" role="status" aria-live="polite">
-      <div className="export-progress-header">
-        <span className={`tracking-state tracking-state-${progress.state}`}>{progress.state}</span>
-        <span>{progress.percent.toFixed(1)}%</span>
-      </div>
-      <progress value={progress.percent} max="100" />
-      <p>{progress.currentFrame} / {progress.totalFrames} frames, {elapsedSeconds.toFixed(1)}s elapsed.</p>
-      <p title={progress.outputPath}>{progress.message}</p>
-      <button type="button" onClick={onCancel} disabled={progress.state !== "pending" && progress.state !== "running"}>
-        Cancel
-      </button>
     </div>
   );
 }
@@ -3335,92 +3314,10 @@ function formatControlValue(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(2);
 }
 
-interface SourceRect {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-}
-
-interface PixelPoint {
-  x: number;
-  y: number;
-}
-
 interface WindowInteraction {
   mode: "move" | "resize" | "rotate";
   shape: PowerWindowShape;
   initialWindow: PowerWindow;
-}
-
-function getContainedRect(containerWidth: number, containerHeight: number, sourceWidth: number, sourceHeight: number): SourceRect {
-  if (containerWidth <= 0 || containerHeight <= 0 || sourceWidth <= 0 || sourceHeight <= 0) {
-    return { left: 0, top: 0, width: 0, height: 0 };
-  }
-
-  const containerAspect = containerWidth / containerHeight;
-  const sourceAspect = sourceWidth / sourceHeight;
-  if (containerAspect > sourceAspect) {
-    const width = containerHeight * sourceAspect;
-    return {
-      left: (containerWidth - width) / 2,
-      top: 0,
-      width,
-      height: containerHeight
-    };
-  }
-
-  const height = containerWidth / sourceAspect;
-  return {
-    left: 0,
-    top: (containerHeight - height) / 2,
-    width: containerWidth,
-    height
-  };
-}
-
-function readSvgPoint(event: ReactPointerEvent<SVGSVGElement>): PixelPoint {
-  const rect = event.currentTarget.getBoundingClientRect();
-
-  return {
-    x: event.clientX - rect.left,
-    y: event.clientY - rect.top
-  };
-}
-
-function getWindowGeometry(window: PowerWindow, sourceRect: SourceRect): {
-  center: PixelPoint;
-  width: number;
-  height: number;
-} {
-  return {
-    center: {
-      x: window.centerX * sourceRect.width,
-      y: window.centerY * sourceRect.height
-    },
-    width: window.width * sourceRect.width,
-    height: window.height * sourceRect.height
-  };
-}
-
-function rotatePixelPoint(point: PixelPoint, degrees: number): PixelPoint {
-  const radians = degrees * Math.PI / 180;
-  const sin = Math.sin(radians);
-  const cos = Math.cos(radians);
-
-  return {
-    x: point.x * cos - point.y * sin,
-    y: point.x * sin + point.y * cos
-  };
-}
-
-function normalizeSignedDegrees(value: number): number {
-  const degrees = ((value + 180) % 360 + 360) % 360 - 180;
-  return degrees === -180 ? 180 : degrees;
-}
-
-function clamp01(value: number): number {
-  return Math.min(1, Math.max(0, value));
 }
 
 function rgbToHslForQualifier(r: number, g: number, b: number): { h: number; s: number; l: number } {

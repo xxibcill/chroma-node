@@ -4,6 +4,7 @@ export type IpcContractVersion = typeof IPC_CONTRACT_VERSION;
 
 import type { LibraryItem, LibraryItemType } from "./library.js";
 import type { PackDuplicateStrategy, PackImportResult } from "./pack.js";
+import { getDisplaySize as getSharedDisplaySize } from "./mediaGeometry.js";
 export type { LibraryItem, LibraryItemType, PackImportResult, PackDuplicateStrategy };
 
 export const IpcChannel = {
@@ -41,17 +42,21 @@ export const IpcChannel = {
   VersionSwitch: "review:version-switch",
   VersionDelete: "review:version-delete",
   VersionUpdate: "review:version-update",
+  VersionSnapshotCurrent: "review:version-snapshot-current",
+  VersionSetStatus: "review:version-set-status",
   AnnotationCreate: "review:annotation-create",
   AnnotationUpdate: "review:annotation-update",
   AnnotationDelete: "review:annotation-delete",
   AnnotationList: "review:annotation-list",
   ReviewPackageExport: "review:package-export",
   ReviewPackageImport: "review:package-import",
+  ReviewPackageValidate: "review:package-validate",
   FeedbackImport: "review:feedback-import",
   FeedbackResolve: "review:feedback-resolve",
   HandoffExport: "review:handoff-export",
   HandoffImport: "review:handoff-import",
   HandoffValidate: "review:handoff-validate",
+  HandoffEstimate: "review:handoff-estimate",
   // Phase 22: Licensing and Entitlements
   LicenseValidate: "license:validate",
   LicenseCheckFeature: "license:check-feature",
@@ -198,10 +203,11 @@ export interface MediaRef {
 export { normalizeRotation } from "./mediaGeometry.js";
 
 export function getDisplaySize(media: { width: number; height: number; rotation: number }): { displayWidth: number; displayHeight: number } {
-  const rotated = media.rotation === 90 || media.rotation === 270;
-  return rotated
-    ? { displayWidth: media.height, displayHeight: media.width }
-    : { displayWidth: media.width, displayHeight: media.height };
+  const displaySize = getSharedDisplaySize(media.width, media.height, media.rotation);
+  return {
+    displayWidth: displaySize.width,
+    displayHeight: displaySize.height
+  };
 }
 
 export interface FrameExtractRequest {
@@ -408,7 +414,7 @@ export interface InstalledPack {
 }
 
 // Phase 21: Review and Collaboration IPC types
-import type { Annotation, AnnotationStatus, ApprovalEntry, FeedbackFile, FeedbackNote, GradeVersion, HandoffPackageManifest, ReviewPackageManifest, ReviewPackageType, ReviewStatus } from "./project.js";
+import type { Annotation, AnnotationStatus, ApprovalEntry, FeedbackFile, FeedbackNote, GradeVersion, HandoffPackageManifest, ReviewPackageManifest, ReviewPackageType, ReviewStatus, ReviewStillRef, ScopeSnapshotRef } from "./project.js";
 
 export type { Annotation, AnnotationStatus, ApprovalEntry, FeedbackFile, FeedbackNote, GradeVersion, HandoffPackageManifest, ReviewPackageManifest, ReviewPackageType, ReviewStatus };
 
@@ -436,6 +442,17 @@ export interface VersionSwitchRequest {
 export interface VersionListResult {
   versions: GradeVersion[];
   activeVersionId?: string;
+}
+
+export interface VersionSnapshotCurrentRequest {
+  versionId: string;
+}
+
+export interface VersionSetStatusRequest {
+  versionId: string;
+  status: ReviewStatus;
+  reviewerLabel?: string;
+  comment?: string;
 }
 
 export interface AnnotationCreateRequest {
@@ -467,6 +484,8 @@ export interface ReviewPackageExportRequest {
   versionIds: string[];
   stillIds: string[];
   scopeSnapshotIds: string[];
+  stills?: ReviewStillRef[];
+  scopeSnapshots?: ScopeSnapshotRef[];
   packageType: ReviewPackageType;
   packageName: string;
   includeMedia: boolean;
@@ -482,9 +501,23 @@ export interface ReviewPackageValidateRequest {
   packagePath: string;
 }
 
+export interface ReviewPackageValidateResult {
+  valid: boolean;
+  error?: string;
+}
+
 export interface FeedbackImportRequest {
   feedbackPath: string;
   duplicateStrategy?: "skip" | "replace" | "rename";
+}
+
+export interface FeedbackImportResult {
+  feedbackFile: FeedbackFile;
+  imported: number;
+  skipped: number;
+  replaced: number;
+  renamed: number;
+  conflicts: Array<{ feedbackNoteId: string; annotationId: string; action: "skipped" | "replaced" | "renamed" }>;
 }
 
 export interface FeedbackResolveRequest {
@@ -509,6 +542,19 @@ export interface HandoffPackageImportRequest {
 
 export interface HandoffPackageValidateRequest {
   packagePath: string;
+}
+
+export interface HandoffPackageEstimateRequest {
+  packageMode: import("./project.js").HandoffPackageMode;
+  includeMedia: boolean;
+  includeCache: boolean;
+  includeExports: boolean;
+  includeLogs: boolean;
+}
+
+export interface HandoffPackageEstimateResult {
+  estimatedBytes: number;
+  missingMedia: string[];
 }
 
 // Phase 22: Licensing and Entitlements
@@ -602,6 +648,8 @@ export interface ChromaNodeApi {
   switchVersion(request: VersionSwitchRequest): Promise<VersionedResponse<GradeVersion>>;
   deleteVersion(request: VersionDeleteRequest): Promise<VersionedResponse<void>>;
   updateVersion(request: VersionUpdateRequest): Promise<VersionedResponse<GradeVersion>>;
+  snapshotCurrentVersion(request: VersionSnapshotCurrentRequest): Promise<VersionedResponse<void>>;
+  setVersionStatus(request: VersionSetStatusRequest): Promise<VersionedResponse<GradeVersion>>;
   // Phase 21: Annotations
   createAnnotation(request: AnnotationCreateRequest): Promise<VersionedResponse<Annotation>>;
   updateAnnotation(request: AnnotationUpdateRequest): Promise<VersionedResponse<Annotation>>;
@@ -610,13 +658,15 @@ export interface ChromaNodeApi {
   // Phase 21: Review Package
   exportReviewPackage(request: ReviewPackageExportRequest): Promise<VersionedResponse<{ path: string; manifest: ReviewPackageManifest }>>;
   importReviewPackage(request: ReviewPackageImportRequest): Promise<VersionedResponse<ReviewPackageManifest>>;
+  validateReviewPackage(request: ReviewPackageValidateRequest): Promise<VersionedResponse<ReviewPackageValidateResult>>;
   // Phase 21: Feedback
-  importFeedback(request: FeedbackImportRequest): Promise<VersionedResponse<FeedbackFile>>;
+  importFeedback(request: FeedbackImportRequest): Promise<VersionedResponse<FeedbackImportResult>>;
   resolveFeedback(request: FeedbackResolveRequest): Promise<VersionedResponse<void>>;
   // Phase 21: Handoff
   exportHandoffPackage(request: HandoffPackageExportRequest): Promise<VersionedResponse<{ path: string; manifest: HandoffPackageManifest }>>;
   importHandoffPackage(request: HandoffPackageImportRequest): Promise<VersionedResponse<void>>;
   validateHandoffPackage(request: HandoffPackageValidateRequest): Promise<VersionedResponse<HandoffPackageManifest>>;
+  estimateHandoffPackage(request: HandoffPackageEstimateRequest): Promise<VersionedResponse<HandoffPackageEstimateResult>>;
   // Phase 22: Licensing
   validateLicense(): Promise<VersionedResponse<LicenseValidationResult>>;
   checkFeatureEntitlement(feature: keyof EntitlementFlags): Promise<VersionedResponse<EntitlementCheckResult>>;

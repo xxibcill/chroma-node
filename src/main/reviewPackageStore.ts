@@ -1,18 +1,18 @@
 import { app, dialog } from "electron";
 import { existsSync } from "fs";
-import { readFile, writeFile, mkdir } from "fs/promises";
+import { copyFile, readFile, writeFile, mkdir } from "fs/promises";
 import path from "path";
 import type {
   ReviewPackageManifest,
   ReviewPackageType,
   ReviewVersionRef,
   ReviewStillRef,
+  ScopeSnapshotRef,
   ReviewApprovalSummary,
   Annotation
 } from "../shared/project.js";
 import { REVIEW_PACKAGE_SCHEMA_VERSION } from "../shared/project.js";
 import { getCurrentProject, updateProject } from "./projectFile.js";
-import { getAnnotationsByFrame } from "./annotationStore.js";
 
 function getReviewPackageDir(): string {
   return path.join(app.getPath("userData"), "review-packages");
@@ -48,6 +48,8 @@ export async function exportReviewPackage(request: {
   versionIds: string[];
   stillIds: string[];
   scopeSnapshotIds: string[];
+  stills?: ReviewStillRef[];
+  scopeSnapshots?: ScopeSnapshotRef[];
   packageType: ReviewPackageType;
   packageName: string;
   includeMedia: boolean;
@@ -87,13 +89,18 @@ export async function exportReviewPackage(request: {
     }
   }
 
-  const annotations: Annotation[] = [];
-  for (const versionId of request.versionIds) {
-    const versionAnnotations = await getAnnotationsByFrame(0, versionId);
-    annotations.push(...versionAnnotations);
-  }
+  const requestedVersionIds = new Set(request.versionIds);
+  const annotations: Annotation[] = (project.annotations ?? [])
+    .filter((annotation) => !annotation.versionId || requestedVersionIds.has(annotation.versionId))
+    .sort((a, b) => a.frameIndex - b.frameIndex || a.createdAt - b.createdAt);
 
-  const stills: ReviewStillRef[] = [];
+  const requestedStillIds = new Set(request.stillIds);
+  const stills: ReviewStillRef[] = (request.stills ?? [])
+    .filter((still) => requestedStillIds.size === 0 || requestedStillIds.has(still.stillId));
+
+  const requestedScopeSnapshotIds = new Set(request.scopeSnapshotIds);
+  const scopeSnapshots: ScopeSnapshotRef[] = (request.scopeSnapshots ?? [])
+    .filter((snapshot) => requestedScopeSnapshotIds.size === 0 || requestedScopeSnapshotIds.has(snapshot.id));
 
   const baseManifest: Omit<ReviewPackageManifest, "manifestChecksum"> = {
     schemaVersion: REVIEW_PACKAGE_SCHEMA_VERSION,
@@ -106,7 +113,7 @@ export async function exportReviewPackage(request: {
     versions,
     annotations,
     stills,
-    scopeSnapshots: [],
+    scopeSnapshots,
     approvalSummary,
     includesMedia: request.includeMedia,
     redacted: request.redactPaths
@@ -137,12 +144,30 @@ export async function exportReviewPackage(request: {
     content._redacted = true;
   }
 
+  if (request.includeMedia && project.media) {
+    content.media = {
+      fileName: project.media.fileName,
+      codec: project.media.codec,
+      width: project.media.width,
+      height: project.media.height,
+      durationSeconds: project.media.durationSeconds,
+      sourcePath: request.redactPaths ? "[REDACTED]" : project.media.sourcePath
+    };
+
+    if (existsSync(project.media.sourcePath)) {
+      const mediaFileName = path.basename(project.media.sourcePath);
+      const mediaPath = path.join(path.dirname(packagePath), `review_media_${mediaFileName}`);
+      await copyFile(project.media.sourcePath, mediaPath);
+      content.mediaPath = request.redactPaths ? path.basename(mediaPath) : mediaPath;
+    }
+  }
+
   await writeFile(packagePath, JSON.stringify(content, null, 2), "utf8");
 
   return { path: packagePath, manifest };
 }
 
-export async function importReviewPackage(request: { packagePath: string }): Promise<ReviewPackageManifest> {
+export async function importReviewPackage(request: { packagePath: string; duplicateStrategy?: "skip" | "replace" }): Promise<ReviewPackageManifest> {
   let data: string;
   try {
     data = await readFile(request.packagePath, "utf8");
@@ -170,6 +195,7 @@ export async function importReviewPackage(request: { packagePath: string }): Pro
 
   const project = getCurrentProject();
   if (project) {
+    const duplicateStrategy = request.duplicateStrategy ?? "skip";
     const gradeVersions = project.gradeVersions ?? [];
     for (const versionRef of manifest.versions) {
       const existingVersion = gradeVersions.find(v => v.id === versionRef.versionId);
@@ -181,17 +207,26 @@ export async function importReviewPackage(request: { packagePath: string }): Pro
           createdAt: Date.now(),
           updatedAt: Date.now(),
           sourceRecipe: false,
-          nodes: versionRef.nodes,
+          nodes: cloneJson(versionRef.nodes),
           stillRefs: [],
           approvalChain: []
         });
+      } else if (duplicateStrategy === "replace") {
+        existingVersion.name = versionRef.versionName;
+        existingVersion.status = versionRef.status;
+        existingVersion.nodes = cloneJson(versionRef.nodes);
+        existingVersion.sourceRecipe = false;
+        existingVersion.updatedAt = Date.now();
       }
     }
 
     const annotations = project.annotations ?? [];
     for (const annotation of manifest.annotations) {
-      if (!annotations.find(a => a.id === annotation.id)) {
+      const existingIndex = annotations.findIndex(a => a.id === annotation.id);
+      if (existingIndex === -1) {
         annotations.push(annotation);
+      } else if (duplicateStrategy === "replace") {
+        annotations[existingIndex] = cloneJson(annotation);
       }
     }
 
@@ -223,4 +258,8 @@ export async function validateReviewPackage(packagePath: string): Promise<{ vali
   } catch (error) {
     return { valid: false, error: String(error) };
   }
+}
+
+function cloneJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
 }

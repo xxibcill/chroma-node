@@ -85,7 +85,7 @@ export async function setConsent(consent: TelemetryConsent): Promise<TelemetryCo
   };
   await saveConsent(newState);
 
-  if (consent === "granted") {
+  if (consent === "granted" && config.enabled) {
     startFlushTimer();
   } else {
     stopFlushTimer();
@@ -126,6 +126,10 @@ async function saveQueue(): Promise<void> {
 }
 
 export async function enqueueEvent(event: TelemetryEvent): Promise<void> {
+  if (!config.enabled) {
+    return;
+  }
+
   const consent = await loadConsent();
   if (consent.consent !== "granted") {
     return;
@@ -148,10 +152,16 @@ export async function enqueueEvent(event: TelemetryEvent): Promise<void> {
 }
 
 export async function flushQueue(): Promise<{ sent: number; failed: number }> {
+  if (!config.enabled) {
+    return { sent: 0, failed: 0 };
+  }
+
   const consent = await loadConsent();
   if (consent.consent !== "granted") {
     return { sent: 0, failed: 0 };
   }
+
+  await loadQueue();
 
   if (eventQueue.length === 0) {
     return { sent: 0, failed: 0 };
@@ -168,6 +178,7 @@ export async function flushQueue(): Promise<{ sent: number; failed: number }> {
       }
       sent++;
     } catch {
+      failed++;
       if (entry.retryCount < config.maxRetries) {
         entry.retryCount++;
         remaining.push(entry);
@@ -230,6 +241,12 @@ export async function getConsent(): Promise<TelemetryConsentState> {
 
 export async function configureTelemetry(newConfig: Partial<TelemetryConfig>): Promise<void> {
   config = { ...config, ...newConfig };
+  const consent = await loadConsent();
+  if (config.enabled && consent.consent === "granted") {
+    startFlushTimer();
+  } else {
+    stopFlushTimer();
+  }
 }
 
 export function getConfig(): TelemetryConfig {

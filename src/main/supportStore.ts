@@ -1,6 +1,6 @@
 import { app } from "electron";
 import { existsSync } from "fs";
-import { writeFile, mkdir } from "fs/promises";
+import { readdir, readFile, writeFile, mkdir } from "fs/promises";
 import path from "path";
 import {
   type CrashReport,
@@ -10,7 +10,8 @@ import {
   type FeedbackSubmissionResult,
   createCrashReport,
   createDiagnosticEntry,
-  SUPPORT_SCHEMA_VERSION
+  SUPPORT_SCHEMA_VERSION,
+  redactSensitivePath
 } from "../shared/support.js";
 import { getFfmpegDiagnostics } from "./ffmpeg.js";
 import { getCurrentProject } from "./projectFile.js";
@@ -158,7 +159,7 @@ export async function createSupportBundle(request: {
   }
 
   if (request.includeLogs) {
-    manifest.logs = ["Log collection not yet implemented"];
+    manifest.logs = await collectApplicationLogs(request.redactPaths ?? true);
     includes.push("logs");
   }
 
@@ -169,6 +170,32 @@ export async function createSupportBundle(request: {
     path: bundleDir,
     manifest
   };
+}
+
+async function collectApplicationLogs(redactPaths: boolean): Promise<string[]> {
+  const logDir = app.getPath("logs");
+  if (!existsSync(logDir)) {
+    return ["No application log directory was found."];
+  }
+
+  const entries = await readdir(logDir, { withFileTypes: true });
+  const logFiles = entries
+    .filter((entry) => entry.isFile() && /\.(log|txt)$/i.test(entry.name))
+    .slice(0, 5);
+
+  if (logFiles.length === 0) {
+    return ["No application log files were found."];
+  }
+
+  const logs: string[] = [];
+  for (const file of logFiles) {
+    const filePath = path.join(logDir, file.name);
+    const content = await readFile(filePath, "utf8").catch(() => "");
+    const boundedContent = content.slice(-32_000);
+    logs.push(`${file.name}\n${redactPaths ? redactSensitivePath(boundedContent) : boundedContent}`);
+  }
+
+  return logs;
 }
 
 export async function submitFeedback(request: FeedbackSubmission): Promise<FeedbackSubmissionResult> {

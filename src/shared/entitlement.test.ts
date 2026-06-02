@@ -127,5 +127,18 @@ describe("entitlement module", () => {
       const result = checkEntitlement(state, "proGrading");
       expect(result.allowed).toBe(true);
     });
+
+    it("denies deactivated licenses even when stale offline grace exists", () => {
+      const state: EntitlementState = {
+        ...createTrialEntitlementState(),
+        status: "deactivated",
+        offlineGraceExpiresAt: Date.now() + OFFLINE_GRACE_PERIOD_MS
+      };
+
+      const result = checkEntitlement(state, "proGrading");
+
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain("deactivated");
+    });
   });
 });

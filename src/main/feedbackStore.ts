@@ -1,5 +1,7 @@
 import { readFile } from "fs/promises";
 import { validateFeedbackFile, createFeedbackFile, type FeedbackFile, type FeedbackNote } from "../shared/feedbackFile.js";
+import type { FeedbackImportRequest, FeedbackImportResult } from "../shared/ipc.js";
+import type { Annotation, AnnotationStatus } from "../shared/project.js";
 import { getCurrentProject, updateProject } from "./projectFile.js";
 
 export async function importFeedback(request: { feedbackPath: string }): Promise<FeedbackFile> {
@@ -25,7 +27,10 @@ export async function importFeedback(request: { feedbackPath: string }): Promise
   return validation.feedbackFile;
 }
 
-export async function importFeedbackToAnnotations(feedbackFile: FeedbackFile): Promise<number> {
+export async function importFeedbackToAnnotations(
+  feedbackFile: FeedbackFile,
+  duplicateStrategy: NonNullable<FeedbackImportRequest["duplicateStrategy"]> = "skip"
+): Promise<FeedbackImportResult> {
   const project = getCurrentProject();
   if (!project) {
     throw new Error("No project is currently open");
@@ -33,31 +38,59 @@ export async function importFeedbackToAnnotations(feedbackFile: FeedbackFile): P
 
   const annotations = project.annotations ?? [];
   let imported = 0;
+  let skipped = 0;
+  let replaced = 0;
+  let renamed = 0;
+  const conflicts: FeedbackImportResult["conflicts"] = [];
 
   for (const note of feedbackFile.notes) {
-    const annotation = {
-      id: `fb-${note.id}`,
-      frameIndex: note.frameIndex ?? 0,
-      timecode: note.timecode ?? "",
-      text: `[${feedbackFile.reviewerLabel ?? "Reviewer"}] ${note.text}`,
-      status: note.status as import("../shared/project.js").AnnotationStatus,
-      versionId: feedbackFile.versionId,
-      createdAt: feedbackFile.createdAt,
-      updatedAt: Date.now(),
-      authorLabel: feedbackFile.reviewerLabel
-    };
+    const annotation = createAnnotationFromFeedback(feedbackFile, note);
 
     const existingIndex = annotations.findIndex(a => a.id === annotation.id);
     if (existingIndex === -1) {
-      annotations.push(annotation as import("../shared/project.js").Annotation);
+      annotations.push(annotation);
       imported++;
+      continue;
     }
+
+    if (duplicateStrategy === "replace") {
+      annotations[existingIndex] = {
+        ...annotation,
+        createdAt: annotations[existingIndex].createdAt,
+        updatedAt: Date.now()
+      };
+      replaced++;
+      conflicts.push({ feedbackNoteId: note.id, annotationId: annotation.id, action: "replaced" });
+      continue;
+    }
+
+    if (duplicateStrategy === "rename") {
+      const renamedAnnotation = {
+        ...annotation,
+        id: createRenamedAnnotationId(annotation.id, annotations)
+      };
+      annotations.push(renamedAnnotation);
+      imported++;
+      renamed++;
+      conflicts.push({ feedbackNoteId: note.id, annotationId: renamedAnnotation.id, action: "renamed" });
+      continue;
+    }
+
+    skipped++;
+    conflicts.push({ feedbackNoteId: note.id, annotationId: annotation.id, action: "skipped" });
   }
 
   project.annotations = annotations;
   await updateProject(project);
 
-  return imported;
+  return {
+    feedbackFile,
+    imported,
+    skipped,
+    replaced,
+    renamed,
+    conflicts
+  };
 }
 
 export async function resolveFeedback(request: { feedbackNoteId: string; resolved: boolean; resolvedBy?: string }): Promise<void> {
@@ -102,4 +135,29 @@ export async function exportAnnotationsToFeedback(reviewerLabel?: string): Promi
     reviewerLabel,
     notes
   });
+}
+
+function createAnnotationFromFeedback(feedbackFile: FeedbackFile, note: FeedbackNote): Annotation {
+  return {
+    id: `fb-${note.id}`,
+    frameIndex: note.frameIndex ?? 0,
+    timecode: note.timecode ?? "",
+    text: `[${feedbackFile.reviewerLabel ?? "Reviewer"}] ${note.text}`,
+    status: note.status as AnnotationStatus,
+    versionId: feedbackFile.versionId,
+    createdAt: feedbackFile.createdAt,
+    updatedAt: Date.now(),
+    authorLabel: feedbackFile.reviewerLabel
+  };
+}
+
+function createRenamedAnnotationId(baseId: string, annotations: Annotation[]): string {
+  const existingIds = new Set(annotations.map((annotation) => annotation.id));
+  let suffix = 2;
+  let candidate = `${baseId}-${suffix}`;
+  while (existingIds.has(candidate)) {
+    suffix += 1;
+    candidate = `${baseId}-${suffix}`;
+  }
+  return candidate;
 }
