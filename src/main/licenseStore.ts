@@ -15,7 +15,8 @@ import {
   OFFLINE_GRACE_PERIOD_MS,
   DEFAULT_ENTITLEMENT_FLAGS,
   PAID_ENTITLEMENT_FLAGS,
-  PRO_ENTITLEMENT_FLAGS
+  PRO_ENTITLEMENT_FLAGS,
+  checkExportEntitlement
 } from "../shared/entitlement.js";
 
 const LICENSE_FILE = "entitlement.json";
@@ -198,14 +199,9 @@ export async function assertExportAllowed(width: number, height: number): Promis
   const state = validation.state;
   state.usage = normalizeUsage(state.usage);
 
-  const maxExports = state.entitlements.maxExportsPerMonth;
-  if (maxExports !== -1 && state.usage.exportsThisMonth >= maxExports) {
-    throw new Error(`Monthly export limit reached for ${state.tier}.`);
-  }
-
-  const requiredResolution = requiredResolutionFlag(width, height);
-  if (!state.entitlements.exportResolutions.includes(requiredResolution)) {
-    throw new Error(`${requiredResolution.toUpperCase()} export is not available on ${state.tier}.`);
+  const entitlement = checkExportEntitlement(state, width, height);
+  if (!entitlement.allowed) {
+    throw new Error(entitlement.reason ?? "Export is not available on your current tier.");
   }
 }
 
@@ -273,18 +269,4 @@ function getCurrentUsage(): EntitlementState["usage"] {
     monthKey: new Date().toISOString().slice(0, 7),
     exportsThisMonth: 0
   };
-}
-
-function requiredResolutionFlag(width: number, height: number): "720p" | "1080p" | "4k" | "hdr" {
-  const longEdge = Math.max(width, height);
-  if (longEdge > 3840) {
-    return "hdr";
-  }
-  if (longEdge > 1920) {
-    return "4k";
-  }
-  if (longEdge > 1280) {
-    return "1080p";
-  }
-  return "720p";
 }

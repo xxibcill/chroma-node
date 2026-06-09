@@ -48,13 +48,14 @@ Evidence:
 - `src/main/telemetryStore.ts` persists consent and queue data, enforces consent before enqueueing, redacts payloads, supports flush/retry/delete, and exposes queue size.
 - IPC and preload contracts expose get/set consent, track, flush, delete all, and queue size operations.
 - Export, license, and launch experiment flows emit telemetry events through the consent-gated telemetry store.
-- `src/main/telemetryStore.test.ts` covers disabled-mode and redaction behavior.
+- Telemetry can flush to a configured HTTP endpoint or local JSONL export path.
+- `src/main/telemetryStore.test.ts` covers disabled-mode, redaction, local export, and retry behavior.
 - `CommercialReadinessPanel` exposes telemetry consent and flush controls.
 
 Remaining work:
-- No analytics provider or dashboard/export review workflow is configured.
+- No analytics dashboard is configured.
 - Expand event emission coverage beyond export/license/launch flows.
-- Add tests for consent, queue retry, and local deletion behavior.
+- Add tests for local deletion behavior and broader consent transitions.
 
 ## Blockers
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Annotation, ChromaProject, GradeVersion, ReviewStatus, ReviewStillRef } from "../../shared/project";
+import type { Annotation, AnnotationStatus, ChromaProject, GradeVersion, ReviewStatus, ReviewStillRef } from "../../shared/project";
 import type { FeedbackImportResult, HandoffPackageEstimateResult } from "../../shared/ipc";
 
 interface GalleryStill {
@@ -12,6 +12,7 @@ interface GalleryStill {
 interface ReviewWorkflowPanelProps {
   currentFrame: number;
   galleryStills: GalleryStill[];
+  onAnnotationsChange?: (annotations: Annotation[]) => void;
   project: ChromaProject;
   timecode: string;
 }
@@ -21,6 +22,7 @@ const api = window.chromaNode;
 export function ReviewWorkflowPanel({
   currentFrame,
   galleryStills,
+  onAnnotationsChange,
   project,
   timecode
 }: ReviewWorkflowPanelProps) {
@@ -29,6 +31,7 @@ export function ReviewWorkflowPanel({
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [annotationText, setAnnotationText] = useState("");
   const [feedbackPath, setFeedbackPath] = useState("");
+  const [annotationFilter, setAnnotationFilter] = useState<AnnotationStatus | "active" | "all">("active");
   const [handoffEstimate, setHandoffEstimate] = useState<HandoffPackageEstimateResult | undefined>();
   const [feedbackResult, setFeedbackResult] = useState<FeedbackImportResult | undefined>();
   const [message, setMessage] = useState("Review store ready.");
@@ -49,17 +52,30 @@ export function ReviewWorkflowPanel({
     const annotationResponse = await api.listAnnotations({});
     if (annotationResponse.result.ok) {
       setAnnotations(annotationResponse.result.value);
+      onAnnotationsChange?.(annotationResponse.result.value);
     }
-  }, []);
+  }, [onAnnotationsChange]);
 
   useEffect(() => {
     refresh();
   }, [refresh]);
 
   const currentAnnotations = useMemo(
-    () => annotations.filter((annotation) => annotation.frameIndex === currentFrame),
-    [annotations, currentFrame]
+    () => annotations.filter((annotation) => {
+      if (annotation.frameIndex !== currentFrame) return false;
+      if (selectedVersionId && annotation.versionId && annotation.versionId !== selectedVersionId) return false;
+      if (annotationFilter === "all") return true;
+      if (annotationFilter === "active") return annotation.status === "open" || annotation.status === "deferred";
+      return annotation.status === annotationFilter;
+    }),
+    [annotationFilter, annotations, currentFrame, selectedVersionId]
   );
+
+  const annotationCounts = useMemo(() => ({
+    open: annotations.filter((annotation) => annotation.status === "open").length,
+    deferred: annotations.filter((annotation) => annotation.status === "deferred").length,
+    resolved: annotations.filter((annotation) => annotation.status === "resolved").length
+  }), [annotations]);
 
   const createVersion = async () => {
     if (!api) return;
@@ -220,15 +236,34 @@ export function ReviewWorkflowPanel({
         />
         <button type="button" onClick={addAnnotation} disabled={!annotationText.trim()}>Add</button>
       </div>
+      <div className="review-workflow__row">
+        <select
+          value={annotationFilter}
+          onChange={(event) => setAnnotationFilter(event.currentTarget.value as AnnotationStatus | "active" | "all")}
+          aria-label="Annotation filter"
+        >
+          <option value="active">Active</option>
+          <option value="all">All</option>
+          <option value="open">Open</option>
+          <option value="deferred">Deferred</option>
+          <option value="resolved">Resolved</option>
+          <option value="rejected">Rejected</option>
+        </select>
+        <span className="review-workflow__counts">{annotationCounts.open} open / {annotationCounts.deferred} deferred / {annotationCounts.resolved} resolved</span>
+      </div>
       <div className="review-workflow__notes" role="list">
         {currentAnnotations.length === 0 ? (
           <p className="muted">No notes on this frame.</p>
         ) : currentAnnotations.slice(0, 3).map((annotation) => (
           <div className="review-note" key={annotation.id} role="listitem">
             <span>{annotation.text}</span>
-            <button type="button" onClick={() => updateAnnotationStatus(annotation.id, annotation.status === "resolved" ? "open" : "resolved")}>
-              {annotation.status === "resolved" ? "Open" : "Resolve"}
-            </button>
+            <div className="review-note__actions">
+              <button type="button" onClick={() => updateAnnotationStatus(annotation.id, annotation.status === "resolved" ? "open" : "resolved")}>
+                {annotation.status === "resolved" ? "Open" : "Resolve"}
+              </button>
+              <button type="button" onClick={() => updateAnnotationStatus(annotation.id, "deferred")}>Defer</button>
+              <button type="button" onClick={() => updateAnnotationStatus(annotation.id, "rejected")}>Reject</button>
+            </div>
           </div>
         ))}
       </div>

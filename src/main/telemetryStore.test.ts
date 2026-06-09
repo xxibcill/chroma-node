@@ -30,13 +30,14 @@ describe("telemetryStore", () => {
   beforeEach(async () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "chroma-telemetry-"));
     electronMock.userDataPath = tempDir;
-    await configureTelemetry({ enabled: false, endpoint: undefined, flushIntervalMs: 60_000, maxQueueSize: 100, maxRetries: 3 });
+    await configureTelemetry({ enabled: false, endpoint: undefined, exportFilePath: undefined, flushIntervalMs: 60_000, maxQueueSize: 100, maxRetries: 3 });
     await setConsent("granted");
     await deleteAllTelemetryData();
   });
 
   afterEach(async () => {
-    await configureTelemetry({ enabled: false, endpoint: undefined });
+    vi.unstubAllGlobals();
+    await configureTelemetry({ enabled: false, endpoint: undefined, exportFilePath: undefined });
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 
@@ -77,6 +78,35 @@ describe("telemetryStore", () => {
 
     expect(result).toEqual({ sent: 1, failed: 0 });
     await expect(getQueueSize()).resolves.toBe(0);
+  });
+
+  it("exports flushed events to a local JSONL sink", async () => {
+    const exportPath = path.join(tempDir, "telemetry", "events.jsonl");
+    await configureTelemetry({ enabled: true, exportFilePath: exportPath });
+    await enqueueEvent(createTelemetryEvent("feature:use", { feature: "review" }));
+
+    const result = await flushQueue();
+
+    expect(result).toEqual({ sent: 1, failed: 0 });
+    const lines = (await fs.readFile(exportPath, "utf8")).trim().split("\n");
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0])).toMatchObject({
+      type: "feature:use",
+      payload: { feature: "review" }
+    });
+  });
+
+  it("keeps failed endpoint sends queued for retry", async () => {
+    await configureTelemetry({ enabled: true, endpoint: "https://telemetry.example.test/events", maxRetries: 3 });
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 503 })));
+    await enqueueEvent(createTelemetryEvent("feature:use", { feature: "export" }));
+
+    const result = await flushQueue();
+
+    expect(result).toEqual({ sent: 0, failed: 1 });
+    const queue = await loadQueue();
+    expect(queue).toHaveLength(1);
+    expect(queue[0].retryCount).toBe(1);
   });
 });
 

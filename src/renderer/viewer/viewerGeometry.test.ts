@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   clamp01,
   getContainedRect,
+  getAnnotationOverlayGeometry,
   getWindowGeometry,
   normalizeSignedDegrees,
   readSvgPoint,
@@ -53,5 +54,25 @@ describe("viewerGeometry", () => {
     expect(clamp01(-0.1)).toBe(0);
     expect(clamp01(0.4)).toBe(0.4);
     expect(clamp01(1.1)).toBe(1);
+  });
+
+  it("converts normalized annotation geometry to viewer pixels", () => {
+    expect(getAnnotationOverlayGeometry({
+      type: "rectangle",
+      x: 0.25,
+      y: 0.75,
+      width: 0.2,
+      height: 0.1,
+      color: "#efcf95"
+    }, {
+      left: 0,
+      top: 0,
+      width: 800,
+      height: 600
+    })).toEqual({
+      center: { x: 200, y: 450 },
+      width: 160,
+      height: 60
+    });
   });
 });

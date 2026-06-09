@@ -5,6 +5,8 @@ import {
   isExpired,
   isOfflineGraceActive,
   checkEntitlement,
+  checkExportEntitlement,
+  getRequiredExportResolution,
   ENTITLEMENT_SCHEMA_VERSION,
   DEFAULT_ENTITLEMENT_FLAGS,
   TRIAL_ENTITLEMENT_FLAGS,
@@ -139,6 +141,46 @@ describe("entitlement module", () => {
 
       expect(result.allowed).toBe(false);
       expect(result.reason).toContain("deactivated");
+    });
+  });
+
+  describe("checkExportEntitlement", () => {
+    it("allows free tier 1080p exports within the monthly limit", () => {
+      const state = createDefaultEntitlementState();
+
+      const result = checkExportEntitlement(state, 1920, 1080);
+
+      expect(result.allowed).toBe(true);
+      expect(result.requiredResolution).toBe("1080p");
+    });
+
+    it("denies free tier 4k exports", () => {
+      const state = createDefaultEntitlementState();
+
+      const result = checkExportEntitlement(state, 3840, 2160);
+
+      expect(result.allowed).toBe(false);
+      expect(result.requiredResolution).toBe("4k");
+      expect(result.reason).toContain("4K export is not available");
+    });
+
+    it("denies exports when monthly usage is exhausted", () => {
+      const state = createDefaultEntitlementState();
+      state.usage.exportsThisMonth = state.entitlements.maxExportsPerMonth;
+
+      const result = checkExportEntitlement(state, 1280, 720);
+
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain("Monthly export limit reached");
+    });
+  });
+
+  describe("getRequiredExportResolution", () => {
+    it("classifies export resolution by long edge", () => {
+      expect(getRequiredExportResolution(1280, 720)).toBe("720p");
+      expect(getRequiredExportResolution(1920, 1080)).toBe("1080p");
+      expect(getRequiredExportResolution(3840, 2160)).toBe("4k");
+      expect(getRequiredExportResolution(4096, 2160)).toBe("hdr");
     });
   });
 });

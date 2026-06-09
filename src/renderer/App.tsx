@@ -16,8 +16,10 @@ import {
   invalidateTrackingForWindow,
   resolveTrackedNode
 } from "../shared/colorEngine";
-import type { ChromaProject, ExportCodec, ViewerMode, AudioBehavior, WorkflowPreset } from "../shared/project";
+import type { Annotation, ChromaProject, ExportCodec, ViewerMode, AudioBehavior, WorkflowPreset } from "../shared/project";
 import { applyWorkflowPreset, createDefaultProject, sanitizeProject } from "../shared/project";
+import { checkExportEntitlement } from "../shared/entitlement";
+import { computeExportGeometry } from "../shared/exportGeometry";
 import {
   createGradedScopeFrame,
   createVectorscopeGuides,
@@ -48,6 +50,7 @@ import {
   getContainedRect,
   getWindowGeometry,
   normalizeSignedDegrees,
+  getAnnotationOverlayGeometry,
   readSvgPoint,
   rotatePixelPoint,
   type SourceRect
@@ -63,6 +66,7 @@ import {
   type RgbFrame
 } from "../shared/aiGrading";
 import { AiPanel } from "./components/AiPanel";
+import { CompositionGridPage } from "./components/CompositionGridPage";
 
 type Status = "idle" | "busy" | "ready" | "error";
 type RgbPrimaryKey = "lift" | "gamma" | "gain" | "offset";
@@ -158,9 +162,10 @@ export function App() {
   const [compareStillId, setCompareStillId] = useState<string | null>(null);
   const [commandSearchOpen, setCommandSearchOpen] = useState(false);
   const [commandSearchQuery, setCommandSearchQuery] = useState("");
-  const [workspacePreset, setWorkspacePreset] = useState<"grade" | "scopes" | "color" | "compare" | "export" | "debug">("grade");
+  const [workspacePreset, setWorkspacePreset] = useState<"grade" | "scopes" | "color" | "compare" | "export" | "grid" | "debug">("grade");
   const [aiSettings, setAiSettings] = useState<AiSettings>(DEFAULT_AI_SETTINGS);
   const [currentFrameForAi, setCurrentFrameForAi] = useState<RgbFrame | undefined>(undefined);
+  const [reviewAnnotations, setReviewAnnotations] = useState<Annotation[]>([]);
 
   const mediaUrl = useMemo(() => (state.media ? filePathToUrl(state.media.sourcePath) : undefined), [state.media]);
   const proxyIndicator = useMemo(() => {
@@ -192,6 +197,10 @@ export function App() {
       state.media?.displayHeight ?? state.frame?.height ?? 1
     ),
     [state.frame?.height, state.frame?.width, state.media?.displayHeight, state.media?.displayWidth, viewerSize.height, viewerSize.width]
+  );
+  const currentReviewAnnotations = useMemo(
+    () => reviewAnnotations.filter((annotation) => annotation.frameIndex === playback.currentFrame && annotation.status !== "rejected"),
+    [playback.currentFrame, reviewAnnotations]
   );
 
   const diagnosticsLabel = useMemo(() => {
@@ -918,6 +927,50 @@ export function App() {
       return;
     }
 
+    const licenseResponse = await window.chromaNode?.validateLicense();
+    const licenseResult = licenseResponse?.result;
+    if (!licenseResult?.ok) {
+      setState((current) => ({
+        ...current,
+        status: "error",
+        message: licenseResult?.ok === false ? licenseResult.error.message : "License preflight unavailable.",
+        error: licenseResult?.ok === false ? licenseResult.error : {
+          code: "UNKNOWN",
+          message: "License preflight unavailable."
+        }
+      }));
+      return;
+    }
+
+    const validation = licenseResult.value;
+    if (!validation.valid) {
+      setState((current) => ({
+        ...current,
+        status: "error",
+        message: validation.error ?? "Activate or renew your license before exporting.",
+        error: {
+          code: "UNKNOWN",
+          message: validation.error ?? "Activate or renew your license before exporting."
+        }
+      }));
+      return;
+    }
+
+    const exportGeometry = computeExportGeometry(project.exportSettings, state.media);
+    const entitlement = checkExportEntitlement(validation.state, exportGeometry.width, exportGeometry.height);
+    if (!entitlement.allowed) {
+      setState((current) => ({
+        ...current,
+        status: "error",
+        message: entitlement.reason ?? "Export is not available on your current tier.",
+        error: {
+          code: "UNKNOWN",
+          message: entitlement.reason ?? "Export is not available on your current tier."
+        }
+      }));
+      return;
+    }
+
     videoRef.current?.pause();
     rendererRef.current?.setPlaybackActive(false);
     setPlayback((current) => ({ ...current, isPlaying: false }));
@@ -929,7 +982,7 @@ export function App() {
       error: undefined
     }));
     await runExport();
-  }, [isExporting, runExport, state.media]);
+  }, [isExporting, project.exportSettings, runExport, state.media]);
 
   const cancelProjectExport = useCallback(async () => {
     if (!exportOperation) {
@@ -1374,12 +1427,32 @@ export function App() {
     commitProject((current) => ({ ...current, nodes: [...current.nodes, newNode] }));
   }, [activeNode, galleryStills, project.nodes.length, commitProject]);
 
-  const applyAiSuggestion = useCallback((suggestedNodes: ColorNode[]) => {
-    if (suggestedNodes.length === 0) return;
+  const applyAiSuggestion = useCallback(async (suggestedNodes: ColorNode[]) => {
+    if (suggestedNodes.length === 0) return false;
+
+    const entitlementResponse = await window.chromaNode?.checkFeatureEntitlement("aiAssistedGrading");
+    const entitlementResult = entitlementResponse?.result;
+    if (!entitlementResult?.ok || !entitlementResult.value.allowed) {
+      const message = entitlementResult?.ok
+        ? entitlementResult.value.reason ?? "AI-assisted grading is not available on your current tier."
+        : entitlementResult?.ok === false ? entitlementResult.error.message : "AI entitlement check unavailable.";
+      setState((current) => ({
+        ...current,
+        status: "error",
+        message,
+        error: entitlementResult?.ok === false ? entitlementResult.error : {
+          code: "UNKNOWN",
+          message
+        }
+      }));
+      return false;
+    }
+
     commitProject((current) => ({
       ...current,
       nodes: [...current.nodes, ...suggestedNodes].slice(-MAX_SERIAL_NODES)
     }));
+    return true;
   }, [commitProject]);
 
   const setTrackingTarget = useCallback((targetShape: PowerWindowShape) => {
@@ -1615,7 +1688,11 @@ export function App() {
 
   return (
     <main className="app-shell">
-      <section className="workspace" aria-label="Chroma Node workspace">
+      <section className={`workspace ${workspacePreset === "grid" ? "workspace-composition" : ""}`} aria-label="Chroma Node workspace">
+        {workspacePreset === "grid" ? (
+          <CompositionGridPage onBack={() => setWorkspacePreset("grade")} />
+        ) : (
+          <>
         <aside className="inspector" aria-label="Media diagnostics">
           <section className="side-card">
             <div className="panel-title">Media</div>
@@ -1646,6 +1723,7 @@ export function App() {
             <ReviewWorkflowPanel
               currentFrame={playback.currentFrame}
               galleryStills={galleryStills}
+              onAnnotationsChange={setReviewAnnotations}
               project={project}
               timecode={timecode}
             />
@@ -1852,6 +1930,9 @@ export function App() {
                   onUpdateWindow={updatePowerWindow}
                 />
               ) : null}
+              {state.media ? (
+                <AnnotationOverlay annotations={currentReviewAnnotations} sourceRect={viewerSourceRect} />
+              ) : null}
               {!showMatte && playback.viewerMode === "split" ? (
                 <div className="split-rule" style={{ left: `${playback.splitPosition * 100}%` }} />
               ) : null}
@@ -2007,6 +2088,7 @@ export function App() {
               <button type="button" className={workspacePreset === "color" ? "is-active" : ""} onClick={() => setWorkspacePreset("color")}>Color</button>
               <button type="button" className={workspacePreset === "compare" ? "is-active" : ""} onClick={() => setWorkspacePreset("compare")}>Compare</button>
               <button type="button" className={workspacePreset === "export" ? "is-active" : ""} onClick={() => setWorkspacePreset("export")}>Export</button>
+              <button type="button" onClick={() => setWorkspacePreset("grid")}>Grid</button>
             </div>
             <div className="action-row">
               <button type="button" onClick={() => { const prev = undo(); if (prev) { setProject(prev); setSelectedNodeId(prev.nodes[0]?.id ?? selectedNodeId); } }} disabled={!canUndo} title={undoLabel ? `Undo: ${undoLabel}` : "Undo"}>
@@ -2088,6 +2170,8 @@ export function App() {
             copiedNode={copiedNode}
             canUseMedia={canUseMedia}
           />
+          </>
+        )}
       </section>
 
       {commandSearchOpen ? (
@@ -3018,6 +3102,131 @@ function WindowOverlay({
         ))}
       </svg>
     </div>
+  );
+}
+
+function AnnotationOverlay({
+  annotations,
+  sourceRect
+}: {
+  annotations: Annotation[];
+  sourceRect: SourceRect;
+}) {
+  if (sourceRect.width <= 0 || sourceRect.height <= 0 || annotations.length === 0) {
+    return null;
+  }
+
+  return (
+    <div
+      className="annotation-overlay"
+      style={{
+        left: sourceRect.left,
+        top: sourceRect.top,
+        width: sourceRect.width,
+        height: sourceRect.height
+      }}
+    >
+      <svg
+        aria-label="Review annotations"
+        viewBox={`0 0 ${sourceRect.width} ${sourceRect.height}`}
+        preserveAspectRatio="none"
+      >
+        {annotations.map((annotation, index) => (
+          <AnnotationOverlayShape
+            key={annotation.id}
+            annotation={annotation}
+            index={index}
+            sourceRect={sourceRect}
+          />
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+function AnnotationOverlayShape({
+  annotation,
+  index,
+  sourceRect
+}: {
+  annotation: Annotation;
+  index: number;
+  sourceRect: SourceRect;
+}) {
+  const geometry = getAnnotationOverlayGeometry(annotation.geometry, sourceRect);
+  const shape = annotation.geometry?.type ?? "point";
+  const color = annotation.geometry?.color ?? "#efcf95";
+  const label = `${index + 1}`;
+  const className = `annotation-shape annotation-shape-${shape} annotation-status-${annotation.status}`;
+
+  if (shape === "rectangle") {
+    return (
+      <g className={className}>
+        <rect
+          x={geometry.center.x - geometry.width / 2}
+          y={geometry.center.y - geometry.height / 2}
+          width={geometry.width}
+          height={geometry.height}
+          stroke={color}
+        />
+        <AnnotationOverlayLabel x={geometry.center.x} y={geometry.center.y} color={color} label={label} />
+      </g>
+    );
+  }
+
+  if (shape === "ellipse") {
+    return (
+      <g className={className}>
+        <ellipse
+          cx={geometry.center.x}
+          cy={geometry.center.y}
+          rx={geometry.width / 2}
+          ry={geometry.height / 2}
+          stroke={color}
+        />
+        <AnnotationOverlayLabel x={geometry.center.x} y={geometry.center.y} color={color} label={label} />
+      </g>
+    );
+  }
+
+  if (shape === "freehand" && annotation.geometry?.points?.length) {
+    const points = annotation.geometry.points
+      .map((point) => `${clamp01(point.x) * sourceRect.width},${clamp01(point.y) * sourceRect.height}`)
+      .join(" ");
+    return (
+      <g className={className}>
+        <polyline points={points} stroke={color} />
+        <AnnotationOverlayLabel x={geometry.center.x} y={geometry.center.y} color={color} label={label} />
+      </g>
+    );
+  }
+
+  return (
+    <g className={className}>
+      <circle cx={geometry.center.x} cy={geometry.center.y} r="8" stroke={color} />
+      <line x1={geometry.center.x - 14} y1={geometry.center.y} x2={geometry.center.x + 14} y2={geometry.center.y} stroke={color} />
+      <line x1={geometry.center.x} y1={geometry.center.y - 14} x2={geometry.center.x} y2={geometry.center.y + 14} stroke={color} />
+      <AnnotationOverlayLabel x={geometry.center.x} y={geometry.center.y} color={color} label={label} />
+    </g>
+  );
+}
+
+function AnnotationOverlayLabel({
+  color,
+  label,
+  x,
+  y
+}: {
+  color: string;
+  label: string;
+  x: number;
+  y: number;
+}) {
+  return (
+    <>
+      <circle className="annotation-label-bg" cx={x + 16} cy={y - 16} r="9" fill={color} />
+      <text className="annotation-label-text" x={x + 16} y={y - 13}>{label}</text>
+    </>
   );
 }
 

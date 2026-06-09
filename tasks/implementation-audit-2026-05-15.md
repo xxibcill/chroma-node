@@ -68,3 +68,17 @@ Additional implementation reduced several partial gaps:
 - Launch experiment overrides are persisted through `launchStore`.
 
 Remaining work is still not zero: provider-backed licensing/recovery, signing/notarization, update download/apply/rollback, annotation overlay UX, richer handoff restore/relink, broader tests, launch documentation, and full pricing/entitlement coverage remain partial.
+
+## Follow-up Implementation - 2026-06-09
+
+Additional implementation reduced several partial gaps:
+
+- Export geometry calculation moved to `src/shared/exportGeometry.ts`, with main export planning and renderer preflight using the same helper.
+- Renderer export preflight now validates license state and export entitlements before starting an export.
+- AI suggestion application now checks the `aiAssistedGrading` entitlement and leaves suggestions pending when blocked.
+- Review annotations now render as viewer overlays using normalized display coordinates, and the review panel can filter/defer/reject notes.
+- Telemetry flush can write to a local JSONL export sink, with retry behavior covered by tests.
+- Support bundle diagnostics now apply path redaction consistently, with bundle manifest/redaction tests.
+- Launch readiness documentation now covers first-grade flow, pricing gates, telemetry/manual metric review, and troubleshooting.
+
+Remaining work is still not zero: provider-backed licensing/recovery, signing/notarization, update download/apply/rollback, direct viewer annotation drawing, richer handoff restore/relink, marketplace/pro renderer gates, broader telemetry events, and release packaging documentation remain partial.

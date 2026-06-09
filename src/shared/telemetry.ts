@@ -42,6 +42,7 @@ export interface TelemetryQueueEntry {
 export interface TelemetryConfig {
   enabled: boolean;
   endpoint?: string;
+  exportFilePath?: string;
   flushIntervalMs: number;
   maxQueueSize: number;
   maxRetries: number;

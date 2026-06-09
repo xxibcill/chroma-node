@@ -128,7 +128,9 @@ export async function createSupportBundle(request: {
   const bundleDir = path.join(dir, bundleId);
   await mkdir(bundleDir, { recursive: true });
 
-  const diagnostics = await getDiagnostics();
+  const diagnostics = request.redactPaths === false
+    ? await getDiagnostics()
+    : redactDiagnostics(await getDiagnostics());
   const includes: string[] = ["diagnostics"];
   const project = getCurrentProject();
 
@@ -196,6 +198,13 @@ async function collectApplicationLogs(redactPaths: boolean): Promise<string[]> {
   }
 
   return logs;
+}
+
+function redactDiagnostics(diagnostics: DiagnosticEntry[]): DiagnosticEntry[] {
+  return diagnostics.map((entry) => ({
+    ...entry,
+    value: redactSensitivePath(String(entry.value ?? ""))
+  }));
 }
 
 export async function submitFeedback(request: FeedbackSubmission): Promise<FeedbackSubmissionResult> {

@@ -77,6 +77,10 @@ export interface EntitlementCheckResult {
   reason?: string;
 }
 
+export interface ExportEntitlementCheckResult extends EntitlementCheckResult {
+  requiredResolution: ExportResolutionFlag;
+}
+
 export const DEFAULT_ENTITLEMENT_FLAGS: EntitlementFlags = {
   proGrading: false,
   aiAssistedGrading: false,
@@ -221,6 +225,61 @@ export function checkEntitlement(
     currentTier: state.tier,
     reason: `Unable to check entitlement for ${feature}.`
   };
+}
+
+export function checkExportEntitlement(
+  state: EntitlementState,
+  width: number,
+  height: number
+): ExportEntitlementCheckResult {
+  const validation = checkEntitlement(state, "exportResolutions");
+  const requiredResolution = getRequiredExportResolution(width, height);
+  if (!validation.allowed) {
+    return {
+      ...validation,
+      requiredResolution
+    };
+  }
+
+  const usage = state.usage ?? createDefaultUsage();
+  const maxExports = state.entitlements.maxExportsPerMonth;
+  if (maxExports !== -1 && usage.exportsThisMonth >= maxExports) {
+    return {
+      allowed: false,
+      currentTier: state.tier,
+      requiredResolution,
+      reason: `Monthly export limit reached for ${state.tier}.`
+    };
+  }
+
+  if (!state.entitlements.exportResolutions.includes(requiredResolution)) {
+    return {
+      allowed: false,
+      currentTier: state.tier,
+      requiredResolution,
+      reason: `${requiredResolution.toUpperCase()} export is not available on ${state.tier}.`
+    };
+  }
+
+  return {
+    allowed: true,
+    currentTier: state.tier,
+    requiredResolution
+  };
+}
+
+export function getRequiredExportResolution(width: number, height: number): ExportResolutionFlag {
+  const longEdge = Math.max(width, height);
+  if (longEdge > 3840) {
+    return "hdr";
+  }
+  if (longEdge > 1920) {
+    return "4k";
+  }
+  if (longEdge > 1280) {
+    return "1080p";
+  }
+  return "720p";
 }
 
 export function serializeEntitlementState(state: EntitlementState): string {

@@ -10,7 +10,7 @@ import {
 interface AiPanelProps {
   settings: AiSettings;
   onSettingsChange: (settings: AiSettings) => void;
-  onApplySuggestion: (nodes: ColorNode[]) => void;
+  onApplySuggestion: (nodes: ColorNode[]) => boolean | Promise<boolean>;
   currentNodes: readonly ColorNode[];
   currentFrame?: RgbFrame;
 }
@@ -84,8 +84,12 @@ export function AiPanel({
     }
   }, [intentPrompt, currentNodes]);
 
-  const handleAcceptSuggestion = useCallback((suggestion: AiSuggestion) => {
-    onApplySuggestion(suggestion.suggestedNodes);
+  const handleAcceptSuggestion = useCallback(async (suggestion: AiSuggestion) => {
+    const applied = await onApplySuggestion(suggestion.suggestedNodes);
+    if (!applied) {
+      return;
+    }
+
     setReviewState(prev => ({
       pending: prev.pending.filter(s => s.id !== suggestion.id),
       accepted: [...prev.accepted, suggestion],

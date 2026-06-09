@@ -48,12 +48,14 @@ Evidence:
 - Project validation round-trips annotations and defaults invalid annotation status values.
 - IPC and preload contracts expose create, update, delete, and list annotations.
 - `src/main/annotationStore.ts` implements annotation CRUD, filtering, and basic stats.
-- `ReviewWorkflowPanel` can add frame notes and resolve/reopen notes from the renderer.
+- `ReviewWorkflowPanel` can add frame notes, filter by status, and resolve/reopen/defer/reject notes from the renderer.
+- Viewer annotation overlays render point, rectangle, ellipse, and freehand geometry in normalized display coordinates.
+- `src/renderer/viewer/viewerGeometry.test.ts` covers annotation coordinate mapping.
 
 Remaining work:
 - Add dedicated annotation edit/delete/filter controls beyond the compact frame-note list.
-- Annotation overlay rendering and normalized display-coordinate interaction are not wired into the viewer.
-- Add tests for annotation store behavior and coordinate mapping through the actual viewer helpers.
+- Add direct manipulation for placing rectangle/freehand annotations in the viewer.
+- Add annotation store tests beyond project persistence and viewer coordinate mapping.
 
 ## Blockers
 

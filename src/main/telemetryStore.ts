@@ -1,6 +1,6 @@
 import { app } from "electron";
 import { existsSync } from "fs";
-import { readFile, writeFile, mkdir } from "fs/promises";
+import { appendFile, readFile, writeFile, mkdir } from "fs/promises";
 import path from "path";
 import {
   type TelemetryConsent,
@@ -173,9 +173,7 @@ export async function flushQueue(): Promise<{ sent: number; failed: number }> {
 
   for (const entry of eventQueue) {
     try {
-      if (config.endpoint) {
-        await sendToEndpoint(entry.event);
-      }
+      await sendTelemetryEvent(entry.event);
       sent++;
     } catch {
       failed++;
@@ -192,6 +190,16 @@ export async function flushQueue(): Promise<{ sent: number; failed: number }> {
   return { sent, failed };
 }
 
+async function sendTelemetryEvent(event: TelemetryEvent): Promise<void> {
+  if (config.endpoint) {
+    await sendToEndpoint(event);
+  }
+
+  if (config.exportFilePath) {
+    await writeToExportFile(event, config.exportFilePath);
+  }
+}
+
 async function sendToEndpoint(event: TelemetryEvent): Promise<void> {
   if (!config.endpoint) return;
 
@@ -205,6 +213,12 @@ async function sendToEndpoint(event: TelemetryEvent): Promise<void> {
   if (!response.ok) {
     throw new Error(`Telemetry endpoint returned ${response.status}`);
   }
+}
+
+async function writeToExportFile(event: TelemetryEvent, exportFilePath: string): Promise<void> {
+  const resolvedPath = path.resolve(exportFilePath);
+  await mkdir(path.dirname(resolvedPath), { recursive: true });
+  await appendFile(resolvedPath, `${JSON.stringify(event)}\n`, "utf8");
 }
 
 function startFlushTimer(): void {
