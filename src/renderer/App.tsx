@@ -281,6 +281,17 @@ export function App() {
     setProject((current) => sanitizeProject(updater(current)));
   }, [buildProjectSnapshot, pushHistory]);
 
+  const applyProjectFromReview = useCallback((updatedProject: ChromaProject) => {
+    const sanitizedProject = sanitizeProject(updatedProject);
+    setProject(sanitizedProject);
+    setReviewAnnotations(sanitizedProject.annotations ?? []);
+    setSelectedNodeId((currentNodeId) => (
+      sanitizedProject.nodes.some((node) => node.id === currentNodeId)
+        ? currentNodeId
+        : sanitizedProject.nodes[0]?.id ?? currentNodeId
+    ));
+  }, []);
+
   const seekVideoToFrame = useCallback((frameIndex: number, media = state.media) => {
     const video = videoRef.current;
     if (!video || !media) {
@@ -1724,7 +1735,9 @@ export function App() {
               currentFrame={playback.currentFrame}
               galleryStills={galleryStills}
               onAnnotationsChange={setReviewAnnotations}
+              onProjectChange={applyProjectFromReview}
               project={project}
+              projectPath={state.projectPath}
               timecode={timecode}
             />
           </section>

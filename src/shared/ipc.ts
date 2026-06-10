@@ -11,6 +11,8 @@ export const IpcChannel = {
   SelectMedia: "dialog:select-media",
   SaveProject: "project:save",
   OpenProject: "project:open",
+  GetCurrentProject: "project:get-current",
+  SyncCurrentProject: "project:sync-current",
   LoadProgress: "progress:load",
   SaveProgress: "progress:save",
   ResetProgress: "progress:reset",
@@ -301,6 +303,11 @@ export interface SaveProjectRequest {
 
 export interface SaveProjectResult {
   projectPath: string;
+}
+
+export interface SyncCurrentProjectRequest {
+  project: import("./project.js").ChromaProject;
+  projectPath?: string;
 }
 
 export interface OpenProjectResult {
@@ -618,6 +625,8 @@ export interface ChromaNodeApi {
   selectMedia(): Promise<VersionedResponse<SelectMediaResponse>>;
   saveProject(request: SaveProjectRequest): Promise<VersionedResponse<SaveProjectResult>>;
   openProject(): Promise<VersionedResponse<OpenProjectResult>>;
+  getCurrentProject(): Promise<VersionedResponse<import("./project.js").ChromaProject | undefined>>;
+  syncCurrentProject(request: SyncCurrentProjectRequest): Promise<VersionedResponse<import("./project.js").ChromaProject>>;
   loadProgress(): Promise<VersionedResponse<LearningProgressPayload>>;
   saveProgress(progress: LearningProgressPayload): Promise<VersionedResponse<void>>;
   resetProgress(): Promise<VersionedResponse<void>>;

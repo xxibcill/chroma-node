@@ -27,6 +27,7 @@ import type {
   SaveProjectRequest,
   SaveProjectResult,
   SelectMediaResponse,
+  SyncCurrentProjectRequest,
   VersionedResponse
 } from "../shared/ipc.js";
 import type {
@@ -112,7 +113,7 @@ import {
   validateHandoffPackage
 } from "./handoffStore.js";
 import { loadProgress, resetProgress, saveProgress } from "./progressStore.js";
-import { openProjectFile, saveProjectFile } from "./projectFile.js";
+import { getCurrentProject, openProjectFile, saveProjectFile, syncCurrentProject } from "./projectFile.js";
 import {
   validateLicense,
   checkFeatureEntitlement as checkFeatureEntitlementFn,
@@ -207,6 +208,28 @@ export function registerIpcHandlers(): void {
       return fail(toAppError(error));
     }
   });
+
+  ipcMain.handle(
+    IpcChannel.GetCurrentProject,
+    async (): Promise<VersionedResponse<import("../shared/project.js").ChromaProject | undefined>> => {
+      try {
+        return ok(getCurrentProject() ?? undefined);
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.SyncCurrentProject,
+    async (_event, request: SyncCurrentProjectRequest): Promise<VersionedResponse<import("../shared/project.js").ChromaProject>> => {
+      try {
+        return ok(syncCurrentProject(request.project, request.projectPath));
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
 
   ipcMain.handle(IpcChannel.LoadProgress, async (): Promise<VersionedResponse<LearningProgressPayload>> => {
     try {

@@ -3,7 +3,7 @@ import { readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { dialog } from "electron";
 import type { OpenProjectResult, SaveProjectRequest, SaveProjectResult } from "../shared/ipc.js";
-import { serializeProject, validateProject, type ChromaProject } from "../shared/project.js";
+import { sanitizeProject, serializeProject, validateProject, type ChromaProject } from "../shared/project.js";
 import { appError } from "./errors.js";
 
 let currentProject: ChromaProject | null = null;
@@ -18,14 +18,33 @@ export function setCurrentProject(project: ChromaProject, projectPath: string): 
   currentProjectPath = projectPath;
 }
 
-export async function updateProject(project: ChromaProject): Promise<void> {
-  if (!currentProjectPath) {
-    throw new Error("No project path set");
+export function syncCurrentProject(project: ChromaProject, projectPath?: string): ChromaProject {
+  const sanitizedProject = sanitizeProject(project);
+  currentProject = sanitizedProject;
+  if (projectPath !== undefined) {
+    currentProjectPath = projectPath;
   }
-  currentProject = project;
+  return sanitizedProject;
+}
+
+export async function updateProject(project: ChromaProject): Promise<void> {
+  const validation = validateProject(project);
+  if (!validation.ok) {
+    throw appError(
+      "PROJECT_VALIDATION_FAILED",
+      "Project could not be updated because it failed validation.",
+      validation.errors.map((error) => `${error.path}: ${error.message}`).join("\n")
+    );
+  }
+
+  currentProject = validation.project;
+  if (!currentProjectPath) {
+    return;
+  }
+
   const tempPath = `${currentProjectPath}.tmp-${process.pid}-${Date.now()}`;
   try {
-    await writeFile(tempPath, serializeProject(project), "utf8");
+    await writeFile(tempPath, serializeProject(validation.project), "utf8");
     await rename(tempPath, currentProjectPath);
   } catch (error) {
     throw appError("PROJECT_SAVE_FAILED", "Project could not be updated.", String(error));
