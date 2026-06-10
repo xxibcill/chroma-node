@@ -122,13 +122,14 @@ export async function createSupportBundle(request: {
   redactPaths?: boolean;
   contactInfo?: string;
 }): Promise<{ path: string; manifest: SupportBundleManifest }> {
+  const redactPaths = request.redactPaths ?? true;
   const bundleId = `bundle-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const dir = getSupportBundlesDir();
   await ensureDir(dir);
   const bundleDir = path.join(dir, bundleId);
   await mkdir(bundleDir, { recursive: true });
 
-  const diagnostics = request.redactPaths === false
+  const diagnostics = !redactPaths
     ? await getDiagnostics()
     : redactDiagnostics(await getDiagnostics());
   const includes: string[] = ["diagnostics"];
@@ -140,7 +141,7 @@ export async function createSupportBundle(request: {
     createdAt: Date.now(),
     appVersion: app.getVersion(),
     includes,
-    redacted: request.redactPaths ?? true,
+    redacted: redactPaths,
     diagnostics,
     contactInfo: request.contactInfo
   };
@@ -152,7 +153,7 @@ export async function createSupportBundle(request: {
 
   if (request.includeMediaMetadata && project?.media) {
     manifest.mediaMetadata = {
-      sourcePath: request.redactPaths ? "REDACTED" : project.media.sourcePath,
+      sourcePath: redactPaths ? "REDACTED" : project.media.sourcePath,
       codec: project.media.codec,
       width: project.media.width,
       height: project.media.height
@@ -161,7 +162,7 @@ export async function createSupportBundle(request: {
   }
 
   if (request.includeLogs) {
-    manifest.logs = await collectApplicationLogs(request.redactPaths ?? true);
+    manifest.logs = await collectApplicationLogs(redactPaths);
     includes.push("logs");
   }
 

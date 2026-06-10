@@ -87,4 +87,13 @@ describe("supportStore", () => {
     expect(result.manifest.logs?.join("\n")).toContain("/Users/REDACTED/");
     expect(result.manifest.logs?.join("\n")).toContain("user@REDACTED");
   });
+
+  it("defaults optional support bundle redaction to on", async () => {
+    const result = await createSupportBundle({
+      includeMediaMetadata: true
+    });
+
+    expect(result.manifest.redacted).toBe(true);
+    expect(result.manifest.mediaMetadata?.sourcePath).toBe("REDACTED");
+  });
 });
