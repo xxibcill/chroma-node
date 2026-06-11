@@ -2,7 +2,7 @@
 
 ## Status
 
-Not started
+Partial
 
 ## Phase
 
@@ -32,9 +32,23 @@ Split export planning, frame transformation, FFmpeg orchestration, and output ve
 ## Progress
 
 - [ ] Not started
-- [ ] In progress
+- [x] In progress
 - [ ] Implemented
 - [ ] Verified
+
+## Implementation Audit - 2026-05-15
+
+Status: Partial.
+
+Evidence:
+- Export planning and geometry validation are split into `src/main/exportPlanning.ts`.
+- Export stills, sequences, synthetic export, profiling, and service-related code are separated into dedicated modules.
+- `src/main/exportProject.ts` consumes `createExportJobSnapshot()` and validates planned output raster against probed export metadata.
+
+Remaining work:
+- `src/main/exportProject.ts` is still a large implementation surface and owns FFmpeg orchestration, frame rendering, frame transforms, audio merge, output probing, and final validation.
+- Frame transform planning is duplicated in export execution instead of being a focused planning module.
+- Mark complete only after `exportProject.ts` is reduced to a thinner coordinator.
 
 ## Blockers
 

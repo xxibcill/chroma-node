@@ -18,7 +18,7 @@ export async function createVersion(request: VersionCreateRequest): Promise<Grad
   }
 
   const now = Date.now();
-  const nodes = request.duplicateFromCurrent ? [...project.nodes] : [createColorNode(1)];
+  const nodes = request.duplicateFromCurrent ? cloneJson(project.nodes) : [createColorNode(1)];
 
   const version: GradeVersion = {
     id: createVersionId(),
@@ -72,7 +72,7 @@ export async function switchVersion(versionId: string): Promise<GradeVersion> {
   }
 
   project.activeVersionId = versionId;
-  project.nodes = [...targetVersion.nodes];
+  project.nodes = cloneJson(targetVersion.nodes);
   project.updatedAt = Date.now();
 
   await updateProject(project);
@@ -97,7 +97,7 @@ export async function deleteVersion(versionId: string): Promise<void> {
   if (project.activeVersionId === versionId) {
     project.activeVersionId = versions.length > 0 ? versions[0].id : undefined;
     if (versions.length > 0) {
-      project.nodes = [...versions[0].nodes];
+      project.nodes = cloneJson(versions[0].nodes);
     }
   }
 
@@ -171,7 +171,7 @@ export async function snapshotCurrentToVersion(versionId: string): Promise<void>
     throw new Error(`Version ${versionId} not found`);
   }
 
-  targetVersion.nodes = [...project.nodes];
+  targetVersion.nodes = cloneJson(project.nodes);
   targetVersion.updatedAt = Date.now();
 
   project.gradeVersions = versions;
@@ -204,4 +204,8 @@ export async function setVersionStatus(versionId: string, status: ReviewStatus, 
   await updateProject(project);
 
   return targetVersion;
+}
+
+function cloneJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
 }

@@ -2,7 +2,7 @@
 
 ## Status
 
-Not started
+Partial
 
 ## Phase
 
@@ -35,9 +35,28 @@ Add licensing, trial, activation, offline grace, and entitlement behavior for pa
 ## Progress
 
 - [ ] Not started
-- [ ] In progress
+- [x] In progress
 - [ ] Implemented
 - [ ] Verified
+
+## Implementation Audit - 2026-05-15
+
+Status: Partial.
+
+Evidence:
+- `src/shared/entitlement.ts` defines license tiers, entitlement flags, trial duration, offline grace, validation results, and entitlement checks.
+- `src/shared/entitlement.test.ts` covers default/trial states, expiry, grace, and feature checks.
+- `src/main/licenseStore.ts` persists entitlement state and implements trial start, structured local license-key activation, deactivation, validation, grace helpers, usage tracking, export entitlement checks, and clearing.
+- IPC and preload contracts expose license validation, feature checks, trial start, activation, deactivation, state, and clear operations.
+- Export resolution and monthly export limits are enforced before project export starts.
+- Renderer export preflight uses the shared export geometry calculation and entitlement checks before starting an export.
+- AI suggestion application is blocked when `aiAssistedGrading` is not available on the current tier.
+- `CommercialReadinessPanel` exposes trial, activation, validation, and deactivation states in the renderer.
+
+Remaining work:
+- Replace structured local license keys with a selected licensing provider and recovery flow.
+- Entitlement gates are not enforced in every renderer feature flow such as marketplace access or future pro controls.
+- Add deeper UI states for expired, failed activation, recovery, and offline grace.
 
 ## Blockers
 

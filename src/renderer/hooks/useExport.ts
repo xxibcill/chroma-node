@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ChromaProject } from "../../shared/project";
-import type { ExportJobResult, ExportProgress } from "../../shared/ipc";
+import type { ExportJobResult, ExportProgress, MediaRef } from "../../shared/ipc";
 
 interface UseExportOptions {
   project: ChromaProject;
-  media: { sourcePath: string } | undefined;
+  media: MediaRef | undefined;
 }
 
 interface UseExportResult {
@@ -45,10 +45,11 @@ export function useExport({
 
     const snapshot: ChromaProject = {
       ...project,
-      media: project.media ?? undefined
+      media: project.media ?? media
     };
 
     setExportOperation(undefined);
+    setExportResult(undefined);
     const response = await api.startExport({
       project: snapshot,
       quality: snapshot.exportSettings.quality
@@ -82,6 +83,12 @@ export function useExport({
     const response = await api.cancelExport({ jobId: exportOperation.jobId });
     const result = response.result;
     if (!result.ok) {
+      setExportOperation((current) => current ? {
+        ...current,
+        state: "failed",
+        message: result.error.message,
+        error: result.error
+      } : current);
       return;
     }
 

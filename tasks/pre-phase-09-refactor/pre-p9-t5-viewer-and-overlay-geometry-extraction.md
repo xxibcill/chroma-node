@@ -2,7 +2,7 @@
 
 ## Status
 
-Not started
+Partial
 
 ## Phase
 
@@ -32,9 +32,22 @@ Move viewer containment, overlay placement, and pointer-space geometry helpers o
 ## Progress
 
 - [ ] Not started
-- [ ] In progress
+- [x] In progress
 - [ ] Implemented
 - [ ] Verified
+
+## Implementation Audit - 2026-05-15
+
+Status: Partial.
+
+Evidence:
+- `src/renderer/viewer/viewerGeometry.ts` contains pure viewer and overlay helpers for contained rects, SVG point conversion, power-window geometry, rotation, signed-degree normalization, and clamping.
+- Shared geometry tests cover containment, rotation, resize, and overlay mapping behavior in `src/shared/mediaGeometry.test.ts`.
+
+Remaining work:
+- `src/renderer/App.tsx` still defines local copies of `getContainedRect`, `readSvgPoint`, `getWindowGeometry`, `rotatePixelPoint`, `normalizeSignedDegrees`, and `clamp01`.
+- `viewerGeometry.ts` is not currently imported by `App.tsx`, so the extraction is not actually used by the root viewer/overlay workflow.
+- Add direct tests for `viewerGeometry.ts` or route the root component through already-tested shared helpers.
 
 ## Blockers
 

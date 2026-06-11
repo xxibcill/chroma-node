@@ -2,7 +2,7 @@
 
 ## Status
 
-Not started
+Partial
 
 ## Phase
 
@@ -32,9 +32,23 @@ Extract export controls, export progress handling, and export summary UI from th
 ## Progress
 
 - [ ] Not started
-- [ ] In progress
+- [x] In progress
 - [ ] Implemented
 - [ ] Verified
+
+## Implementation Audit - 2026-05-15
+
+Status: Partial.
+
+Evidence:
+- Export geometry controls live in `src/renderer/components/ExportSettingsPanel.tsx`.
+- Standalone `ExportProgressPanel`, `ExportSummary`, `ExportCard`, and `useExport` modules exist.
+- Existing export quality, codec, workflow preset, progress, and cancel behavior still passes tests.
+
+Remaining work:
+- `src/renderer/App.tsx` still defines inline `ExportProgressPanel` and `ExportSummary` instead of using the extracted files.
+- Export orchestration state is still owned by `App.tsx`; `src/renderer/hooks/useExport.ts` exists but is not wired into the root workflow.
+- Complete this task by moving progress/summary rendering and start/cancel ownership out of `App.tsx`.
 
 ## Blockers
 

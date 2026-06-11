@@ -2,7 +2,7 @@
 
 ## Status
 
-Not started
+Complete
 
 ## Phase
 
@@ -33,8 +33,21 @@ Make export geometry explicit in project and IPC models before the export pipeli
 
 - [ ] Not started
 - [ ] In progress
-- [ ] Implemented
-- [ ] Verified
+- [x] Implemented
+- [x] Verified
+
+## Implementation Audit - 2026-05-15
+
+Status: Complete.
+
+Evidence:
+- `ProjectExportSettings` in `src/shared/project.ts` supports `sizeMode`, `preset`, `customWidth`, `customHeight`, and explicit `resizePolicy`.
+- Export presets and resize policy types are shared through project and IPC contracts.
+- Project validation supplies backward-compatible defaults for missing or invalid export geometry fields.
+- Unit coverage exists in `src/shared/project.test.ts` and `src/main/exportPlanning.test.ts`.
+
+Remaining work:
+- None for this task.
 
 ## Blockers
 

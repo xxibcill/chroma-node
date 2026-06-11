@@ -1,6 +1,6 @@
 import { app, dialog } from "electron";
 import { existsSync } from "fs";
-import { copyFile, readFile, writeFile, mkdir, stat } from "fs/promises";
+import { copyFile, readdir, readFile, writeFile, mkdir, stat } from "fs/promises";
 import path from "path";
 import type {
   HandoffPackageManifest,
@@ -40,16 +40,24 @@ function computeManifestChecksum(manifest: Omit<HandoffPackageManifest, "manifes
   return Math.abs(hash).toString(16).padStart(8, "0");
 }
 
-function redactPaths(obj: Record<string, unknown>): Record<string, unknown> {
+function redactPaths(value: unknown): unknown {
+  if (typeof value === "string") {
+    return value.includes("/Users/") || value.includes("\\Users\\") || value.includes("C:\\")
+      ? "[REDACTED]"
+      : value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => redactPaths(item));
+  }
+
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
   const result: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(obj)) {
-    if (typeof value === "string" && (value.includes("/Users/") || value.includes("\\Users\\") || value.includes("C:\\"))) {
-      result[key] = "[REDACTED]";
-    } else if (typeof value === "object" && value !== null) {
-      result[key] = redactPaths(value as Record<string, unknown>);
-    } else {
-      result[key] = value;
-    }
+  for (const [key, child] of Object.entries(value)) {
+    result[key] = redactPaths(child);
   }
   return result;
 }
@@ -149,7 +157,7 @@ export async function exportHandoffPackage(request: {
 
   const content: Record<string, unknown> = {
     manifest,
-    project: request.redactPaths ? redactPaths(project as unknown as Record<string, unknown>) : project
+    project: request.redactPaths ? redactPaths(project) : project
   };
 
   if (request.includeMedia && project.media) {
@@ -165,6 +173,18 @@ export async function exportHandoffPackage(request: {
         content.mediaPath = "[COPY_FAILED]";
       }
     }
+  }
+
+  if (request.includeExports) {
+    content.exports = await copyKnownExports(packagePath, project.gradeVersions?.map((version) => version.exportPath).filter((value): value is string => Boolean(value)) ?? []);
+  }
+
+  if (request.includeLogs) {
+    content.logs = await collectLogFiles(request.redactPaths);
+  }
+
+  if (request.includeCache) {
+    content.cacheSummary = await summarizeCache();
   }
 
   await writeFile(packagePath, JSON.stringify(content, null, 2), "utf8");
@@ -253,10 +273,94 @@ export async function estimatePackageSize(request: {
     }
   }
 
+  if (request.includeExports) {
+    const exportPaths = project.gradeVersions?.map((version) => version.exportPath).filter((value): value is string => Boolean(value)) ?? [];
+    for (const exportPath of exportPaths) {
+      const size = await getFileSize(exportPath);
+      if (size) {
+        estimatedBytes += size;
+      }
+    }
+  }
+
+  if (request.includeLogs) {
+    estimatedBytes += await estimateLogBytes();
+  }
+
+  if (request.includeCache) {
+    estimatedBytes += await estimateDirectoryBytes(path.join(app.getPath("userData"), "Cache"), 25);
+  }
+
   const missingMedia: string[] = [];
   if (project.media && request.includeMedia && !existsSync(project.media.sourcePath)) {
     missingMedia.push(project.media.sourcePath);
   }
 
   return { estimatedBytes, missingMedia };
+}
+
+async function copyKnownExports(packagePath: string, exportPaths: string[]): Promise<Array<{ sourcePath: string; included: boolean; packagePath?: string }>> {
+  const packageDir = path.dirname(packagePath);
+  const copied: Array<{ sourcePath: string; included: boolean; packagePath?: string }> = [];
+  for (const exportPath of exportPaths) {
+    if (!existsSync(exportPath)) {
+      copied.push({ sourcePath: exportPath, included: false });
+      continue;
+    }
+
+    const destination = path.join(packageDir, `export_${path.basename(exportPath)}`);
+    await copyFile(exportPath, destination);
+    copied.push({ sourcePath: exportPath, included: true, packagePath: destination });
+  }
+  return copied;
+}
+
+async function collectLogFiles(redact: boolean): Promise<Array<{ fileName: string; content: string }>> {
+  const logDir = app.getPath("logs");
+  if (!existsSync(logDir)) {
+    return [];
+  }
+
+  const entries = await readdir(logDir, { withFileTypes: true });
+  const logs: Array<{ fileName: string; content: string }> = [];
+  for (const entry of entries.filter((item) => item.isFile() && /\.(log|txt)$/i.test(item.name)).slice(0, 5)) {
+    const content = await readFile(path.join(logDir, entry.name), "utf8").catch(() => "");
+    logs.push({ fileName: entry.name, content: redact ? redactText(content.slice(-32_000)) : content.slice(-32_000) });
+  }
+  return logs;
+}
+
+async function summarizeCache(): Promise<{ path: string; estimatedBytes: number }> {
+  const cachePath = path.join(app.getPath("userData"), "Cache");
+  return {
+    path: cachePath,
+    estimatedBytes: await estimateDirectoryBytes(cachePath, 25)
+  };
+}
+
+async function estimateLogBytes(): Promise<number> {
+  const logDir = app.getPath("logs");
+  return estimateDirectoryBytes(logDir, 10);
+}
+
+async function estimateDirectoryBytes(directoryPath: string, maxFiles: number): Promise<number> {
+  if (!existsSync(directoryPath)) {
+    return 0;
+  }
+
+  const entries = await readdir(directoryPath, { withFileTypes: true }).catch(() => []);
+  let total = 0;
+  for (const entry of entries.slice(0, maxFiles)) {
+    const entryPath = path.join(directoryPath, entry.name);
+    if (entry.isFile()) {
+      total += await getFileSize(entryPath) ?? 0;
+    }
+  }
+  return total;
+}
+
+function redactText(text: string): string {
+  return text
+    .replace(/\/Users\/[^/]+\//g, "/Users/REDACTED/")
+    .replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, "user@REDACTED");
 }

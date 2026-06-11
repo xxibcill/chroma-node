@@ -2,7 +2,7 @@
 
 ## Status
 
-Not started
+Partial
 
 ## Phase
 
@@ -35,9 +35,24 @@ Package projects for archive, handoff, diagnostics, and support while protecting
 ## Progress
 
 - [ ] Not started
-- [ ] In progress
+- [x] In progress
 - [ ] Implemented
 - [ ] Verified
+
+## Implementation Audit - 2026-05-15
+
+Status: Partial.
+
+Evidence:
+- `HandoffPackageManifest`, package modes, media refs, and checksum fields are defined in `src/shared/project.ts`.
+- IPC and preload contracts expose handoff export, import, validation, and package-size estimate.
+- `src/main/handoffStore.ts` writes `.chromahandoff` packages, can include project JSON, can copy source media when requested, includes known exports/log summaries/cache summaries, validates checksums, and estimates package size.
+- `ReviewWorkflowPanel` exposes estimate and handoff package actions.
+
+Remaining work:
+- Library dependencies and restore media relinking are not implemented beyond manifest flags/project import.
+- Redaction is basic recursive path replacement and needs verification against all package content.
+- Add fuller package mode selection, restore, and missing dependency handling in the renderer.
 
 ## Blockers
 

@@ -27,6 +27,7 @@ import type {
   SaveProjectRequest,
   SaveProjectResult,
   SelectMediaResponse,
+  SyncCurrentProjectRequest,
   VersionedResponse
 } from "../shared/ipc.js";
 import type {
@@ -35,15 +36,22 @@ import type {
   AnnotationListRequest,
   AnnotationUpdateRequest,
   FeedbackImportRequest,
+  FeedbackImportResult,
   FeedbackResolveRequest,
   HandoffPackageExportRequest,
+  HandoffPackageEstimateRequest,
+  HandoffPackageEstimateResult,
   HandoffPackageImportRequest,
   HandoffPackageValidateRequest,
   ReviewPackageExportRequest,
   ReviewPackageImportRequest,
+  ReviewPackageValidateRequest,
+  ReviewPackageValidateResult,
   VersionCreateRequest,
   VersionDeleteRequest,
   VersionListResult,
+  VersionSetStatusRequest,
+  VersionSnapshotCurrentRequest,
   VersionSwitchRequest,
   VersionUpdateRequest
 } from "../shared/ipc.js";
@@ -51,7 +59,7 @@ import { IpcChannel } from "../shared/ipc.js";
 import { appError, fail, isAppError, ok } from "./errors.js";
 import { cancelExport, exportProject, outputPathExists } from "./exportProject.js";
 import { exportSequence, findExistingSequenceOutput } from "./exportSequence.js";
-import { computeExportFps } from "./exportPlanning.js";
+import { computeExportFps, computeExportGeometry } from "./exportPlanning.js";
 import { exportStill } from "./exportStill.js";
 import { exportSynthetic } from "./exportSynthetic.js";
 import { extractFrame } from "./frame.js";
@@ -77,6 +85,8 @@ import {
   createVersion,
   deleteVersion,
   listVersions,
+  setVersionStatus,
+  snapshotCurrentToVersion,
   switchVersion,
   updateVersion
 } from "./reviewVersionStore.js";
@@ -88,27 +98,32 @@ import {
 } from "./annotationStore.js";
 import {
   exportReviewPackage,
-  importReviewPackage
+  importReviewPackage,
+  validateReviewPackage
 } from "./reviewPackageStore.js";
 import {
   importFeedback,
+  importFeedbackToAnnotations,
   resolveFeedback
 } from "./feedbackStore.js";
 import {
   exportHandoffPackage,
+  estimatePackageSize,
   importHandoffPackage,
   validateHandoffPackage
 } from "./handoffStore.js";
 import { loadProgress, resetProgress, saveProgress } from "./progressStore.js";
-import { openProjectFile, saveProjectFile } from "./projectFile.js";
+import { getCurrentProject, openProjectFile, saveProjectFile, syncCurrentProject } from "./projectFile.js";
 import {
   validateLicense,
   checkFeatureEntitlement as checkFeatureEntitlementFn,
   startTrial,
-  activateLicense,
+  activateLicenseKey,
   deactivateLicense,
   getEntitlementState,
-  clearLicense
+  clearLicense,
+  assertExportAllowed,
+  recordExportUsage
 } from "./licenseStore.js";
 import {
   getConsent,
@@ -133,6 +148,10 @@ import {
   getAvailableChannels,
   type UpdateStoreConfig
 } from "./updateStore.js";
+import {
+  getOnboardingExperiments,
+  setOnboardingExperiment
+} from "./launchStore.js";
 import type { LicenseActivationRequest, EntitlementFlags, TelemetryConsent } from "../shared/ipc.js";
 import type { EntitlementState } from "../shared/entitlement.js";
 import type { LicenseValidationResult, EntitlementCheckResult } from "../shared/entitlement.js";
@@ -189,6 +208,28 @@ export function registerIpcHandlers(): void {
       return fail(toAppError(error));
     }
   });
+
+  ipcMain.handle(
+    IpcChannel.GetCurrentProject,
+    async (): Promise<VersionedResponse<import("../shared/project.js").ChromaProject | undefined>> => {
+      try {
+        return ok(getCurrentProject() ?? undefined);
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.SyncCurrentProject,
+    async (_event, request: SyncCurrentProjectRequest): Promise<VersionedResponse<import("../shared/project.js").ChromaProject>> => {
+      try {
+        return ok(syncCurrentProject(request.project, request.projectPath));
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
 
   ipcMain.handle(IpcChannel.LoadProgress, async (): Promise<VersionedResponse<LearningProgressPayload>> => {
     try {
@@ -265,10 +306,30 @@ export function registerIpcHandlers(): void {
     async (event, request: ExportProjectRequest): Promise<VersionedResponse<ExportJobResult>> => {
       try {
         const preparedRequest = await prepareExportRequest(request);
-        return ok(await exportProject(preparedRequest, (progress) => {
+        if (preparedRequest.project.media) {
+          const geometry = computeExportGeometry(preparedRequest.project.exportSettings, preparedRequest.project.media);
+          await assertExportAllowed(geometry.width, geometry.height);
+        }
+        trackEvent("export:start", {
+          codec: preparedRequest.project.exportSettings.codec,
+          quality: preparedRequest.project.exportSettings.quality,
+          sizeMode: preparedRequest.project.exportSettings.sizeMode
+        });
+        const result = await exportProject(preparedRequest, (progress) => {
           event.sender.send(IpcChannel.ExportProgress, progress);
-        }));
+        });
+        await recordExportUsage();
+        trackEvent("export:complete", {
+          codec: result.codec,
+          width: result.width,
+          height: result.height,
+          frameCount: result.frameCount
+        });
+        return ok(result);
       } catch (error) {
+        trackEvent("export:fail", {
+          message: error instanceof Error ? error.message : String(error)
+        });
         return fail(toAppError(error));
       }
     }
@@ -511,6 +572,29 @@ export function registerIpcHandlers(): void {
     }
   );
 
+  ipcMain.handle(
+    IpcChannel.VersionSnapshotCurrent,
+    async (_event, request: VersionSnapshotCurrentRequest): Promise<VersionedResponse<void>> => {
+      try {
+        await snapshotCurrentToVersion(request.versionId);
+        return ok(undefined);
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannel.VersionSetStatus,
+    async (_event, request: VersionSetStatusRequest): Promise<VersionedResponse<import("../shared/project.js").GradeVersion>> => {
+      try {
+        return ok(await setVersionStatus(request.versionId, request.status, request.reviewerLabel, request.comment));
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
   // Phase 21: Annotations
   ipcMain.handle(
     IpcChannel.AnnotationCreate,
@@ -580,12 +664,24 @@ export function registerIpcHandlers(): void {
     }
   );
 
+  ipcMain.handle(
+    IpcChannel.ReviewPackageValidate,
+    async (_event, request: ReviewPackageValidateRequest): Promise<VersionedResponse<ReviewPackageValidateResult>> => {
+      try {
+        return ok(await validateReviewPackage(request.packagePath));
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
   // Phase 21: Feedback
   ipcMain.handle(
     IpcChannel.FeedbackImport,
-    async (_event, request: FeedbackImportRequest): Promise<VersionedResponse<import("../shared/project.js").FeedbackFile>> => {
+    async (_event, request: FeedbackImportRequest): Promise<VersionedResponse<FeedbackImportResult>> => {
       try {
-        return ok(await importFeedback(request));
+        const feedbackFile = await importFeedback(request);
+        return ok(await importFeedbackToAnnotations(feedbackFile, request.duplicateStrategy));
       } catch (error) {
         return fail(toAppError(error));
       }
@@ -639,6 +735,17 @@ export function registerIpcHandlers(): void {
     }
   );
 
+  ipcMain.handle(
+    IpcChannel.HandoffEstimate,
+    async (_event, request: HandoffPackageEstimateRequest): Promise<VersionedResponse<HandoffPackageEstimateResult>> => {
+      try {
+        return ok(await estimatePackageSize(request));
+      } catch (error) {
+        return fail(toAppError(error));
+      }
+    }
+  );
+
   // Phase 22: Licensing and Entitlements
   ipcMain.handle(
     IpcChannel.LicenseValidate,
@@ -666,7 +773,9 @@ export function registerIpcHandlers(): void {
     IpcChannel.LicenseStartTrial,
     async (): Promise<VersionedResponse<EntitlementState>> => {
       try {
-        return ok(await startTrial());
+        const state = await startTrial();
+        trackEvent("license:trial-start", { tier: state.tier, expiresAt: state.expiresAt });
+        return ok(state);
       } catch (error) {
         return fail(toAppError(error));
       }
@@ -677,15 +786,17 @@ export function registerIpcHandlers(): void {
     IpcChannel.LicenseActivate,
     async (_event, request: LicenseActivationRequest): Promise<VersionedResponse<{ success: boolean; activationId?: string; tier?: string; expiresAt?: number; errorMessage?: string }>> => {
       try {
-        // In a real implementation, this would validate with a license server
-        // For now, we create a local activation with a placeholder activationId
         if (!request.licenseKey.trim()) {
           return ok({ success: false, errorMessage: "License key is required." });
         }
 
-        const activationId = `activation-${Date.now().toString(36)}`;
-        const tier = "paid";
-        const state = await activateLicense(activationId, tier);
+        const activation = await activateLicenseKey(request.licenseKey);
+        if (!activation.success || !activation.state) {
+          return ok({ success: false, errorMessage: activation.errorMessage });
+        }
+
+        const state = activation.state;
+        trackEvent("license:activate", { tier: state.tier });
         return ok({
           success: true,
           activationId: state.activationId,
@@ -703,6 +814,7 @@ export function registerIpcHandlers(): void {
     async (): Promise<VersionedResponse<void>> => {
       try {
         await deactivateLicense();
+        trackEvent("license:expire", { reason: "deactivated" });
         return ok(undefined);
       } catch (error) {
         return fail(toAppError(error));
@@ -933,8 +1045,7 @@ export function registerIpcHandlers(): void {
     IpcChannel.LaunchGetExperiments,
     async (): Promise<VersionedResponse<OnboardingExperiment[]>> => {
       try {
-        const { ONBOARDING_EXPERIMENTS } = await import("../shared/launchConfig.js");
-        return ok(ONBOARDING_EXPERIMENTS);
+        return ok(await getOnboardingExperiments());
       } catch (error) {
         return fail(toAppError(error));
       }
@@ -957,8 +1068,7 @@ export function registerIpcHandlers(): void {
     IpcChannel.LaunchSetExperiment,
     async (_event, request: { id: string; enabled: boolean }): Promise<VersionedResponse<void>> => {
       try {
-        // Experiments are read-only for now - stored in launchConfig
-        // In a full implementation, this would persist user experiment assignments
+        await setOnboardingExperiment(request.id, request.enabled);
         trackEvent("feature:use", {
           feature: "launch:set-experiment",
           experimentId: request.id,

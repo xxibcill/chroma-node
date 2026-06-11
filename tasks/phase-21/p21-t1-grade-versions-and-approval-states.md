@@ -2,7 +2,7 @@
 
 ## Status
 
-Not started
+Partial
 
 ## Phase
 
@@ -35,9 +35,25 @@ Add named grade versions with review and approval state so users can manage alte
 ## Progress
 
 - [ ] Not started
-- [ ] In progress
+- [x] In progress
 - [ ] Implemented
 - [ ] Verified
+
+## Implementation Audit - 2026-05-15
+
+Status: Partial.
+
+Evidence:
+- `GradeVersion`, `ReviewStatus`, and `ApprovalEntry` are defined in `src/shared/project.ts`.
+- Project validation round-trips grade versions and active version IDs.
+- IPC and preload contracts expose create, list, switch, delete, update, snapshot, and status operations.
+- `src/main/reviewVersionStore.ts` implements create, switch, delete, update, status, and snapshot helpers.
+- `ReviewWorkflowPanel` exposes create, snapshot, in-review, approve, and reject actions in the renderer.
+- `src/main/reviewVersionStore.test.ts` covers snapshot and approval-chain behavior.
+
+Remaining work:
+- Add explicit archive and compare/version-diff UI polish.
+- Broaden tests around create/switch/delete/update behavior.
 
 ## Blockers
 

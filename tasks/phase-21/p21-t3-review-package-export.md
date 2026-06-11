@@ -2,7 +2,7 @@
 
 ## Status
 
-Not started
+Partial
 
 ## Phase
 
@@ -35,9 +35,23 @@ Export a portable review package with graded media, stills, annotations, scopes,
 ## Progress
 
 - [ ] Not started
-- [ ] In progress
+- [x] In progress
 - [ ] Implemented
 - [ ] Verified
+
+## Implementation Audit - 2026-05-15
+
+Status: Partial.
+
+Evidence:
+- `ReviewPackageManifest`, package types, still refs, scope snapshot refs, and approval summaries are defined in `src/shared/project.ts`.
+- IPC and preload contracts expose review package export, import, and validation.
+- `src/main/reviewPackageStore.ts` writes `.chromareview` JSON packages with a manifest checksum, includes requested still/scope data supplied by the renderer, exports annotations across all frames for selected versions, can copy source media when requested, and can validate/import manifests.
+- `ReviewWorkflowPanel` can export a client-review package from the renderer.
+
+Remaining work:
+- Add tests covering package contents, redaction, manifest validation, and import/duplicate behavior.
+- Add richer review media/still asset packaging once still and scope snapshot persistence is formalized.
 
 ## Blockers
 

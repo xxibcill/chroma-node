@@ -2,7 +2,7 @@
 
 ## Status
 
-Not started
+Complete
 
 ## Phase
 
@@ -33,8 +33,20 @@ Add focused tests around shared geometry and export planning so later Phase 08 a
 
 - [ ] Not started
 - [ ] In progress
-- [ ] Implemented
-- [ ] Verified
+- [x] Implemented
+- [x] Verified
+
+## Implementation Audit - 2026-05-15
+
+Status: Complete.
+
+Evidence:
+- `src/shared/mediaGeometry.test.ts` covers rotated and non-rotated media, portrait, square, landscape, containment, resize policy, pad rects, overlay mapping, and supported raster limits.
+- `src/main/exportPlanning.test.ts` covers source geometry, portrait presets, square/custom cases, fit, crop, pad, validation failures, FPS planning, and export snapshot output dimensions.
+- This audit updates the previously stale task tracking notes.
+
+Remaining work:
+- None for this task.
 
 ## Blockers
 

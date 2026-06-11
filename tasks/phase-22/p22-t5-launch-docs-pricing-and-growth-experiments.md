@@ -2,7 +2,7 @@
 
 ## Status
 
-Not started
+Partial
 
 ## Phase
 
@@ -35,9 +35,27 @@ Prepare the product for paid launch with documentation, pricing gates, onboardin
 ## Progress
 
 - [ ] Not started
-- [ ] In progress
+- [x] In progress
 - [ ] Implemented
 - [ ] Verified
+
+## Implementation Audit - 2026-05-15
+
+Status: Partial.
+
+Evidence:
+- `src/shared/launchConfig.ts` defines pricing tiers, onboarding experiments, launch metrics, pricing gates, and helper lookups.
+- IPC and preload contracts expose pricing tiers, persisted onboarding experiments, launch metrics, and a set-experiment endpoint.
+- `README.md` and `RELEASE_NOTES.md` include existing install and product notes.
+- `docs/launch-readiness.md` covers first successful grade flow, pricing gate mapping, telemetry/manual metrics review, and troubleshooting.
+- `src/main/launchStore.ts` persists onboarding experiment overrides.
+- Launch experiment changes emit telemetry events.
+- Export and AI pricing gates are enforced through entitlement checks.
+
+Remaining work:
+- Launch documentation still needs screenshots/release packaging instructions after the signing/update path is selected.
+- Pricing gates are not enforced in marketplace and future pro-control renderer UI states.
+- Launch metrics are only partially tied to emitted telemetry events and have no manual reporting workflow.
 
 ## Blockers
 

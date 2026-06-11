@@ -67,14 +67,14 @@ export const PRICING_TIERS: PricingTier[] = [
     features: [
       "Import media and create projects",
       "Basic color correction tools",
-      "Export up to 720p",
+      "Export up to 1080p",
       "5 projects maximum",
       "10 exports per month"
     ],
     limits: {
       maxProjects: 5,
       maxExportsPerMonth: 10,
-      maxExportResolution: "720p",
+      maxExportResolution: "1080p",
       aiAssistedGrading: false,
       advancedScopes: false,
       marketplaceAccess: false,

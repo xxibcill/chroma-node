@@ -27,8 +27,8 @@ This roadmap breaks the DaVinci Resolve-inspired Color page learning app into im
 | [Phase 18 - Guided Learning and Creator Workflows](phase-18-guided-learning-and-creator-workflows.md) | Not started | Turn Chroma Node into a guided learning workstation with lessons, recipes, practice targets, and progress loops. |
 | [Phase 19 - AI Assisted Grading and Shot Matching](phase-19-ai-assisted-grading-and-shot-matching.md) | Not started | Add explainable AI assistance for balance, diagnostics, reference matching, and natural-language grade intent. |
 | [Phase 20 - Look Library and Marketplace Foundation](phase-20-look-library-and-marketplace-foundation.md) | Not started | Build reusable look, LUT, recipe, lesson, and asset-pack infrastructure for future creator packs and paid distribution. |
-| [Phase 21 - Professional Review and Collaboration](phase-21-professional-review-and-collaboration.md) | Not started | Add grade versions, annotations, review packages, feedback import, and project handoff workflows. |
-| [Phase 22 - Commercial Readiness and Growth Platform](phase-22-commercial-readiness-and-growth-platform.md) | Not started | Prepare the product to sell, support, update, measure, and grow with licensing, telemetry, packaging, docs, and support loops. |
+| [Phase 21 - Professional Review and Collaboration](phase-21-professional-review-and-collaboration.md) | Partial | Add grade versions, annotations, review packages, feedback import, and project handoff workflows. |
+| [Phase 22 - Commercial Readiness and Growth Platform](phase-22-commercial-readiness-and-growth-platform.md) | Partial | Prepare the product to sell, support, update, measure, and grow with licensing, telemetry, packaging, docs, and support loops. |
 
 ## Status Values
 

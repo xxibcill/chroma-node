@@ -2,7 +2,7 @@
 
 ## Status
 
-Not started
+Partial
 
 ## Phase
 
@@ -35,9 +35,24 @@ Ship signed production builds with update channels, rollback safety, and release
 ## Progress
 
 - [ ] Not started
-- [ ] In progress
+- [x] In progress
 - [ ] Implemented
 - [ ] Verified
+
+## Implementation Audit - 2026-05-15
+
+Status: Partial.
+
+Evidence:
+- `package.json` has Electron Builder packaging configuration for macOS DMG output and package scripts.
+- `src/shared/update.ts` defines stable, beta, and internal release channels plus update status/result types.
+- `src/main/updateStore.ts` persists update channel/config, fetches release metadata from configured channel URLs, compares versions, and exposes update check/status/channel operations through IPC.
+- `CommercialReadinessPanel` exposes update checks in the renderer.
+
+Remaining work:
+- No signing, notarization, or signed installer verification is implemented.
+- No auto-update download/apply flow, rollback, safe-start behavior, or signed update metadata exists.
+- Release verification is not documented as a reproducible production checklist.
 
 ## Blockers
 

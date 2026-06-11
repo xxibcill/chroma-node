@@ -1,3 +1,6 @@
+import { getContainedRect as getSharedContainedRect, type ContainedRect } from "../../shared/mediaGeometry";
+import type { Annotation } from "../../shared/project";
+
 export interface SourceRect {
   left: number;
   top: number;
@@ -10,35 +13,19 @@ export interface PixelPoint {
   y: number;
 }
 
+export interface AnnotationOverlayGeometry {
+  center: PixelPoint;
+  width: number;
+  height: number;
+}
+
 export function getContainedRect(
   containerWidth: number,
   containerHeight: number,
   sourceWidth: number,
   sourceHeight: number
-): SourceRect {
-  if (containerWidth <= 0 || containerHeight <= 0 || sourceWidth <= 0 || sourceHeight <= 0) {
-    return { left: 0, top: 0, width: 0, height: 0 };
-  }
-
-  const containerAspect = containerWidth / containerHeight;
-  const sourceAspect = sourceWidth / sourceHeight;
-  if (containerAspect > sourceAspect) {
-    const width = containerHeight * sourceAspect;
-    return {
-      left: (containerWidth - width) / 2,
-      top: 0,
-      width,
-      height: containerHeight
-    };
-  }
-
-  const height = containerWidth / sourceAspect;
-  return {
-    left: 0,
-    top: (containerHeight - height) / 2,
-    width: containerWidth,
-    height
-  };
+): ContainedRect {
+  return getSharedContainedRect(containerWidth, containerHeight, sourceWidth, sourceHeight);
 }
 
 export function readSvgPoint(
@@ -91,4 +78,35 @@ export function normalizeSignedDegrees(value: number): number {
 
 export function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value));
+}
+
+export function getAnnotationOverlayGeometry(
+  geometry: Annotation["geometry"] | undefined,
+  sourceRect: SourceRect
+): AnnotationOverlayGeometry {
+  const x = clamp01(geometry?.x ?? 0.5);
+  const y = clamp01(geometry?.y ?? 0.5);
+  const normalizedWidth = readAnnotationSize(geometry?.width, geometry?.x2, x);
+  const normalizedHeight = readAnnotationSize(geometry?.height, geometry?.y2, y);
+
+  return {
+    center: {
+      x: x * sourceRect.width,
+      y: y * sourceRect.height
+    },
+    width: Math.max(12, normalizedWidth * sourceRect.width),
+    height: Math.max(12, normalizedHeight * sourceRect.height)
+  };
+}
+
+function readAnnotationSize(size: number | undefined, secondPoint: number | undefined, center: number): number {
+  if (typeof size === "number" && Number.isFinite(size) && size > 0) {
+    return clamp01(size);
+  }
+
+  if (typeof secondPoint === "number" && Number.isFinite(secondPoint)) {
+    return Math.max(0.02, Math.abs(clamp01(secondPoint) - center));
+  }
+
+  return 0.12;
 }

@@ -9,21 +9,6 @@ import type {
   ExportProjectRequest,
   ExportQuality
 } from "../shared/ipc.js";
-import {
-  evaluateNodeGraph,
-  normalizeNodeGraph,
-  resolveTrackedNode,
-  decodeTransfer,
-  encodeTransfer,
-  toneMapSdr,
-  compressGamut,
-  PRIMARIES,
-  COLORSPACES,
-  type ColorNode,
-  type ColorManagementSettings,
-  type TransferFunctionType,
-  type ColorPrimariesType
-} from "../shared/colorEngine.js";
 import { sanitizeProject } from "../shared/project.js";
 import {
   createExportJobSnapshot,
@@ -34,6 +19,8 @@ import { appError, isAppError } from "./errors.js";
 import { requireFfmpeg, requireFfprobe, getFfmpegDiagnostics } from "./ffmpeg.js";
 import { runProcess } from "./process.js";
 import { type ProfilingTimers } from "./exportProfiling.js";
+import { renderRgbaFrame } from "./exportFrameRender.js";
+import { transformRgbaFrame } from "./exportFrameTransform.js";
 
 export type ExportJobState = "pending" | "running" | "canceled" | "failed" | "completed";
 
@@ -282,7 +269,7 @@ async function processFrames(
           job.profiling.renderStart = performance.now();
         }
 
-        const graded = renderRgbaFrameProxy(sourceFrame, sourceWidth, sourceHeight, snapshot.project.nodes, frameIndex, {
+        const graded = renderRgbaFrame(sourceFrame, sourceWidth, sourceHeight, snapshot.project.nodes, frameIndex, {
           colorManagement: snapshot.project.colorManagementSettings,
           sourceTransfer: snapshot.media.colorMetadata?.transfer.type ?? "bt1886",
           sourcePrimaries: snapshot.media.colorMetadata?.primaries.type ?? "rec709",
@@ -290,7 +277,7 @@ async function processFrames(
                  snapshot.media.colorMetadata?.transfer.type === "pq" ||
                  snapshot.media.colorMetadata?.transfer.type === "appleLog")
         });
-        const resized = transformRgbaFrameProxy(
+        const resized = transformRgbaFrame(
           graded,
           sourceWidth,
           sourceHeight,
@@ -661,187 +648,6 @@ function toExportError(error: unknown): AppError {
 
 function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
-}
-
-// Frame rendering - these delegate to the originals to avoid duplication
-function renderRgbaFrameProxy(
-  source: Buffer,
-  sourceWidth: number,
-  sourceHeight: number,
-  nodes: readonly ColorNode[],
-  frameIndex: number,
-  options?: {
-    colorManagement?: ColorManagementSettings;
-    sourceTransfer?: TransferFunctionType;
-    sourcePrimaries?: ColorPrimariesType;
-    isHdr?: boolean;
-  }
-): Buffer {
-  const resolvedNodes = normalizeNodeGraph(nodes).map((node) => resolveTrackedNode(node, frameIndex));
-  const colorManagement = options?.colorManagement;
-  const sourceTransfer = options?.sourceTransfer ?? "bt1886";
-  const sourcePrimaries = options?.sourcePrimaries ?? "rec709";
-  const isHdr = options?.isHdr ?? false;
-
-  const output = Buffer.allocUnsafe(source.length);
-
-  const targetTransfer: TransferFunctionType = colorManagement?.outputTransform && colorManagement.outputTransform !== "none"
-    ? (COLORSPACES[colorManagement.outputTransform as keyof typeof COLORSPACES]?.transfer ?? "bt1886")
-    : "bt1886";
-
-  const workingPrimaries: ColorPrimariesType = colorManagement?.workingColorSpace
-    ? (COLORSPACES[colorManagement.workingColorSpace as keyof typeof COLORSPACES]?.primaries ?? "rec709")
-    : "rec709";
-
-  for (let y = 0; y < sourceHeight; y += 1) {
-    for (let x = 0; x < sourceWidth; x += 1) {
-      const offset = (y * sourceWidth + x) * 4;
-      let pixel: { r: number; g: number; b: number; a: number } = {
-        r: source[offset] / 255,
-        g: source[offset + 1] / 255,
-        b: source[offset + 2] / 255,
-        a: source[offset + 3] / 255
-      };
-
-      if (sourceTransfer !== "linear") {
-        pixel = { ...decodeTransfer(pixel, sourceTransfer), a: pixel.a };
-      }
-
-      const graded = evaluateNodeGraph(pixel, resolvedNodes, {
-        x: (x + 0.5) / sourceWidth,
-        y: (y + 0.5) / sourceHeight
-      });
-
-      if (sourcePrimaries !== workingPrimaries) {
-        const srcP = PRIMARIES[sourcePrimaries] ?? PRIMARIES.rec709;
-        const wkP = PRIMARIES[workingPrimaries] ?? PRIMARIES.rec709;
-        pixel = { ...compressGamut(graded, srcP, wkP), a: graded.a ?? pixel.a };
-      } else {
-        pixel = { ...graded, a: graded.a ?? pixel.a };
-      }
-
-      if (isHdr && colorManagement?.toneMapping === "sdr") {
-        pixel = { ...toneMapSdr(pixel, true), a: pixel.a };
-      }
-
-      pixel = { ...encodeTransfer(pixel, targetTransfer), a: pixel.a };
-
-      output[offset] = floatToByte(pixel.r);
-      output[offset + 1] = floatToByte(pixel.g);
-      output[offset + 2] = floatToByte(pixel.b);
-      output[offset + 3] = floatToByte(pixel.a);
-    }
-  }
-
-  return output;
-}
-
-function transformRgbaFrameProxy(
-  source: Buffer,
-  sourceWidth: number,
-  sourceHeight: number,
-  targetWidth: number,
-  targetHeight: number,
-  policy: "fit" | "crop" | "pad"
-): Buffer {
-  const output = Buffer.alloc(targetWidth * targetHeight * 4);
-  const sourceAspect = sourceWidth / sourceHeight;
-  const targetAspect = targetWidth / targetHeight;
-
-  let srcX = 0;
-  let srcY = 0;
-  let srcVisibleWidth = sourceWidth;
-  let srcVisibleHeight = sourceHeight;
-
-  if (policy === "fit") {
-    if (sourceAspect > targetAspect) {
-      srcVisibleHeight = Math.round(sourceWidth / targetAspect);
-      srcY = Math.round((sourceHeight - srcVisibleHeight) / 2);
-    } else if (sourceAspect < targetAspect) {
-      srcVisibleWidth = Math.round(sourceHeight * targetAspect);
-      srcX = Math.round((sourceWidth - srcVisibleWidth) / 2);
-    }
-  } else if (policy === "crop") {
-    if (sourceAspect > targetAspect) {
-      srcVisibleWidth = Math.round(sourceHeight * targetAspect);
-      srcX = Math.round((sourceWidth - srcVisibleWidth) / 2);
-    } else if (sourceAspect < targetAspect) {
-      srcVisibleHeight = Math.round(sourceWidth / targetAspect);
-      srcY = Math.round((sourceHeight - srcVisibleHeight) / 2);
-    }
-  }
-
-  const paddedContent = policy === "pad"
-    ? getPaddedContentRect(sourceWidth, sourceHeight, targetWidth, targetHeight)
-    : undefined;
-
-  const sx = srcVisibleWidth / targetWidth;
-  const sy = srcVisibleHeight / targetHeight;
-
-  for (let ty = 0; ty < targetHeight; ty += 1) {
-    for (let tx = 0; tx < targetWidth; tx += 1) {
-      let r: number, g: number, b: number, a: number;
-
-      if (paddedContent) {
-        const insideContent = tx >= paddedContent.x &&
-          tx < paddedContent.x + paddedContent.width &&
-          ty >= paddedContent.y &&
-          ty < paddedContent.y + paddedContent.height;
-        if (insideContent) {
-          const srcX = Math.floor(((tx - paddedContent.x) + 0.5) * sourceWidth / paddedContent.width);
-          const srcY = Math.floor(((ty - paddedContent.y) + 0.5) * sourceHeight / paddedContent.height);
-          const idx = (Math.max(0, Math.min(sourceHeight - 1, srcY)) * sourceWidth + Math.max(0, Math.min(sourceWidth - 1, srcX))) * 4;
-          r = source[idx];
-          g = source[idx + 1];
-          b = source[idx + 2];
-          a = source[idx + 3];
-        } else {
-          r = 0;
-          g = 0;
-          b = 0;
-          a = 255;
-        }
-      } else {
-        const px = Math.round(srcX + tx * sx);
-        const py = Math.round(srcY + ty * sy);
-        const idx = (Math.max(0, Math.min(sourceHeight - 1, py)) * sourceWidth + Math.max(0, Math.min(sourceWidth - 1, px))) * 4;
-        r = source[idx];
-        g = source[idx + 1];
-        b = source[idx + 2];
-        a = source[idx + 3];
-      }
-
-      const outOffset = (ty * targetWidth + tx) * 4;
-      output[outOffset] = r;
-      output[outOffset + 1] = g;
-      output[outOffset + 2] = b;
-      output[outOffset + 3] = a;
-    }
-  }
-
-  return output;
-}
-
-function getPaddedContentRect(
-  sourceWidth: number,
-  sourceHeight: number,
-  targetWidth: number,
-  targetHeight: number
-): { x: number; y: number; width: number; height: number } {
-  const scale = Math.min(targetWidth / sourceWidth, targetHeight / sourceHeight);
-  const width = Math.max(1, Math.round(sourceWidth * scale));
-  const height = Math.max(1, Math.round(sourceHeight * scale));
-
-  return {
-    x: Math.floor((targetWidth - width) / 2),
-    y: Math.floor((targetHeight - height) / 2),
-    width,
-    height
-  };
-}
-
-function floatToByte(value: number): number {
-  return Math.max(0, Math.min(255, Math.round(value * 255)));
 }
 
 function parseRational(value?: string): number {

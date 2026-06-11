@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useUndoRedo } from "./state/useUndoRedo";
 import type { PointerEvent as ReactPointerEvent } from "react";
-import type { AppError, DecodedFrame, ExportJobResult, ExportProgress, ExportQuality, FfmpegDiagnostics, MediaRef } from "../shared/ipc";
+import type { AppError, DecodedFrame, ExportJobResult, ExportQuality, FfmpegDiagnostics, MediaRef } from "../shared/ipc";
 import type { ColorNode, CurveChannel, CurvePoint, HslQualifier, PowerWindow, PowerWindowShape, RgbVector, TrackingKeyframe } from "../shared/colorEngine";
 import {
   MAX_SERIAL_NODES,
@@ -16,8 +16,10 @@ import {
   invalidateTrackingForWindow,
   resolveTrackedNode
 } from "../shared/colorEngine";
-import type { ChromaProject, ExportCodec, ViewerMode, AudioBehavior, WorkflowPreset } from "../shared/project";
+import type { Annotation, ChromaProject, ExportCodec, ViewerMode, AudioBehavior, WorkflowPreset } from "../shared/project";
 import { applyWorkflowPreset, createDefaultProject, sanitizeProject } from "../shared/project";
+import { checkExportEntitlement } from "../shared/entitlement";
+import { computeExportGeometry } from "../shared/exportGeometry";
 import {
   createGradedScopeFrame,
   createVectorscopeGuides,
@@ -38,6 +40,21 @@ import type { LumaFrame } from "./tracking/templateTracker";
 import { TrackingFailure, getScaledSearchRadius, matchTranslation } from "./tracking/templateTracker";
 import { FrameRenderer } from "./webgl/FrameRenderer";
 import { ExportSettingsPanel } from "./components/ExportSettingsPanel";
+import { ExportProgressPanel } from "./components/ExportProgressPanel";
+import { ExportSummary } from "./components/ExportSummary";
+import { ReviewWorkflowPanel } from "./components/ReviewWorkflowPanel";
+import { CommercialReadinessPanel } from "./components/CommercialReadinessPanel";
+import { useExport } from "./hooks/useExport";
+import {
+  clamp01,
+  getContainedRect,
+  getWindowGeometry,
+  normalizeSignedDegrees,
+  getAnnotationOverlayGeometry,
+  readSvgPoint,
+  rotatePixelPoint,
+  type SourceRect
+} from "./viewer/viewerGeometry";
 import {
   getPreviewPolicy,
   getTrackingMaxWidth,
@@ -49,6 +66,7 @@ import {
   type RgbFrame
 } from "../shared/aiGrading";
 import { AiPanel } from "./components/AiPanel";
+import { CompositionGridPage } from "./components/CompositionGridPage";
 
 type Status = "idle" | "busy" | "ready" | "error";
 type RgbPrimaryKey = "lift" | "gamma" | "gain" | "offset";
@@ -120,7 +138,6 @@ export function App() {
   const [showMatte, setShowMatte] = useState(false);
   const [scopeInfo, setScopeInfo] = useState("Scopes waiting for a graded frame.");
   const [trackingOperation, setTrackingOperation] = useState<TrackingOperation | undefined>();
-  const [exportOperation, setExportOperation] = useState<ExportProgress | undefined>();
   const [viewerSize, setViewerSize] = useState({ width: 0, height: 0 });
   const [project, setProject] = useState<ChromaProject>(initialProject);
   const [selectedNodeId, setSelectedNodeId] = useState(initialProject.nodes[0].id);
@@ -145,9 +162,10 @@ export function App() {
   const [compareStillId, setCompareStillId] = useState<string | null>(null);
   const [commandSearchOpen, setCommandSearchOpen] = useState(false);
   const [commandSearchQuery, setCommandSearchQuery] = useState("");
-  const [workspacePreset, setWorkspacePreset] = useState<"grade" | "scopes" | "color" | "compare" | "export" | "debug">("grade");
+  const [workspacePreset, setWorkspacePreset] = useState<"grade" | "scopes" | "color" | "compare" | "export" | "grid" | "debug">("grade");
   const [aiSettings, setAiSettings] = useState<AiSettings>(DEFAULT_AI_SETTINGS);
   const [currentFrameForAi, setCurrentFrameForAi] = useState<RgbFrame | undefined>(undefined);
+  const [reviewAnnotations, setReviewAnnotations] = useState<Annotation[]>([]);
 
   const mediaUrl = useMemo(() => (state.media ? filePathToUrl(state.media.sourcePath) : undefined), [state.media]);
   const proxyIndicator = useMemo(() => {
@@ -159,7 +177,6 @@ export function App() {
   const lastFrameIndex = useMemo(() => getLastFrameIndex(state.media), [state.media]);
   const timecode = useMemo(() => formatTimecode(playback.currentFrame, state.media), [playback.currentFrame, state.media]);
   const canUseMedia = Boolean(state.media);
-  const isExporting = exportOperation?.state === "pending" || exportOperation?.state === "running";
   const activeNode = useMemo(
     () => project.nodes.find((node) => node.id === selectedNodeId) ?? project.nodes[0],
     [project.nodes, selectedNodeId]
@@ -181,6 +198,10 @@ export function App() {
     ),
     [state.frame?.height, state.frame?.width, state.media?.displayHeight, state.media?.displayWidth, viewerSize.height, viewerSize.width]
   );
+  const currentReviewAnnotations = useMemo(
+    () => reviewAnnotations.filter((annotation) => annotation.frameIndex === playback.currentFrame && annotation.status !== "rejected"),
+    [playback.currentFrame, reviewAnnotations]
+  );
 
   const diagnosticsLabel = useMemo(() => {
     if (!diagnostics) {
@@ -201,12 +222,75 @@ export function App() {
       }
     });
   }, [playback.currentFrame, playback.splitPosition, playback.viewerMode, project, state.media]);
+  const exportSnapshot = useMemo(() => buildProjectSnapshot(), [buildProjectSnapshot]);
+  const {
+    cancelExport,
+    exportOperation,
+    exportResult,
+    isExporting,
+    runExport
+  } = useExport({
+    project: exportSnapshot,
+    media: state.media
+  });
+
+  useEffect(() => {
+    if (!exportResult) {
+      return;
+    }
+
+    setState((current) => ({
+      ...current,
+      status: "ready",
+      message: "H.264 export completed.",
+      exportResult,
+      error: undefined
+    }));
+  }, [exportResult]);
+
+  useEffect(() => {
+    if (!exportOperation) {
+      return;
+    }
+
+    if (exportOperation.state === "pending" || exportOperation.state === "running") {
+      setState((current) => ({
+        ...current,
+        status: "busy",
+        message: `${exportOperation.message} ${exportOperation.percent.toFixed(1)}%.`,
+        error: undefined
+      }));
+      return;
+    }
+
+    if (exportOperation.state === "completed") {
+      return;
+    }
+
+    setState((current) => ({
+      ...current,
+      status: exportOperation.state === "failed" ? "error" : current.media ? "ready" : "idle",
+      message: exportOperation.state === "canceled" ? "Export cancelled." : exportOperation.message,
+      error: exportOperation.state === "failed" ? exportOperation.error : undefined
+    }));
+  }, [exportOperation]);
 
   const commitProject = useCallback((updater: (current: ChromaProject) => ChromaProject) => {
     const snapshot = buildProjectSnapshot();
     pushHistory(snapshot);
     setProject((current) => sanitizeProject(updater(current)));
   }, [buildProjectSnapshot, pushHistory]);
+
+  const applyProjectFromReview = useCallback((updatedProject: ChromaProject) => {
+    const sanitizedProject = sanitizeProject(updatedProject);
+    setProject(sanitizedProject);
+    setReviewAnnotations(sanitizedProject.annotations ?? []);
+    setSelectedNodeId((currentNodeId) => (
+      sanitizedProject.nodes.some((node) => node.id === currentNodeId)
+        ? currentNodeId
+        : sanitizedProject.nodes[0]?.id ?? currentNodeId
+    ));
+  }, []);
 
   const seekVideoToFrame = useCallback((frameIndex: number, media = state.media) => {
     const video = videoRef.current;
@@ -850,61 +934,74 @@ export function App() {
   }, []);
 
   const runProjectExport = useCallback(async () => {
-    if (!api || !state.media || isExporting) {
+    if (!state.media || isExporting) {
+      return;
+    }
+
+    const licenseResponse = await window.chromaNode?.validateLicense();
+    const licenseResult = licenseResponse?.result;
+    if (!licenseResult?.ok) {
+      setState((current) => ({
+        ...current,
+        status: "error",
+        message: licenseResult?.ok === false ? licenseResult.error.message : "License preflight unavailable.",
+        error: licenseResult?.ok === false ? licenseResult.error : {
+          code: "UNKNOWN",
+          message: "License preflight unavailable."
+        }
+      }));
+      return;
+    }
+
+    const validation = licenseResult.value;
+    if (!validation.valid) {
+      setState((current) => ({
+        ...current,
+        status: "error",
+        message: validation.error ?? "Activate or renew your license before exporting.",
+        error: {
+          code: "UNKNOWN",
+          message: validation.error ?? "Activate or renew your license before exporting."
+        }
+      }));
+      return;
+    }
+
+    const exportGeometry = computeExportGeometry(project.exportSettings, state.media);
+    const entitlement = checkExportEntitlement(validation.state, exportGeometry.width, exportGeometry.height);
+    if (!entitlement.allowed) {
+      setState((current) => ({
+        ...current,
+        status: "error",
+        message: entitlement.reason ?? "Export is not available on your current tier.",
+        error: {
+          code: "UNKNOWN",
+          message: entitlement.reason ?? "Export is not available on your current tier."
+        }
+      }));
       return;
     }
 
     videoRef.current?.pause();
     rendererRef.current?.setPlaybackActive(false);
     setPlayback((current) => ({ ...current, isPlaying: false }));
-    setExportOperation(undefined);
-    setState((current) => ({ ...current, status: "busy", message: "Exporting graded H.264 MP4...", error: undefined }));
-    const snapshot = buildProjectSnapshot();
-    const exportResponse = await api.startExport({
-      project: snapshot,
-      quality: snapshot.exportSettings.quality
-    });
-    const exportResult = exportResponse.result;
-    if (!exportResult.ok) {
-      const wasCancelled = exportResult.error.code === "EXPORT_CANCELLED" || exportResult.error.code === "USER_CANCELLED";
-      setState((current) => ({
-        ...current,
-        status: current.media ? "ready" : "idle",
-        message: wasCancelled ? "Export cancelled." : exportResult.error.message,
-        error: wasCancelled ? undefined : exportResult.error
-      }));
-      return;
-    }
-
     setState((current) => ({
       ...current,
-      status: "ready",
-      message: "H.264 export completed.",
-      exportResult: exportResult.value,
+      status: "busy",
+      message: "Exporting graded H.264 MP4...",
+      exportResult: undefined,
       error: undefined
     }));
-  }, [buildProjectSnapshot, isExporting, state.media]);
+    await runExport();
+  }, [isExporting, project.exportSettings, runExport, state.media]);
 
   const cancelProjectExport = useCallback(async () => {
-    if (!api || !exportOperation) {
+    if (!exportOperation) {
       return;
     }
 
-    setExportOperation((current) => current ? { ...current, message: "Cancelling export..." } : current);
-    const response = await api.cancelExport({ jobId: exportOperation.jobId });
-    const result = response.result;
-    if (!result.ok) {
-      setState((current) => ({
-        ...current,
-        status: current.media ? "ready" : "idle",
-        message: result.error.message,
-        error: result.error
-      }));
-      return;
-    }
-
-    setExportOperation(result.value);
-  }, [exportOperation]);
+    await cancelExport();
+  }, [cancelExport, exportOperation]);
 
   const togglePlayback = useCallback(() => {
     const video = videoRef.current;
@@ -1341,12 +1438,32 @@ export function App() {
     commitProject((current) => ({ ...current, nodes: [...current.nodes, newNode] }));
   }, [activeNode, galleryStills, project.nodes.length, commitProject]);
 
-  const applyAiSuggestion = useCallback((suggestedNodes: ColorNode[]) => {
-    if (suggestedNodes.length === 0) return;
+  const applyAiSuggestion = useCallback(async (suggestedNodes: ColorNode[]) => {
+    if (suggestedNodes.length === 0) return false;
+
+    const entitlementResponse = await window.chromaNode?.checkFeatureEntitlement("aiAssistedGrading");
+    const entitlementResult = entitlementResponse?.result;
+    if (!entitlementResult?.ok || !entitlementResult.value.allowed) {
+      const message = entitlementResult?.ok
+        ? entitlementResult.value.reason ?? "AI-assisted grading is not available on your current tier."
+        : entitlementResult?.ok === false ? entitlementResult.error.message : "AI entitlement check unavailable.";
+      setState((current) => ({
+        ...current,
+        status: "error",
+        message,
+        error: entitlementResult?.ok === false ? entitlementResult.error : {
+          code: "UNKNOWN",
+          message
+        }
+      }));
+      return false;
+    }
+
     commitProject((current) => ({
       ...current,
       nodes: [...current.nodes, ...suggestedNodes].slice(-MAX_SERIAL_NODES)
     }));
+    return true;
   }, [commitProject]);
 
   const setTrackingTarget = useCallback((targetShape: PowerWindowShape) => {
@@ -1418,40 +1535,6 @@ export function App() {
           status: "error",
           error: result.error,
           message: result.error.message
-        }));
-      }
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!api) {
-      return;
-    }
-
-    return api.onExportProgress((progress) => {
-      setExportOperation(progress);
-      if (progress.state === "running" || progress.state === "pending") {
-        setState((current) => ({
-          ...current,
-          status: "busy",
-          message: `${progress.message} ${progress.percent.toFixed(1)}%.`,
-          error: undefined
-        }));
-      }
-      if (progress.state === "canceled") {
-        setState((current) => ({
-          ...current,
-          status: current.media ? "ready" : "idle",
-          message: "Export cancelled.",
-          error: undefined
-        }));
-      }
-      if (progress.state === "failed") {
-        setState((current) => ({
-          ...current,
-          status: "error",
-          message: progress.error?.message ?? progress.message,
-          error: progress.error
         }));
       }
     });
@@ -1616,7 +1699,11 @@ export function App() {
 
   return (
     <main className="app-shell">
-      <section className="workspace" aria-label="Chroma Node workspace">
+      <section className={`workspace ${workspacePreset === "grid" ? "workspace-composition" : ""}`} aria-label="Chroma Node workspace">
+        {workspacePreset === "grid" ? (
+          <CompositionGridPage onBack={() => setWorkspacePreset("grade")} />
+        ) : (
+          <>
         <aside className="inspector" aria-label="Media diagnostics">
           <section className="side-card">
             <div className="panel-title">Media</div>
@@ -1640,6 +1727,24 @@ export function App() {
               <MetadataRow label="Nodes" value={`${project.nodes.length} / ${MAX_SERIAL_NODES}`} />
               <MetadataRow label="Path" value={state.projectPath ?? "Unsaved"} />
             </dl>
+          </section>
+
+          <section className="side-card">
+            <div className="panel-title">Review</div>
+            <ReviewWorkflowPanel
+              currentFrame={playback.currentFrame}
+              galleryStills={galleryStills}
+              onAnnotationsChange={setReviewAnnotations}
+              onProjectChange={applyProjectFromReview}
+              project={project}
+              projectPath={state.projectPath}
+              timecode={timecode}
+            />
+          </section>
+
+          <section className="side-card">
+            <div className="panel-title">Commercial</div>
+            <CommercialReadinessPanel />
           </section>
 
           <section className="side-card side-card-export">
@@ -1838,6 +1943,9 @@ export function App() {
                   onUpdateWindow={updatePowerWindow}
                 />
               ) : null}
+              {state.media ? (
+                <AnnotationOverlay annotations={currentReviewAnnotations} sourceRect={viewerSourceRect} />
+              ) : null}
               {!showMatte && playback.viewerMode === "split" ? (
                 <div className="split-rule" style={{ left: `${playback.splitPosition * 100}%` }} />
               ) : null}
@@ -1993,6 +2101,7 @@ export function App() {
               <button type="button" className={workspacePreset === "color" ? "is-active" : ""} onClick={() => setWorkspacePreset("color")}>Color</button>
               <button type="button" className={workspacePreset === "compare" ? "is-active" : ""} onClick={() => setWorkspacePreset("compare")}>Compare</button>
               <button type="button" className={workspacePreset === "export" ? "is-active" : ""} onClick={() => setWorkspacePreset("export")}>Export</button>
+              <button type="button" onClick={() => setWorkspacePreset("grid")}>Grid</button>
             </div>
             <div className="action-row">
               <button type="button" onClick={() => { const prev = undo(); if (prev) { setProject(prev); setSelectedNodeId(prev.nodes[0]?.id ?? selectedNodeId); } }} disabled={!canUndo} title={undoLabel ? `Undo: ${undoLabel}` : "Undo"}>
@@ -2074,6 +2183,8 @@ export function App() {
             copiedNode={copiedNode}
             canUseMedia={canUseMedia}
           />
+          </>
+        )}
       </section>
 
       {commandSearchOpen ? (
@@ -2923,7 +3034,8 @@ function WindowOverlay({
       return;
     }
 
-    const point = readSvgPoint(event);
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const point = readSvgPoint(event.clientX, event.clientY, bounds);
     const initial = interaction.initialWindow;
     if (interaction.mode === "move") {
       onUpdateWindow(interaction.shape, (window) => ({
@@ -3006,6 +3118,131 @@ function WindowOverlay({
   );
 }
 
+function AnnotationOverlay({
+  annotations,
+  sourceRect
+}: {
+  annotations: Annotation[];
+  sourceRect: SourceRect;
+}) {
+  if (sourceRect.width <= 0 || sourceRect.height <= 0 || annotations.length === 0) {
+    return null;
+  }
+
+  return (
+    <div
+      className="annotation-overlay"
+      style={{
+        left: sourceRect.left,
+        top: sourceRect.top,
+        width: sourceRect.width,
+        height: sourceRect.height
+      }}
+    >
+      <svg
+        aria-label="Review annotations"
+        viewBox={`0 0 ${sourceRect.width} ${sourceRect.height}`}
+        preserveAspectRatio="none"
+      >
+        {annotations.map((annotation, index) => (
+          <AnnotationOverlayShape
+            key={annotation.id}
+            annotation={annotation}
+            index={index}
+            sourceRect={sourceRect}
+          />
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+function AnnotationOverlayShape({
+  annotation,
+  index,
+  sourceRect
+}: {
+  annotation: Annotation;
+  index: number;
+  sourceRect: SourceRect;
+}) {
+  const geometry = getAnnotationOverlayGeometry(annotation.geometry, sourceRect);
+  const shape = annotation.geometry?.type ?? "point";
+  const color = annotation.geometry?.color ?? "#efcf95";
+  const label = `${index + 1}`;
+  const className = `annotation-shape annotation-shape-${shape} annotation-status-${annotation.status}`;
+
+  if (shape === "rectangle") {
+    return (
+      <g className={className}>
+        <rect
+          x={geometry.center.x - geometry.width / 2}
+          y={geometry.center.y - geometry.height / 2}
+          width={geometry.width}
+          height={geometry.height}
+          stroke={color}
+        />
+        <AnnotationOverlayLabel x={geometry.center.x} y={geometry.center.y} color={color} label={label} />
+      </g>
+    );
+  }
+
+  if (shape === "ellipse") {
+    return (
+      <g className={className}>
+        <ellipse
+          cx={geometry.center.x}
+          cy={geometry.center.y}
+          rx={geometry.width / 2}
+          ry={geometry.height / 2}
+          stroke={color}
+        />
+        <AnnotationOverlayLabel x={geometry.center.x} y={geometry.center.y} color={color} label={label} />
+      </g>
+    );
+  }
+
+  if (shape === "freehand" && annotation.geometry?.points?.length) {
+    const points = annotation.geometry.points
+      .map((point) => `${clamp01(point.x) * sourceRect.width},${clamp01(point.y) * sourceRect.height}`)
+      .join(" ");
+    return (
+      <g className={className}>
+        <polyline points={points} stroke={color} />
+        <AnnotationOverlayLabel x={geometry.center.x} y={geometry.center.y} color={color} label={label} />
+      </g>
+    );
+  }
+
+  return (
+    <g className={className}>
+      <circle cx={geometry.center.x} cy={geometry.center.y} r="8" stroke={color} />
+      <line x1={geometry.center.x - 14} y1={geometry.center.y} x2={geometry.center.x + 14} y2={geometry.center.y} stroke={color} />
+      <line x1={geometry.center.x} y1={geometry.center.y - 14} x2={geometry.center.x} y2={geometry.center.y + 14} stroke={color} />
+      <AnnotationOverlayLabel x={geometry.center.x} y={geometry.center.y} color={color} label={label} />
+    </g>
+  );
+}
+
+function AnnotationOverlayLabel({
+  color,
+  label,
+  x,
+  y
+}: {
+  color: string;
+  label: string;
+  x: number;
+  y: number;
+}) {
+  return (
+    <>
+      <circle className="annotation-label-bg" cx={x + 16} cy={y - 16} r="9" fill={color} />
+      <text className="annotation-label-text" x={x + 16} y={y - 13}>{label}</text>
+    </>
+  );
+}
+
 function WindowOverlayShape({
   disabled,
   onBeginInteraction,
@@ -3019,7 +3256,7 @@ function WindowOverlayShape({
   sourceRect: SourceRect;
   window: PowerWindow;
 }) {
-  const geometry = getWindowGeometry(window, sourceRect);
+  const geometry = getWindowGeometry(window.centerX, window.centerY, window.width, window.height, sourceRect);
   const rotate = `rotate(${window.rotationDegrees} ${geometry.center.x} ${geometry.center.y})`;
   const resizePoint = rotatePixelPoint({ x: geometry.width / 2, y: geometry.height / 2 }, window.rotationDegrees);
   const rotationPoint = rotatePixelPoint({ x: 0, y: -geometry.height / 2 - 28 }, window.rotationDegrees);
@@ -3129,42 +3366,6 @@ function MetadataRow({ label, value }: { label: string; value: string }) {
     <div>
       <dt>{label}</dt>
       <dd title={value}>{value}</dd>
-    </div>
-  );
-}
-
-function ExportSummary({ result }: { result: ExportJobResult }) {
-  return (
-    <dl className="metadata-table">
-      <MetadataRow label="Codec" value={result.codec} />
-      <MetadataRow label="Raster" value={`${result.width} x ${result.height}`} />
-      <MetadataRow label="Frames" value={String(result.frameCount)} />
-      <MetadataRow label="Audio" value={result.hasAudio ? "Present" : "None"} />
-      <MetadataRow label="Path" value={result.outputPath} />
-    </dl>
-  );
-}
-
-function ExportProgressPanel({
-  onCancel,
-  progress
-}: {
-  onCancel: () => void;
-  progress: ExportProgress;
-}) {
-  const elapsedSeconds = Math.max(0, progress.elapsedMs / 1000);
-  return (
-    <div className="export-progress" role="status" aria-live="polite">
-      <div className="export-progress-header">
-        <span className={`tracking-state tracking-state-${progress.state}`}>{progress.state}</span>
-        <span>{progress.percent.toFixed(1)}%</span>
-      </div>
-      <progress value={progress.percent} max="100" />
-      <p>{progress.currentFrame} / {progress.totalFrames} frames, {elapsedSeconds.toFixed(1)}s elapsed.</p>
-      <p title={progress.outputPath}>{progress.message}</p>
-      <button type="button" onClick={onCancel} disabled={progress.state !== "pending" && progress.state !== "running"}>
-        Cancel
-      </button>
     </div>
   );
 }
@@ -3335,92 +3536,10 @@ function formatControlValue(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(2);
 }
 
-interface SourceRect {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-}
-
-interface PixelPoint {
-  x: number;
-  y: number;
-}
-
 interface WindowInteraction {
   mode: "move" | "resize" | "rotate";
   shape: PowerWindowShape;
   initialWindow: PowerWindow;
-}
-
-function getContainedRect(containerWidth: number, containerHeight: number, sourceWidth: number, sourceHeight: number): SourceRect {
-  if (containerWidth <= 0 || containerHeight <= 0 || sourceWidth <= 0 || sourceHeight <= 0) {
-    return { left: 0, top: 0, width: 0, height: 0 };
-  }
-
-  const containerAspect = containerWidth / containerHeight;
-  const sourceAspect = sourceWidth / sourceHeight;
-  if (containerAspect > sourceAspect) {
-    const width = containerHeight * sourceAspect;
-    return {
-      left: (containerWidth - width) / 2,
-      top: 0,
-      width,
-      height: containerHeight
-    };
-  }
-
-  const height = containerWidth / sourceAspect;
-  return {
-    left: 0,
-    top: (containerHeight - height) / 2,
-    width: containerWidth,
-    height
-  };
-}
-
-function readSvgPoint(event: ReactPointerEvent<SVGSVGElement>): PixelPoint {
-  const rect = event.currentTarget.getBoundingClientRect();
-
-  return {
-    x: event.clientX - rect.left,
-    y: event.clientY - rect.top
-  };
-}
-
-function getWindowGeometry(window: PowerWindow, sourceRect: SourceRect): {
-  center: PixelPoint;
-  width: number;
-  height: number;
-} {
-  return {
-    center: {
-      x: window.centerX * sourceRect.width,
-      y: window.centerY * sourceRect.height
-    },
-    width: window.width * sourceRect.width,
-    height: window.height * sourceRect.height
-  };
-}
-
-function rotatePixelPoint(point: PixelPoint, degrees: number): PixelPoint {
-  const radians = degrees * Math.PI / 180;
-  const sin = Math.sin(radians);
-  const cos = Math.cos(radians);
-
-  return {
-    x: point.x * cos - point.y * sin,
-    y: point.x * sin + point.y * cos
-  };
-}
-
-function normalizeSignedDegrees(value: number): number {
-  const degrees = ((value + 180) % 360 + 360) % 360 - 180;
-  return degrees === -180 ? 180 : degrees;
-}
-
-function clamp01(value: number): number {
-  return Math.min(1, Math.max(0, value));
 }
 
 function rgbToHslForQualifier(r: number, g: number, b: number): { h: number; s: number; l: number } {

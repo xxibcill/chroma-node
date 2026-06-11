@@ -15,6 +15,12 @@ export interface EntitlementState {
   entitlements: EntitlementFlags;
   purchasedFeatureIds: string[];
   marketplacePurchasedIds: string[];
+  usage: EntitlementUsage;
+}
+
+export interface EntitlementUsage {
+  monthKey: string;
+  exportsThisMonth: number;
 }
 
 export interface EntitlementFlags {
@@ -71,6 +77,10 @@ export interface EntitlementCheckResult {
   reason?: string;
 }
 
+export interface ExportEntitlementCheckResult extends EntitlementCheckResult {
+  requiredResolution: ExportResolutionFlag;
+}
+
 export const DEFAULT_ENTITLEMENT_FLAGS: EntitlementFlags = {
   proGrading: false,
   aiAssistedGrading: false,
@@ -125,7 +135,8 @@ export function createDefaultEntitlementState(): EntitlementState {
     status: "active",
     entitlements: { ...DEFAULT_ENTITLEMENT_FLAGS },
     purchasedFeatureIds: [],
-    marketplacePurchasedIds: []
+    marketplacePurchasedIds: [],
+    usage: createDefaultUsage()
   };
 }
 
@@ -139,7 +150,8 @@ export function createTrialEntitlementState(): EntitlementState {
     expiresAt: now + TRIAL_DURATION_MS,
     entitlements: { ...TRIAL_ENTITLEMENT_FLAGS },
     purchasedFeatureIds: [],
-    marketplacePurchasedIds: []
+    marketplacePurchasedIds: [],
+    usage: createDefaultUsage()
   };
 }
 
@@ -164,7 +176,17 @@ export function checkEntitlement(
   state: EntitlementState,
   feature: keyof EntitlementFlags
 ): EntitlementCheckResult {
-  if (isExpired(state) && !isOfflineGraceActive(state)) {
+  if (state.status === "deactivated" || state.status === "failed") {
+    return {
+      allowed: false,
+      currentTier: state.tier,
+      reason: state.status === "deactivated"
+        ? "License has been deactivated. Please activate a license to continue using this feature."
+        : "License validation failed. Please activate or renew your license."
+    };
+  }
+
+  if (isExpired(state) && !(state.status === "active" && isOfflineGraceActive(state))) {
     return {
       allowed: false,
       currentTier: state.tier,
@@ -205,6 +227,61 @@ export function checkEntitlement(
   };
 }
 
+export function checkExportEntitlement(
+  state: EntitlementState,
+  width: number,
+  height: number
+): ExportEntitlementCheckResult {
+  const validation = checkEntitlement(state, "exportResolutions");
+  const requiredResolution = getRequiredExportResolution(width, height);
+  if (!validation.allowed) {
+    return {
+      ...validation,
+      requiredResolution
+    };
+  }
+
+  const usage = state.usage ?? createDefaultUsage();
+  const maxExports = state.entitlements.maxExportsPerMonth;
+  if (maxExports !== -1 && usage.exportsThisMonth >= maxExports) {
+    return {
+      allowed: false,
+      currentTier: state.tier,
+      requiredResolution,
+      reason: `Monthly export limit reached for ${state.tier}.`
+    };
+  }
+
+  if (!state.entitlements.exportResolutions.includes(requiredResolution)) {
+    return {
+      allowed: false,
+      currentTier: state.tier,
+      requiredResolution,
+      reason: `${requiredResolution.toUpperCase()} export is not available on ${state.tier}.`
+    };
+  }
+
+  return {
+    allowed: true,
+    currentTier: state.tier,
+    requiredResolution
+  };
+}
+
+export function getRequiredExportResolution(width: number, height: number): ExportResolutionFlag {
+  const longEdge = Math.max(width, height);
+  if (longEdge > 3840) {
+    return "hdr";
+  }
+  if (longEdge > 1920) {
+    return "4k";
+  }
+  if (longEdge > 1280) {
+    return "1080p";
+  }
+  return "720p";
+}
+
 export function serializeEntitlementState(state: EntitlementState): string {
   return JSON.stringify(state, null, 2);
 }
@@ -219,4 +296,11 @@ export function deserializeEntitlementState(data: unknown): EntitlementState | n
   if (typeof state.entitlements !== "object") return null;
 
   return state;
+}
+
+export function createDefaultUsage(): EntitlementUsage {
+  return {
+    monthKey: new Date().toISOString().slice(0, 7),
+    exportsThisMonth: 0
+  };
 }
